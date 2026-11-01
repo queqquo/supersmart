@@ -1,0 +1,865 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Sliders,
+  Sparkles,
+  Layers,
+  ShieldCheck,
+  Check,
+  Copy,
+  RotateCcw,
+  Clock,
+  TrendingUp,
+  TrendingDown,
+  Percent,
+  ChevronDown,
+  ChevronUp,
+  BookmarkPlus,
+  Info,
+  DollarSign,
+  Dices,
+  Calculator
+} from 'lucide-react';
+import {
+  Draw,
+  ScoringWeights,
+  FilterOptions,
+  PlayMode,
+  SystemGenerationResult,
+  SavedPlay,
+  NumberStat,
+  GeneratedColumn
+} from '../types/lottery';
+import {
+  calculateNumberStatistics,
+  scoreAllNumbers,
+  generateOptimizedSystem
+} from '../utils/combinatorics';
+import { runNext100DrawsSimulation } from '../utils/monteCarloSimulation';
+import { DEFAULT_WEIGHTS, DEFAULT_FILTERS, saveWeights, saveFilters } from '../utils/storage';
+import { EvolutionarySliderTrainer } from './EvolutionarySliderTrainer';
+
+interface SystemGeneratorProps {
+  draws: Draw[];
+  weights: ScoringWeights;
+  onUpdateWeights: (weights: ScoringWeights) => void;
+  filters: FilterOptions;
+  onUpdateFilters: (filters: FilterOptions) => void;
+  onSavePlay: (play: SavedPlay) => void;
+  onOpenSmartPaste: () => void;
+  onColumnsGenerated?: (columns: GeneratedColumn[]) => void;
+  onOpenSimulationTab?: () => void;
+}
+
+export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
+  draws,
+  weights,
+  onUpdateWeights,
+  filters,
+  onUpdateFilters,
+  onSavePlay,
+  onOpenSmartPaste,
+  onColumnsGenerated,
+  onOpenSimulationTab
+}) => {
+  // Config state
+  const [poolSizeV, setPoolSizeV] = useState<number>(12); // v in [10, 15]
+  const [playMode, setPlayMode] = useState<PlayMode>('pure_coverage');
+  const [selectedPool, setSelectedPool] = useState<number[]>([]);
+  const [systemResult, setSystemResult] = useState<SystemGenerationResult | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [manualPoolEdit, setManualPoolEdit] = useState(false);
+
+  // Calculate stats from draws
+  const numberStatsMap = useMemo(() => {
+    return calculateNumberStatistics(draws, 36);
+  }, [draws]);
+
+  // Recalculate scored ranking whenever weights, draws, or numberStatsMap changes
+  const scoredNumbers = useMemo(() => {
+    return scoreAllNumbers(numberStatsMap, weights, 36);
+  }, [numberStatsMap, weights]);
+
+  // Derive default top V pool
+  const defaultTopVNumbers = useMemo(() => {
+    return scoredNumbers.slice(0, poolSizeV).map((s) => s.number).sort((a, b) => a - b);
+  }, [scoredNumbers, poolSizeV]);
+
+  // Keep selectedPool synced with weights/poolSize unless manually editing
+  useEffect(() => {
+    if (!manualPoolEdit) {
+      setSelectedPool(defaultTopVNumbers);
+    }
+  }, [defaultTopVNumbers, manualPoolEdit]);
+
+  // Slider handlers
+  const handleWeightChange = (key: keyof ScoringWeights, val: number) => {
+    const updated = { ...weights, [key]: Number(val.toFixed(2)) };
+    onUpdateWeights(updated);
+    saveWeights(updated);
+    // If not manual editing, resetting manual mode so new weights take effect
+    if (!manualPoolEdit) {
+      // selectedPool will sync via useEffect
+    }
+  };
+
+  const handleResetWeights = () => {
+    onUpdateWeights(DEFAULT_WEIGHTS);
+    saveWeights(DEFAULT_WEIGHTS);
+    setManualPoolEdit(false);
+  };
+
+  const handleApplyTripletWeights = (newWeights: ScoringWeights) => {
+    onUpdateWeights(newWeights);
+    saveWeights(newWeights);
+    setManualPoolEdit(false);
+  };
+
+  // Generate / Run Optimization
+  const handleRunOptimization = (overridePool?: number[]) => {
+    const targetCount = playMode === 'pure_coverage' ? 10 : 6;
+    const poolToUse =
+      Array.isArray(overridePool) && overridePool.length > 0
+        ? overridePool
+        : manualPoolEdit && selectedPool.length === poolSizeV
+        ? selectedPool
+        : defaultTopVNumbers;
+
+    if (!Array.isArray(overridePool) && !manualPoolEdit) {
+      setSelectedPool(defaultTopVNumbers);
+    }
+
+    // SuperStar candidates from highest scoring stats
+    const superstarPool = scoredNumbers.slice(0, 6).map((s) => s.number);
+
+    const result = generateOptimizedSystem(
+      poolToUse,
+      filters,
+      targetCount,
+      playMode === 'superstar' ? superstarPool : undefined
+    );
+
+    setSystemResult(result);
+    onColumnsGenerated?.(result.columns);
+    setSavedSuccess(false);
+  };
+
+  // Compute expected gains/losses mean per individual sestina across 100 simulated draws
+  const expectedWeeklyPnL = useMemo(() => {
+    if (!systemResult || systemResult.columns.length === 0) return null;
+    return runNext100DrawsSimulation(
+      draws,
+      systemResult.columns,
+      'bayesian_hybrid_urn',
+      202604
+    ).weeklySystemPnL;
+  }, [draws, systemResult]);
+
+  // Run on mount or when defaultTopVNumbers becomes available
+  useEffect(() => {
+    if (draws.length > 0 && defaultTopVNumbers.length >= poolSizeV) {
+      handleRunOptimization(defaultTopVNumbers);
+    }
+  }, [draws, defaultTopVNumbers, playMode]);
+
+  // Save Play to Ledger
+  const handleSaveToLedger = () => {
+    if (!systemResult) return;
+
+    // Latest draw contest number + 1 as target
+    const latestDraw = draws[0];
+    const targetContestNumber = latestDraw ? latestDraw.contestNumber + 1 : 46;
+    const targetYear = latestDraw ? latestDraw.year : 2026;
+    const targetId = `${targetYear}-${String(targetContestNumber).padStart(3, '0')}`;
+
+    const play: SavedPlay = {
+      id: `play-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      targetContestId: targetId,
+      mode: playMode,
+      cost: playMode === 'pure_coverage' ? 10.0 : 9.0,
+      savedAmount: playMode === 'pure_coverage' ? 0.0 : 1.0,
+      poolNumbers: systemResult.poolNumbers,
+      columns: systemResult.columns,
+      status: 'IN_ATTESA'
+    };
+
+    onSavePlay(play);
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 3500);
+  };
+
+  // Copy columns text for online play
+  const handleCopyColumns = () => {
+    if (!systemResult) return;
+    const lines = systemResult.columns.map((c) => {
+      const colStr = `Colonna ${c.id}: ${c.numbers.join(' - ')}`;
+      return c.superstar ? `${colStr} [SuperStar: ${c.superstar}]` : colStr;
+    });
+    navigator.clipboard.writeText(lines.join('\n'));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Toggle number in custom pool
+  const toggleNumberInPool = (num: number) => {
+    setManualPoolEdit(true);
+    if (selectedPool.includes(num)) {
+      if (selectedPool.length > 6) {
+        setSelectedPool(selectedPool.filter((n) => n !== num));
+      }
+    } else {
+      if (selectedPool.length < 15) {
+        setSelectedPool([...selectedPool, num].sort((a, b) => a - b));
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Top Banner / Budget Overview */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-amber-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 rounded-full blur-3xl -z-10 pointer-events-none" />
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Budget 10,00 € / Settimana
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                Covering Design C({poolSizeV}, 6, t, m)
+              </span>
+            </div>
+            <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">
+              Ottimizzatore Combinatorio SuperEnalotto
+            </h2>
+            <p className="text-xs text-slate-400 max-w-2xl">
+              Algoritmo ortogonale a costo zero che massimizza la copertura di ambi e terni da un pool di{' '}
+              <strong className="text-slate-200">{poolSizeV} numeri</strong> selezionati tramite scoring
+              pesato sui ritardi storici, frequenze cicliche e affinità spia.
+            </p>
+          </div>
+
+          {/* Mode Selector Tabs */}
+          <div className="flex items-center p-1 bg-slate-950 rounded-xl border border-slate-800 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setPlayMode('pure_coverage');
+                setTimeout(() => handleRunOptimization(), 10);
+              }}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                playMode === 'pure_coverage'
+                  ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>Copertura Pura</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-950/20">10 Sestine (10€)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPlayMode('superstar');
+                setTimeout(() => handleRunOptimization(), 10);
+              }}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                playMode === 'superstar'
+                  ? 'bg-purple-600 text-white shadow-md font-extrabold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>Modalità SuperStar</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-black/20">6 Sestine (9€ + 1€)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Grid: Controls & Scoring on Left, Output on Right */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Sliders, Filters, Pool Selection (5 cols) */}
+        <div className="lg:col-span-5 space-y-5">
+          {/* Section: Scoring Weights Sliders (Requested Feature) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Pesi Funzione di Scoring S(x)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleResetWeights}
+                className="text-xs text-slate-400 hover:text-amber-300 flex items-center gap-1 transition-colors"
+                title="Reimposta pesi predefiniti (0.50, 0.30, 0.20)"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Default</span>
+              </button>
+            </div>
+
+            {/* Formula display */}
+            <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800/80 text-[11px] font-mono text-slate-300 flex items-center justify-between">
+              <span>S(x) = w₁·Rit(x) + w₂·Freq(x) + w₃·Aff(x)</span>
+              <span className="text-amber-400 font-bold">
+                Σ = {(weights.wDelay + weights.wFrequency + weights.wAffinity).toFixed(2)}
+              </span>
+            </div>
+
+            {/* Slider 1: w1 - Delay (Ritardo Storico) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <label htmlFor="weight-delay-slider" className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-400" />
+                  w₁: Ritardo Cronologico (Rit)
+                </label>
+                <span className="font-mono font-bold text-rose-300 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                  {weights.wDelay.toFixed(2)}
+                </span>
+              </div>
+              <input
+                id="weight-delay-slider"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={weights.wDelay}
+                onChange={(e) => handleWeightChange('wDelay', parseFloat(e.target.value))}
+                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500"
+              />
+              <p className="text-[10px] text-slate-500 flex justify-between">
+                <span>Rapporto ritardo attuale / max storico</span>
+                <span>Priorità numeri ritardatari</span>
+              </p>
+            </div>
+
+            {/* Slider 2: w2 - Frequency (Frequenza Ciclica K=36) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <label htmlFor="weight-freq-slider" className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-sky-400" />
+                  w₂: Frequenza Ciclica (Freq, K=36)
+                </label>
+                <span className="font-mono font-bold text-sky-300 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+                  {weights.wFrequency.toFixed(2)}
+                </span>
+              </div>
+              <input
+                id="weight-freq-slider"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={weights.wFrequency}
+                onChange={(e) => handleWeightChange('wFrequency', parseFloat(e.target.value))}
+                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
+              />
+              <p className="text-[10px] text-slate-500 flex justify-between">
+                <span>Uscite negli ultimi 36 concorsi</span>
+                <span>Priorità numeri "caldi"</span>
+              </p>
+            </div>
+
+            {/* Slider 3: w3 - Affinity (Affinità / Spia) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <label htmlFor="weight-aff-slider" className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  w₃: Affinità Spia / Simpatia (Aff)
+                </label>
+                <span className="font-mono font-bold text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                  {weights.wAffinity.toFixed(2)}
+                </span>
+              </div>
+              <input
+                id="weight-aff-slider"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={weights.wAffinity}
+                onChange={(e) => handleWeightChange('wAffinity', parseFloat(e.target.value))}
+                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+              />
+              <p className="text-[10px] text-slate-500 flex justify-between">
+                <span>Correlazione con l'ultima estrazione</span>
+                <span>Numeri simpatici / spia</span>
+              </p>
+            </div>
+
+            {/* Pool size selector */}
+            <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+              <label htmlFor="pool-size-select" className="text-xs font-semibold text-slate-300">
+                Dimensione Pool v (Lunghetta):
+              </label>
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                {[10, 11, 12, 13, 14, 15].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => {
+                      setPoolSizeV(v);
+                      setManualPoolEdit(false);
+                    }}
+                    className={`px-2 py-0.5 text-xs font-mono font-bold rounded ${
+                      poolSizeV === v
+                        ? 'bg-amber-500 text-slate-950'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Section: Base Pool Preview (v numbers selected) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Pool Base ({selectedPool.length} Numeri)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setManualPoolEdit(false);
+                  setSelectedPool(defaultTopVNumbers);
+                }}
+                className="text-xs text-slate-400 hover:text-amber-300"
+              >
+                Ricalcola dai Pesi
+              </button>
+            </div>
+
+            {/* Balls of the selected pool */}
+            <div className="flex flex-wrap gap-2 p-3 bg-slate-950 rounded-xl border border-slate-800 min-h-[58px]">
+              {selectedPool.map((num) => {
+                const stat = numberStatsMap[num];
+                return (
+                  <div
+                    key={num}
+                    onClick={() => toggleNumberInPool(num)}
+                    className="group relative cursor-pointer"
+                    title={`Numero ${num} | Score: ${stat?.compositeScore} | Ritardo: ${stat?.currentDelay} | Freq: ${stat?.frequencyK}`}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-extrabold text-sm flex items-center justify-center font-mono shadow-md border border-amber-300 group-hover:scale-110 transition-transform">
+                      {num}
+                    </div>
+                    <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-700 text-[8px] font-bold text-slate-400 flex items-center justify-center">
+                      ×
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="text-[11px] text-slate-400 flex items-center justify-between">
+              <span>Combinazioni integrali C({selectedPool.length}, 6):</span>
+              <span className="font-mono font-bold text-white">
+                {selectedPool.length === 12
+                  ? '924 sestine'
+                  : selectedPool.length === 10
+                  ? '210 sestine'
+                  : selectedPool.length === 15
+                  ? '5.005 sestine'
+                  : 'Calcolate al volo'}
+              </span>
+            </div>
+          </div>
+
+          {/* Section: Statistical Conditioning Filters (Phase B) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              className="w-full flex items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Filtri Statistici Condizionanti
+                </h3>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium">
+                  4 Attivi (~81% Casi)
+                </span>
+                {showAdvancedFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </div>
+            </button>
+
+            {showAdvancedFilters && (
+              <div className="space-y-2.5 pt-2 border-t border-slate-800 text-xs">
+                {/* Filter 1 */}
+                <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
+                  <div>
+                    <span className="font-semibold text-slate-200">Bilanciamento Pari/Dispari</span>
+                    <p className="text-[10px] text-slate-400">Accetta solo 3/3, 4/2 o 2/4 (evita 6/0 o 5/1)</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={filters.evenOdd}
+                    onChange={(e) => {
+                      const updated = { ...filters, evenOdd: e.target.checked };
+                      onUpdateFilters(updated);
+                      saveFilters(updated);
+                    }}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+
+                {/* Filter 2 */}
+                <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
+                  <div>
+                    <span className="font-semibold text-slate-200">Bilanciamento Alti/Bassi</span>
+                    <p className="text-[10px] text-slate-400">Suddivide 1-45 (Bassi) e 46-90 (Alti): 3/3, 4/2, 2/4</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={filters.highLow}
+                    onChange={(e) => {
+                      const updated = { ...filters, highLow: e.target.checked };
+                      onUpdateFilters(updated);
+                      saveFilters(updated);
+                    }}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+
+                {/* Filter 3 */}
+                <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
+                  <div>
+                    <span className="font-semibold text-slate-200">Somma Gaussiana Sestina [190 - 350]</span>
+                    <p className="text-[10px] text-slate-400">Esclude sestine estreme (media teorica 273)</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={filters.sumRange}
+                    onChange={(e) => {
+                      const updated = { ...filters, sumRange: e.target.checked };
+                      onUpdateFilters(updated);
+                      saveFilters(updated);
+                    }}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+
+                {/* Filter 4 */}
+                <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
+                  <div>
+                    <span className="font-semibold text-slate-200">Consecutività & Decine</span>
+                    <p className="text-[10px] text-slate-400">Max 2 consecutivi e max 2 numeri per decina</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={filters.consecutive && filters.decades}
+                    onChange={(e) => {
+                      const updated = {
+                        ...filters,
+                        consecutive: e.target.checked,
+                        decades: e.target.checked
+                      };
+                      onUpdateFilters(updated);
+                      saveFilters(updated);
+                    }}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+
+          {/* Trigger Button: Calcola Sistema */}
+          <button
+            type="button"
+            onClick={() => handleRunOptimization()}
+            className="w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 font-extrabold text-base shadow-xl shadow-amber-500/25 hover:from-amber-400 hover:to-amber-300 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border border-amber-300/40"
+          >
+            <Sparkles className="w-5 h-5 fill-slate-950" />
+            <span>Calcola Sistema Ottimizzato (10,00 €)</span>
+          </button>
+        </div>
+
+        {/* Right Column: Generated System Output & Coverage Metrics (7 cols) */}
+        <div className="lg:col-span-7 space-y-5">
+          {systemResult ? (
+            <>
+              {/* Coverage Metrics Header */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <span>Sistema Ortogonale a Riduzione Greedy</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 font-mono border border-amber-500/30">
+                        {systemResult.columns.length} Colonne
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Sviluppo da {systemResult.totalCombinations} integrali → {systemResult.filteredCombinationsCount} filtrate → {systemResult.columns.length} colonne ottimali
+                    </p>
+                  </div>
+
+                  {/* Execution time indicator */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>{systemResult.executionTimeMs} ms (&lt;500ms)</span>
+                  </div>
+                </div>
+
+                {/* Metrics Stats row */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase font-medium">Copertura Ambi</span>
+                    <span className="text-base font-bold text-amber-400 font-mono">
+                      {systemResult.coverageMetrics.pairsCoveredCount} / {systemResult.coverageMetrics.pairsTotalInPool}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      {Math.round((systemResult.coverageMetrics.pairsCoveredCount / systemResult.coverageMetrics.pairsTotalInPool) * 100)}% del pool
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase font-medium">Copertura Terni</span>
+                    <span className="text-base font-bold text-sky-400 font-mono">
+                      {systemResult.coverageMetrics.tripletsCoveredCount} / {systemResult.coverageMetrics.tripletsTotalInPool}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      {Math.round((systemResult.coverageMetrics.tripletsCoveredCount / systemResult.coverageMetrics.tripletsTotalInPool) * 100)}% del pool
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase font-medium">Presenza Media</span>
+                    <span className="text-base font-bold text-emerald-400 font-mono">
+                      {systemResult.coverageMetrics.averagePresence}x
+                    </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      perfetto bilanciamento
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase font-medium">Costo Giocata</span>
+                    <span className="text-base font-bold text-white font-mono">
+                      {playMode === 'pure_coverage' ? '10,00 €' : '9,00 €'}
+                    </span>
+                    <span className="text-[10px] text-amber-400 block">
+                      {playMode === 'pure_coverage' ? '10 x 1,00€' : '+ 1€ salvadanaio'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* The Columns: Schedina View */}
+              <div className="space-y-2.5">
+                {systemResult.columns.map((col) => (
+                  <div
+                    key={col.id}
+                    className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 font-mono text-xs font-bold flex items-center justify-center shrink-0">
+                        {String(col.id).padStart(2, '0')}
+                      </span>
+
+                      {/* Six balls */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {col.numbers.map((n) => (
+                          <div
+                            key={n}
+                            className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-bold text-xs flex items-center justify-center shadow-md font-mono border border-amber-300"
+                          >
+                            {n}
+                          </div>
+                        ))}
+
+                        {/* SuperStar if present */}
+                        {col.superstar && (
+                          <div className="flex items-center gap-1 ml-1 pl-2 border-l border-slate-800">
+                            <span className="text-[10px] font-bold text-purple-400">★</span>
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-md font-mono border border-purple-400">
+                              {col.superstar}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Metadata tags: Sum, Evens/Odds, Lows/Highs */}
+                    <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400 self-end sm:self-center">
+                      <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800">
+                        Σ {col.sum}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800">
+                        P/D {col.evens}/{col.odds}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800">
+                        A/B {col.highs}/{col.lows}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Expected Gains & Losses Card (Mean across each individual Sestina) */}
+              {expectedWeeklyPnL && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Calculator className="w-5 h-5 text-amber-400 shrink-0" />
+                      <div>
+                        <h4 className="text-sm font-bold text-white">
+                          Guadagni e Perdite Presunte (Media Calcolata su Ogni Singola Sestina)
+                        </h4>
+                        <p className="text-[11px] text-slate-400">
+                          Valore generato come media aritmetica (1/{expectedWeeklyPnL.sestineCount} Σ) delle perdite e dei guadagni su ciascuna sestina (100 estrazioni casuali simulate)
+                        </p>
+                      </div>
+                    </div>
+                    {onOpenSimulationTab && (
+                      <button
+                        type="button"
+                        onClick={onOpenSimulationTab}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                      >
+                        <Dices className="w-3.5 h-3.5" />
+                        <span>Dettaglio 100 Estrazioni &rarr;</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-950/90 p-3 rounded-xl border border-emerald-500/20">
+                      <span className="text-[10px] text-slate-400 block uppercase font-semibold">
+                        Media Guadagni / Sestina
+                      </span>
+                      <span className="text-base font-extrabold text-emerald-400 font-mono">
+                        +{expectedWeeklyPnL.meanTotalGainPerSestina.toFixed(2)} €
+                      </span>
+                      <span className="text-[10px] text-slate-500 block font-mono">
+                        +{expectedWeeklyPnL.meanSingleDrawGainPerSestina.toFixed(2)} € / estr.
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-950/90 p-3 rounded-xl border border-rose-500/20">
+                      <span className="text-[10px] text-slate-400 block uppercase font-semibold">
+                        Media Perdite / Sestina
+                      </span>
+                      <span className="text-base font-extrabold text-rose-400 font-mono">
+                        -{expectedWeeklyPnL.meanTotalLossPerSestina.toFixed(2)} €
+                      </span>
+                      <span className="text-[10px] text-slate-500 block font-mono">
+                        -{expectedWeeklyPnL.meanSingleDrawLossPerSestina.toFixed(2)} € / estr.
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-950/90 p-3 rounded-xl border border-amber-500/30">
+                      <span className="text-[10px] text-amber-300 block uppercase font-bold">
+                        Bilancio Medio / Sestina (100 Estr.)
+                      </span>
+                      <span
+                        className={`text-base font-extrabold font-mono ${
+                          expectedWeeklyPnL.meanNetProfitLossPerSestina >= 0
+                            ? 'text-emerald-400'
+                            : 'text-amber-400'
+                        }`}
+                      >
+                        {expectedWeeklyPnL.meanNetProfitLossPerSestina >= 0 ? '+' : ''}
+                        {expectedWeeklyPnL.meanNetProfitLossPerSestina.toFixed(2)} €
+                      </span>
+                      <span className="text-[10px] text-slate-500 block font-mono">
+                        Costo medio: {expectedWeeklyPnL.meanTotalCostPerSestina.toFixed(2)} €
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-950/90 p-3 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block uppercase font-semibold">
+                        Media Netta / Sestina (1 Estr.)
+                      </span>
+                      <span
+                        className={`text-base font-extrabold font-mono ${
+                          expectedWeeklyPnL.meanSingleDrawNetPerSestina >= 0
+                            ? 'text-emerald-400'
+                            : 'text-slate-200'
+                        }`}
+                      >
+                        {expectedWeeklyPnL.meanSingleDrawNetPerSestina >= 0 ? '+' : ''}
+                        {expectedWeeklyPnL.meanSingleDrawNetPerSestina.toFixed(2)} €
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        per singola sestina / settimana
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCopyColumns}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+                >
+                  {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  <span>{copied ? 'Copiato negli Appunti!' : 'Copia Sestine per Gioco Online'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveToLedger}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg active:scale-95 cursor-pointer ${
+                    savedSuccess
+                      ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/20'
+                      : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-amber-500/20 hover:from-amber-400 hover:to-amber-500'
+                  }`}
+                >
+                  {savedSuccess ? <Check className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
+                  <span>
+                    {savedSuccess ? 'Giocata Salvata con Successo!' : 'Registra Giocata Settimanale (10,00 €)'}
+                  </span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-white">Pronto per il Calcolo Combinatorio</h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Fai clic su "Calcola Sistema Ottimizzato" per sviluppare le combinazioni ortogonali a 10 colonne nel rispetto del budget di 10,00 €.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleRunOptimization()}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition-all shadow-md"
+              >
+                Calcola Ora
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Evolutionary Slider Trainer (n1 triplets, n2 draws, n3 generations, pairwise mean crossover) */}
+      <EvolutionarySliderTrainer
+        draws={draws}
+        currentWeights={weights}
+        onApplyTripletWeights={handleApplyTripletWeights}
+      />
+    </div>
+  );
+};

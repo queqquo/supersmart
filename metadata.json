@@ -1,0 +1,6 @@
+{
+  "name": "SuperEnalotto Combinatorial Optimizer",
+  "description": "Ottimizzatore combinatorio a costo zero per SuperEnalotto: covering design ortogonale, filtri statistici e gestione budget 10€/settimana.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
