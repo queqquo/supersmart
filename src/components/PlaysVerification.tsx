@@ -3,39 +3,112 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Trophy,
   CheckCircle2,
   AlertCircle,
-  Calendar,
   Trash2,
   TrendingUp,
   TrendingDown,
   PiggyBank,
-  Sparkles,
-  ArrowRight,
-  RotateCcw
+  PlusCircle,
+  Plus,
+  Dices,
+  FileText,
+  Euro,
+  Save,
+  X,
+  Edit3
 } from 'lucide-react';
-import { SavedPlay, Draw, PlayResult } from '../types/lottery';
-import { evaluatePlayedSystem } from '../utils/combinatorics';
+import { SavedPlay, Draw, PlayResult, GeneratedColumn } from '../types/lottery';
+import {
+  evaluatePlayedSystem,
+  buildGeneratedColumn,
+  parseManualSestineText,
+  createManualSavedPlay,
+  applyManualCostAndWinning
+} from '../utils/combinatorics';
 
 interface PlaysVerificationProps {
   plays: SavedPlay[];
   draws: Draw[];
+  onSavePlay: (play: SavedPlay) => void;
   onUpdatePlay: (play: SavedPlay) => void;
   onDeletePlay: (id: string) => void;
+}
+
+interface ManualRowInput {
+  rowId: string;
+  numbers: [string, string, string, string, string, string];
+  superstar: string;
+}
+
+function createEmptyManualRow(index: number): ManualRowInput {
+  return {
+    rowId: `row-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+    numbers: ['', '', '', '', '', ''],
+    superstar: ''
+  };
+}
+
+function createRandomManualRow(index: number): ManualRowInput {
+  const chosen: number[] = [];
+  while (chosen.length < 6) {
+    const r = Math.floor(Math.random() * 90) + 1;
+    if (!chosen.includes(r)) chosen.push(r);
+  }
+  chosen.sort((a, b) => a - b);
+  return {
+    rowId: `row-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+    numbers: [
+      String(chosen[0]),
+      String(chosen[1]),
+      String(chosen[2]),
+      String(chosen[3]),
+      String(chosen[4]),
+      String(chosen[5])
+    ],
+    superstar: ''
+  };
 }
 
 export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
   plays,
   draws,
+  onSavePlay,
   onUpdatePlay,
   onDeletePlay
 }) => {
   const [selectedPlayId, setSelectedPlayId] = useState<string | null>(
     plays.length > 0 ? plays[0].id : null
   );
+
+  // Manual Registration Panel state
+  const [isManualFormOpen, setIsManualFormOpen] = useState(false);
+  const defaultNextContest = useMemo(() => {
+    const latest = draws[0];
+    if (!latest) return `${new Date().getFullYear()}-001`;
+    return `${latest.year}-${String(latest.contestNumber + 1).padStart(3, '0')}`;
+  }, [draws]);
+
+  const [manualContestId, setManualContestId] = useState<string>(defaultNextContest);
+  const [manualRows, setManualRows] = useState<ManualRowInput[]>(() => [createEmptyManualRow(1)]);
+  const [manualCost, setManualCost] = useState<string>('1.00');
+  const [costManuallyEdited, setCostManuallyEdited] = useState<boolean>(false);
+  const [manualWinning, setManualWinning] = useState<string>('0.00');
+  const [manualSavedAmount, setManualSavedAmount] = useState<string>('0.00');
+  const [manualStatus, setManualStatus] = useState<'VERIFICATA' | 'IN_ATTESA'>('VERIFICATA');
+  const [manualNote, setManualNote] = useState<string>('');
+  const [quickPasteText, setQuickPasteText] = useState<string>('');
+  const [showQuickPaste, setShowQuickPaste] = useState<boolean>(false);
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [manualSuccessBanner, setManualSuccessBanner] = useState<string | null>(null);
+
+  // Inline edit state for existing selected play
+  const [editCostInput, setEditCostInput] = useState<string>('');
+  const [editWinInput, setEditWinInput] = useState<string>('');
+  const [inlineSaveFeedback, setInlineSaveFeedback] = useState<boolean>(false);
 
   // Economic Ledger calculations
   const ledger = useMemo(() => {
@@ -72,9 +145,186 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
     return plays.find((p) => p.id === selectedPlayId) || plays[0] || null;
   }, [plays, selectedPlayId]);
 
+  // Sync inline edit inputs when activePlay changes
+  useEffect(() => {
+    if (activePlay) {
+      setEditCostInput(activePlay.cost.toFixed(2));
+      setEditWinInput((activePlay.result?.totalWinning ?? 0).toFixed(2));
+    }
+  }, [activePlay?.id, activePlay?.cost, activePlay?.result?.totalWinning]);
+
+  // Update auto cost when adding/removing rows unless user edited cost manually
+  const updateRowsAndAutoCost = (nextRows: ManualRowInput[]) => {
+    setManualRows(nextRows);
+    if (!costManuallyEdited) {
+      setManualCost((nextRows.length * 1.0).toFixed(2));
+    }
+  };
+
+  const handleAddRow = () => {
+    setManualError(null);
+    updateRowsAndAutoCost([...manualRows, createEmptyManualRow(manualRows.length + 1)]);
+  };
+
+  const handleAddRandomRow = () => {
+    setManualError(null);
+    // If there is only 1 empty row, fill it; otherwise append a new random row
+    if (
+      manualRows.length === 1 &&
+      manualRows[0].numbers.every((n) => n.trim() === '')
+    ) {
+      setManualRows([createRandomManualRow(1)]);
+      return;
+    }
+    updateRowsAndAutoCost([...manualRows, createRandomManualRow(manualRows.length + 1)]);
+  };
+
+  const handleRemoveRow = (rowId: string) => {
+    if (manualRows.length <= 1) {
+      setManualRows([createEmptyManualRow(1)]);
+      return;
+    }
+    updateRowsAndAutoCost(manualRows.filter((r) => r.rowId !== rowId));
+  };
+
+  const handleNumberInputChange = (rowId: string, posIdx: number, val: string) => {
+    setManualError(null);
+    setManualRows((prev) =>
+      prev.map((row) => {
+        if (row.rowId !== rowId) return row;
+        const nextNums = [...row.numbers] as [string, string, string, string, string, string];
+        nextNums[posIdx] = val;
+        return { ...row, numbers: nextNums };
+      })
+    );
+  };
+
+  const handleSuperstarInputChange = (rowId: string, val: string) => {
+    setManualError(null);
+    setManualRows((prev) =>
+      prev.map((row) => (row.rowId === rowId ? { ...row, superstar: val } : row))
+    );
+  };
+
+  const handleImportQuickPaste = () => {
+    setManualError(null);
+    const parsedCols = parseManualSestineText(quickPasteText);
+    if (parsedCols.length === 0) {
+      setManualError(
+        'Nessuna sestina valida trovata nel testo. Inserisci 6 numeri distinti tra 1 e 90 per riga (es. "5 14 28 42 67 89").'
+      );
+      return;
+    }
+
+    const importedRows: ManualRowInput[] = parsedCols.map((col, idx) => ({
+      rowId: `row-imported-${Date.now()}-${idx}`,
+      numbers: [
+        String(col.numbers[0]),
+        String(col.numbers[1]),
+        String(col.numbers[2]),
+        String(col.numbers[3]),
+        String(col.numbers[4]),
+        String(col.numbers[5])
+      ],
+      superstar: col.superstar ? String(col.superstar) : ''
+    }));
+
+    updateRowsAndAutoCost(importedRows);
+    setShowQuickPaste(false);
+    setQuickPasteText('');
+  };
+
+  const handleSaveManualPlay = (e: React.FormEvent) => {
+    e.preventDefault();
+    setManualError(null);
+
+    const validatedColumns: GeneratedColumn[] = [];
+    for (let i = 0; i < manualRows.length; i++) {
+      const row = manualRows[i];
+      const rawNums = row.numbers.map((s) => parseInt(s.trim(), 10));
+      if (rawNums.some((n) => Number.isNaN(n) || n < 1 || n > 90)) {
+        setManualError(
+          `Sestina #${i + 1} incompleta o non valida: inserisci 6 numeri interi compresi tra 1 e 90.`
+        );
+        return;
+      }
+
+      const uniqueCheck = new Set(rawNums);
+      if (uniqueCheck.size !== 6) {
+        setManualError(
+          `Sestina #${i + 1} contiene numeri duplicati: ogni sestina deve avere 6 numeri tutti diversi (1-90).`
+        );
+        return;
+      }
+
+      let starVal: number | undefined = undefined;
+      if (row.superstar.trim() !== '') {
+        const parsedStar = parseInt(row.superstar.trim(), 10);
+        if (Number.isNaN(parsedStar) || parsedStar < 1 || parsedStar > 90) {
+          setManualError(
+            `Sestina #${i + 1}: il numero SuperStar deve essere compreso tra 1 e 90.`
+          );
+          return;
+        }
+        starVal = parsedStar;
+      }
+
+      const col = buildGeneratedColumn(i + 1, rawNums, starVal);
+      if (!col) {
+        setManualError(`Errore nella validazione della Sestina #${i + 1}.`);
+        return;
+      }
+      validatedColumns.push(col);
+    }
+
+    const parsedCost = parseFloat(manualCost.replace(',', '.'));
+    if (Number.isNaN(parsedCost) || parsedCost < 0) {
+      setManualError('Inserisci un Costo Giocata valido (€ >= 0).');
+      return;
+    }
+
+    const parsedWin = parseFloat(manualWinning.replace(',', '.')) || 0;
+    if (parsedWin < 0) {
+      setManualError('Inserisci un importo Vincita valido (€ >= 0).');
+      return;
+    }
+
+    const parsedSaved = parseFloat(manualSavedAmount.replace(',', '.')) || 0;
+
+    const newPlay = createManualSavedPlay({
+      targetContestId: manualContestId.trim() || defaultNextContest,
+      columns: validatedColumns,
+      cost: parsedCost,
+      winningAmount: parsedWin,
+      savedAmount: Math.max(0, parsedSaved),
+      status: parsedWin > 0 ? 'VERIFICATA' : manualStatus,
+      manualNote: manualNote.trim() || undefined
+    });
+
+    onSavePlay(newPlay);
+    setSelectedPlayId(newPlay.id);
+    setIsManualFormOpen(false);
+
+    // Reset form for next time
+    setManualRows([createEmptyManualRow(1)]);
+    setManualCost('1.00');
+    setCostManuallyEdited(false);
+    setManualWinning('0.00');
+    setManualSavedAmount('0.00');
+    setManualNote('');
+    setManualSuccessBanner(
+      `Giocata manuale (${validatedColumns.length} ${
+        validatedColumns.length === 1 ? 'sestina' : 'sestine'
+      }, Costo ${newPlay.cost.toFixed(2)} €, Vincita ${(newPlay.result?.totalWinning ?? 0).toFixed(
+        2
+      )} €) registrata nel bilancio!`
+    );
+    setTimeout(() => setManualSuccessBanner(null), 5000);
+  };
+
   // Handler to verify a play against an extraction
   const handleVerifyPlay = (play: SavedPlay, targetDraw: Draw) => {
-    const result: PlayResult = evaluatePlayedSystem(play.columns, targetDraw);
+    const result: PlayResult = evaluatePlayedSystem(play.columns, targetDraw, play.cost);
     const updatedPlay: SavedPlay = {
       ...play,
       status: 'VERIFICATA',
@@ -83,24 +333,84 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
     onUpdatePlay(updatedPlay);
   };
 
+  // Handler to manually update cost & winning of an existing play
+  const handleSaveInlineCostAndWinning = (play: SavedPlay) => {
+    const newCost = parseFloat(editCostInput.replace(',', '.'));
+    const newWin = parseFloat(editWinInput.replace(',', '.'));
+    if (Number.isNaN(newCost) || newCost < 0 || Number.isNaN(newWin) || newWin < 0) {
+      return;
+    }
+    const updated = applyManualCostAndWinning(play, newCost, newWin, true);
+    onUpdatePlay(updated);
+    setInlineSaveFeedback(true);
+    setTimeout(() => setInlineSaveFeedback(false), 2500);
+  };
+
+  const previewCostNum = Math.max(0, parseFloat(manualCost.replace(',', '.')) || 0);
+  const previewWinNum = Math.max(0, parseFloat(manualWinning.replace(',', '.')) || 0);
+  const previewNetNum = previewWinNum - previewCostNum;
+
   return (
     <div className="space-y-6">
       {/* Economic Ledger Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Trophy className="w-5 h-5 text-amber-400" />
               <span>Controllo Budget & Bilancio Economico</span>
             </h2>
             <p className="text-xs text-slate-400">
-              Tracciamento del piano da 10,00 € a settimana, calcolo automatico vincite e ritorno sull'investimento (ROI).
+              Tracciamento giocate di sistema e manuali, costi sostenuti, vincite conseguite e ritorno sull&apos;investimento (ROI).
             </p>
           </div>
-          <span className="text-xs px-3 py-1 rounded-full bg-slate-950 text-slate-300 border border-slate-800 font-mono">
-            {ledger.totalPlays} giocate registrate ({ledger.verifiedCount} verificate)
-          </span>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="text-xs px-3 py-1.5 rounded-full bg-slate-950 text-slate-300 border border-slate-800 font-mono">
+              {ledger.totalPlays} giocate registrate ({ledger.verifiedCount} verificate)
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setManualError(null);
+                setIsManualFormOpen((prev) => !prev);
+              }}
+              className={`px-4 py-2 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-md ${
+                isManualFormOpen
+                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25'
+                  : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 hover:from-amber-400 hover:to-amber-500'
+              }`}
+            >
+              {isManualFormOpen ? (
+                <>
+                  <X className="w-4 h-4" />
+                  <span>Chiudi Inserimento Manuale</span>
+                </>
+              ) : (
+                <>
+                  <PlusCircle className="w-4 h-4" />
+                  <span>Registrazione Manuale Giocata</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
+
+        {manualSuccessBanner && (
+          <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-200 text-xs flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-semibold">{manualSuccessBanner}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setManualSuccessBanner(null)}
+              className="text-emerald-400 hover:text-emerald-200 p-1"
+              aria-label="Chiudi notifica"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* 4 KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
@@ -109,7 +419,7 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
             <span className="text-xl font-extrabold text-white font-mono block mt-1">
               {ledger.totalSpent.toFixed(2)} €
             </span>
-            <span className="text-[10px] text-slate-500">10,00 € / settimana</span>
+            <span className="text-[10px] text-slate-500">Costo totale schedine</span>
           </div>
 
           <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/90">
@@ -150,10 +460,370 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
             <span className="text-xl font-extrabold text-purple-300 font-mono block mt-1">
               {ledger.piggybankBalance.toFixed(2)} €
             </span>
-            <span className="text-[10px] text-purple-400/80">Avanzo 1€ SuperStar</span>
+            <span className="text-[10px] text-purple-400/80">Accantonamento extra</span>
           </div>
         </div>
       </div>
+
+      {/* Manual Play Registration Form Panel */}
+      {isManualFormOpen && (
+        <form
+          onSubmit={handleSaveManualPlay}
+          className="bg-slate-900 border-2 border-amber-500/40 rounded-2xl p-5 shadow-2xl space-y-5"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div>
+              <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                <PlusCircle className="w-5 h-5 text-amber-400" />
+                <span>Registrazione Manuale delle Giocate</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Inserisci manualmente una o più sestine giocate, il costo sostenuto (€) e l&apos;eventuale vincita conseguita (€).
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowQuickPaste((prev) => !prev)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-400" />
+                <span>{showQuickPaste ? 'Nascondi Incolla Testo' : 'Incolla Multi-Sestina'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleAddRandomRow}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <Dices className="w-3.5 h-3.5 text-emerald-400" />
+                <span>+ Sestina Casuale</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Optional Quick Multi-Sestina Text Paste */}
+          {showQuickPaste && (
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="manual-quick-paste"
+                  className="text-xs font-bold text-slate-300 uppercase tracking-wider"
+                >
+                  Incolla una o più sestine (una per riga, 6 numeri da 1 a 90, opz. *SuperStar)
+                </label>
+              </div>
+              <textarea
+                id="manual-quick-paste"
+                rows={3}
+                value={quickPasteText}
+                onChange={(e) => setQuickPasteText(e.target.value)}
+                placeholder={'Esempio:\n05 14 28 42 67 89 *45\n12, 23, 34, 56, 78, 90'}
+                className="w-full rounded-xl bg-slate-900 border border-slate-700 p-3 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleImportQuickPaste}
+                  className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer transition-colors"
+                >
+                  Importa Sestine nelle Righe
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 1: Sestine Rows Input */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                1. Sestine Giocate ({manualRows.length}{' '}
+                {manualRows.length === 1 ? 'colonna' : 'colonne'})
+              </span>
+              <button
+                type="button"
+                onClick={handleAddRow}
+                className="px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Aggiungi Sestina</span>
+              </button>
+            </div>
+
+            <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+              {manualRows.map((row, rIdx) => (
+                <div
+                  key={row.rowId}
+                  className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 text-amber-400 font-mono text-xs font-bold flex items-center justify-center shrink-0">
+                      #{rIdx + 1}
+                    </span>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {row.numbers.map((numStr, nIdx) => (
+                        <input
+                          key={nIdx}
+                          type="number"
+                          min={1}
+                          max={90}
+                          required
+                          value={numStr}
+                          onChange={(e) =>
+                            handleNumberInputChange(row.rowId, nIdx, e.target.value)
+                          }
+                          placeholder={`N${nIdx + 1}`}
+                          aria-label={`Sestina ${rIdx + 1} Numero ${nIdx + 1}`}
+                          className="w-12 h-10 rounded-lg bg-slate-900 border border-slate-700 text-center font-mono font-bold text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                      ))}
+                    </div>
+
+                    {/* Optional SuperStar input */}
+                    <div className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
+                      <span className="text-[11px] font-bold text-purple-300 font-mono">★</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={90}
+                        value={row.superstar}
+                        onChange={(e) => handleSuperstarInputChange(row.rowId, e.target.value)}
+                        placeholder="SS"
+                        aria-label={`Sestina ${rIdx + 1} SuperStar opzionale`}
+                        title="Numero SuperStar opzionale (1-90)"
+                        className="w-12 h-10 rounded-lg bg-slate-900 border border-purple-500/40 text-center font-mono font-bold text-sm text-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rand = createRandomManualRow(rIdx + 1);
+                        setManualRows((prev) =>
+                          prev.map((item) =>
+                            item.rowId === row.rowId
+                              ? { ...item, numbers: rand.numbers }
+                              : item
+                          )
+                        );
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-mono cursor-pointer"
+                      title="Riempi questa sestina con 6 numeri casuali"
+                    >
+                      Casuale
+                    </button>
+                    {manualRows.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRow(row.rowId)}
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-900 transition-colors cursor-pointer"
+                        aria-label={`Rimuovi Sestina ${rIdx + 1}`}
+                        title="Rimuovi riga"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Step 2: Cost, Winning, Contest, and Status */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2 border-t border-slate-800">
+            {/* Costo Associato (€) */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="manual-cost-input"
+                  className="text-xs font-bold text-slate-300 flex items-center gap-1"
+                >
+                  <Euro className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Costo Associato (€)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCostManuallyEdited(false);
+                    setManualCost((manualRows.length * 1.0).toFixed(2));
+                  }}
+                  className="text-[10px] text-amber-400 hover:underline font-mono cursor-pointer"
+                >
+                  Auto (1€×{manualRows.length})
+                </button>
+              </div>
+              <input
+                id="manual-cost-input"
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                value={manualCost}
+                onChange={(e) => {
+                  setCostManuallyEdited(true);
+                  setManualCost(e.target.value);
+                }}
+                className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm font-mono font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <span className="text-[10px] text-slate-500 block">
+                Importo speso per la schedina
+              </span>
+            </div>
+
+            {/* Vincita Conseguita (€) */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+              <label
+                htmlFor="manual-winning-input"
+                className="text-xs font-bold text-emerald-400 flex items-center gap-1"
+              >
+                <Trophy className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Vincita Conseguita (€)</span>
+              </label>
+              <input
+                id="manual-winning-input"
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                value={manualWinning}
+                onChange={(e) => {
+                  setManualWinning(e.target.value);
+                  const val = parseFloat(e.target.value);
+                  if (!Number.isNaN(val) && val > 0) {
+                    setManualStatus('VERIFICATA');
+                  }
+                }}
+                className="w-full rounded-lg bg-slate-900 border border-emerald-500/40 px-3 py-2 text-sm font-mono font-bold text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <span className="text-[10px] text-slate-500 block">
+                Inserisci 0,00 € se non vincente o in attesa
+              </span>
+            </div>
+
+            {/* Concorso di Riferimento */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="manual-contest-input"
+                  className="text-xs font-bold text-slate-300"
+                >
+                  Concorso Riferimento
+                </label>
+                {draws.length > 0 && (
+                  <select
+                    aria-label="Seleziona concorso da archivio"
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) setManualContestId(e.target.value);
+                    }}
+                    className="bg-slate-900 text-[10px] text-slate-400 border border-slate-800 rounded px-1.5 py-0.5 font-mono"
+                  >
+                    <option value="">Da archivio...</option>
+                    {draws.slice(0, 15).map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.id} ({d.date})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <input
+                id="manual-contest-input"
+                type="text"
+                required
+                value={manualContestId}
+                onChange={(e) => setManualContestId(e.target.value)}
+                placeholder="es. 2026-175"
+                className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm font-mono font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <span className="text-[10px] text-slate-500 block">
+                ID concorso o data giocata
+              </span>
+            </div>
+
+            {/* Stato Giocata & Nota */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+              <label
+                htmlFor="manual-status-select"
+                className="text-xs font-bold text-slate-300 block"
+              >
+                Stato Contabile
+              </label>
+              <select
+                id="manual-status-select"
+                value={previewWinNum > 0 ? 'VERIFICATA' : manualStatus}
+                onChange={(e) =>
+                  setManualStatus(e.target.value as 'VERIFICATA' | 'IN_ATTESA')
+                }
+                className="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="VERIFICATA">Confermata (Contabilizza Costo e Vincita)</option>
+                <option value="IN_ATTESA">In Attesa di Estrazione</option>
+              </select>
+              <input
+                type="text"
+                value={manualNote}
+                onChange={(e) => setManualNote(e.target.value)}
+                placeholder="Nota opzionale (es. Schedina bar)"
+                aria-label="Nota opzionale giocata"
+                className="w-full rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-amber-500 mt-1"
+              />
+            </div>
+          </div>
+
+          {manualError && (
+            <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-200 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{manualError}</span>
+            </div>
+          )}
+
+          {/* Footer Summary & Submit */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-800">
+            <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
+              <span className="text-slate-400">
+                Sestine: <strong className="text-white">{manualRows.length}</strong>
+              </span>
+              <span className="text-slate-400">
+                Costo: <strong className="text-white">{previewCostNum.toFixed(2)} €</strong>
+              </span>
+              <span className="text-slate-400">
+                Vincita: <strong className="text-emerald-400">{previewWinNum.toFixed(2)} €</strong>
+              </span>
+              <span className="text-slate-400">
+                Impatto Netto:{' '}
+                <strong
+                  className={
+                    previewNetNum >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                  }
+                >
+                  {previewNetNum > 0 ? '+' : ''}
+                  {previewNetNum.toFixed(2)} €
+                </strong>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsManualFormOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs cursor-pointer transition-colors"
+              >
+                Annulla
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-extrabold text-xs shadow-lg flex items-center gap-1.5 cursor-pointer transition-all"
+              >
+                <Save className="w-4 h-4" />
+                <span>Salva Giocata nel Bilancio</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
 
       {/* Plays Master-Detail View */}
       {plays.length > 0 ? (
@@ -161,7 +831,7 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
           {/* Left: Plays List (4 cols) */}
           <div className="lg:col-span-4 space-y-3">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">
-              Storico Schedine Settimanali
+              Storico Schedine Registrate
             </h3>
 
             <div className="space-y-2">
@@ -180,10 +850,17 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                         : 'bg-slate-900 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-sm text-white">
-                        Concorso {play.targetContestId}
-                      </span>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-sm text-white">
+                          Concorso {play.targetContestId}
+                        </span>
+                        {play.mode === 'manual' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold uppercase">
+                            Manuale
+                          </span>
+                        )}
+                      </div>
                       <span
                         className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
                           isVerified
@@ -193,12 +870,26 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                             : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                         }`}
                       >
-                        {isVerified ? (hasWin ? `Vinti ${play.result?.totalWinning}€` : 'Nessun Punto') : 'In Attesa'}
+                        {isVerified
+                          ? hasWin
+                            ? `Vinti ${play.result?.totalWinning.toFixed(2)}€`
+                            : '0,00€ (Verificata)'
+                          : 'In Attesa'}
                       </span>
                     </div>
 
+                    {play.manualNote && (
+                      <p className="text-[11px] text-slate-400 italic mt-1 truncate">
+                        {play.manualNote}
+                      </p>
+                    )}
+
                     <div className="flex items-center justify-between text-xs text-slate-400 mt-2 font-mono">
-                      <span>{play.columns.length} colonne ({play.cost.toFixed(2)}€)</span>
+                      <span>
+                        {play.columns.length}{' '}
+                        {play.columns.length === 1 ? 'sestina' : 'colonne'} (Costo:{' '}
+                        {play.cost.toFixed(2)}€)
+                      </span>
                       <span>{play.createdAt.split('T')[0]}</span>
                     </div>
                   </div>
@@ -214,16 +905,22 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                 {/* Detail Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-lg font-extrabold text-white">
                         Giocata Concorso {activePlay.targetContestId}
                       </h3>
                       <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-950 text-slate-300 border border-slate-800 font-mono">
-                        {activePlay.mode === 'pure_coverage' ? 'Copertura Pura (10€)' : 'SuperStar (9€)'}
+                        {activePlay.mode === 'manual'
+                          ? `Registrazione Manuale (${activePlay.cost.toFixed(2)}€)`
+                          : activePlay.mode === 'pure_coverage'
+                          ? `Copertura Pura (${activePlay.cost.toFixed(2)}€)`
+                          : `SuperStar (${activePlay.cost.toFixed(2)}€)`}
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Pool di base: {activePlay.poolNumbers.join(' - ')} | Creata il {activePlay.createdAt.split('T')[0]}
+                      Numeri coinvolti: {activePlay.poolNumbers.join(' - ')} | Creata il{' '}
+                      {activePlay.createdAt.split('T')[0]}
+                      {activePlay.manualNote ? ` | Nota: ${activePlay.manualNote}` : ''}
                     </p>
                   </div>
 
@@ -245,10 +942,64 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                   </div>
                 </div>
 
+                {/* Inline Cost & Manual Winning Editor for Active Play */}
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs text-slate-300 font-semibold">
+                    <Edit3 className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Modifica Rapida Costo & Vincita Reale:</span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <label
+                        htmlFor="inline-edit-cost"
+                        className="text-[11px] text-slate-400 font-mono"
+                      >
+                        Costo (€):
+                      </label>
+                      <input
+                        id="inline-edit-cost"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editCostInput}
+                        onChange={(e) => setEditCostInput(e.target.value)}
+                        className="w-20 rounded-lg bg-slate-900 border border-slate-700 px-2 py-1 text-xs font-mono font-bold text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <label
+                        htmlFor="inline-edit-win"
+                        className="text-[11px] text-emerald-400 font-mono"
+                      >
+                        Vincita (€):
+                      </label>
+                      <input
+                        id="inline-edit-win"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editWinInput}
+                        onChange={(e) => setEditWinInput(e.target.value)}
+                        className="w-24 rounded-lg bg-slate-900 border border-emerald-500/40 px-2 py-1 text-xs font-mono font-bold text-emerald-300 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSaveInlineCostAndWinning(activePlay)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-bold font-mono cursor-pointer transition-colors"
+                    >
+                      {inlineSaveFeedback ? 'Salvato!' : 'Aggiorna Importi'}
+                    </button>
+                  </div>
+                </div>
+
                 {/* Verification Trigger Bar */}
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-400">Verifica contro:</span>
+                    <span className="text-slate-400">Verifica contro estrazione:</span>
                     <select
                       id="select-target-draw"
                       defaultValue={draws[0]?.id || ''}
@@ -265,9 +1016,12 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const sel = document.getElementById('select-target-draw') as HTMLSelectElement;
+                      const sel = document.getElementById(
+                        'select-target-draw'
+                      ) as HTMLSelectElement;
                       const chosenId = sel ? sel.value : draws[0]?.id;
-                      const drawToMatch = draws.find((d) => d.id === chosenId) || draws[0];
+                      const drawToMatch =
+                        draws.find((d) => d.id === chosenId) || draws[0];
                       if (drawToMatch) {
                         handleVerifyPlay(activePlay, drawToMatch);
                       }
@@ -281,9 +1035,18 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
 
                 {/* Columns Match Breakdown */}
                 <div className="space-y-2.5">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    Dettaglio 10 Colonne & Esito Punteggi
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      Dettaglio Sestine Giocate ({activePlay.columns.length}) & Esito
+                    </h4>
+                    {activePlay.result && (
+                      <span className="text-xs font-mono font-bold text-emerald-400">
+                        Totale Vinto: {activePlay.result.totalWinning.toFixed(2)} € (Netto:{' '}
+                        {activePlay.result.netReturn >= 0 ? '+' : ''}
+                        {activePlay.result.netReturn.toFixed(2)} €)
+                      </span>
+                    )}
+                  </div>
 
                   {activePlay.columns.map((col, idx) => {
                     const matchInfo = activePlay.result?.matchesPerColumn[idx];
@@ -348,9 +1111,13 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                                   : 'bg-slate-900 text-slate-500 border border-slate-800'
                               }`}
                             >
-                              {matchInfo.matchCount} Punti
-                              {matchInfo.hasSuperstar ? ' + Stella' : ''}
-                              {isWinningCol ? ` (${matchInfo.estimatedPrize} €)` : ''}
+                              {activePlay.result?.isManualWinning
+                                ? isWinningCol
+                                  ? `Vincita Registrata: ${matchInfo.estimatedPrize.toFixed(2)} €`
+                                  : 'Registrata'
+                                : `${matchInfo.matchCount} Punti${
+                                    matchInfo.hasSuperstar ? ' + Stella' : ''
+                                  }${isWinningCol ? ` (${matchInfo.estimatedPrize} €)` : ''}`}
                             </span>
                           </div>
                         ) : (
@@ -367,14 +1134,24 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
           </div>
         </div>
       ) : (
-        <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
-          <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center mx-auto">
+        <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
+          <div className="w-12 h-12 rounded-full bg-slate-800 text-amber-400 flex items-center justify-center mx-auto">
             <Trophy className="w-6 h-6" />
           </div>
           <h3 className="text-base font-bold text-white">Nessuna Giocata Registrata</h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto">
-            Usa la scheda "Generatore Ottimizzato" per calcolare il tuo sistema da 10,00 € e clicca su "Registra Giocata Settimanale" per iniziare il tracciamento del bilancio.
+            Puoi inserire subito una giocata manuale specificando le sestine, il costo associato e la vincita, oppure usare la scheda &quot;Generatore Ottimizzato&quot;.
           </p>
+          <div>
+            <button
+              type="button"
+              onClick={() => setIsManualFormOpen(true)}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs shadow-md hover:from-amber-400 hover:to-amber-500 transition-all inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>Registra Giocata Manuale</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

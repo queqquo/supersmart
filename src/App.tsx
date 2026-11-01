@@ -362,6 +362,7 @@ export default function App() {
           <PlaysVerification
             plays={savedPlays}
             draws={draws}
+            onSavePlay={handleSavePlay}
             onUpdatePlay={handleUpdatePlay}
             onDeletePlay={handleDeletePlay}
           />

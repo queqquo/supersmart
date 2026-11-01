@@ -11,7 +11,8 @@ import {
   GeneratedColumn,
   SystemGenerationResult,
   ColumnMatchResult,
-  PlayResult
+  PlayResult,
+  SavedPlay
 } from '../types/lottery';
 
 /**
@@ -549,7 +550,8 @@ export function generateOptimizedSystem(
  */
 export function evaluatePlayedSystem(
   columns: GeneratedColumn[],
-  winningDraw: Draw
+  winningDraw: Draw,
+  customCost?: number
 ): PlayResult {
   const winningSet = new Set(winningDraw.numbers);
   const jolly = winningDraw.jolly;
@@ -626,17 +628,257 @@ export function evaluatePlayedSystem(
     });
   }
 
-  // System cost: pure_coverage is 10€, superstar is 9€
-  const cost = columns.length === 6 ? 9.0 : 10.0;
-  const netReturn = totalWinning - cost;
+  // System cost: use customCost if provided, else pure_coverage is 10€, superstar is 9€
+  const cost = customCost !== undefined ? customCost : columns.length === 6 ? 9.0 : 10.0;
+  const netReturn = Number((totalWinning - cost).toFixed(2));
 
   return {
     matchesPerColumn,
-    totalWinning,
+    totalWinning: Number(totalWinning.toFixed(2)),
     netReturn,
     bestMatch,
     hasWin: totalWinning > 0,
     verifiedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Validates and builds a single GeneratedColumn from 6 distinct numbers in [1..90]
+ */
+export function buildGeneratedColumn(
+  id: number,
+  rawNumbers: number[],
+  superstar?: number
+): GeneratedColumn | null {
+  const uniqueValid: number[] = [];
+  for (const n of rawNumbers) {
+    const intVal = Math.round(Number(n));
+    if (Number.isFinite(intVal) && intVal >= 1 && intVal <= 90 && !uniqueValid.includes(intVal)) {
+      uniqueValid.push(intVal);
+    }
+  }
+
+  if (uniqueValid.length !== 6) {
+    return null;
+  }
+
+  const sorted = [...uniqueValid].sort((a, b) => a - b);
+  let evens = 0;
+  let lows = 0;
+  let sum = 0;
+  for (const num of sorted) {
+    if (num % 2 === 0) evens++;
+    if (num <= 45) lows++;
+    sum += num;
+  }
+
+  let validSuperstar: number | undefined = undefined;
+  if (superstar !== undefined && superstar !== null && !Number.isNaN(Number(superstar))) {
+    const sVal = Math.round(Number(superstar));
+    if (sVal >= 1 && sVal <= 90) {
+      validSuperstar = sVal;
+    }
+  }
+
+  return {
+    id,
+    numbers: sorted,
+    superstar: validSuperstar,
+    sum,
+    evens,
+    odds: 6 - evens,
+    lows,
+    highs: 6 - lows
+  };
+}
+
+/**
+ * Parses multi-line manual sestine text into GeneratedColumn[]
+ * Each line can contain 6 numbers (1..90) and optionally a 7th number or "*N" / "stella N" as SuperStar.
+ */
+export function parseManualSestineText(rawText: string): GeneratedColumn[] {
+  if (!rawText || !rawText.trim()) return [];
+  const lines = rawText
+    .split(/\r?\n|;/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  const columns: GeneratedColumn[] = [];
+
+  for (const line of lines) {
+    // Check explicit superstar marker like *45, ★45, SS:45, stella 45
+    let explicitStar: number | undefined;
+    let cleanedLine = line;
+    const starMatch = cleanedLine.match(/(?:★|\*|superstar|stella|ss)\s*[:=]?\s*(\d{1,2})\b/i);
+    if (starMatch) {
+      const parsedStar = parseInt(starMatch[1], 10);
+      if (parsedStar >= 1 && parsedStar <= 90) {
+        explicitStar = parsedStar;
+      }
+      cleanedLine = cleanedLine.replace(starMatch[0], ' ');
+    }
+
+    const tokens = cleanedLine.match(/\b([1-8]?[0-9]|90)\b/g);
+    if (!tokens) continue;
+
+    const nums: number[] = [];
+    let extraStar: number | undefined = explicitStar;
+    for (const tok of tokens) {
+      const val = parseInt(tok, 10);
+      if (val >= 1 && val <= 90) {
+        if (nums.length < 6 && !nums.includes(val)) {
+          nums.push(val);
+        } else if (nums.length === 6 && extraStar === undefined) {
+          extraStar = val;
+        }
+      }
+    }
+
+    if (nums.length === 6) {
+      const col = buildGeneratedColumn(columns.length + 1, nums, extraStar);
+      if (col) {
+        columns.push(col);
+      }
+    }
+  }
+
+  return columns;
+}
+
+/**
+ * Creates a SavedPlay object from manual user entry (sestine, cost, optional winning)
+ */
+export function createManualSavedPlay(params: {
+  id?: string;
+  targetContestId: string;
+  columns: GeneratedColumn[];
+  cost: number;
+  winningAmount?: number;
+  savedAmount?: number;
+  status?: 'IN_ATTESA' | 'VERIFICATA';
+  manualNote?: string;
+  createdAt?: string;
+}): SavedPlay {
+  const normalizedColumns = params.columns.map((c, idx) => ({
+    ...c,
+    id: idx + 1,
+    numbers: [...c.numbers].sort((a, b) => a - b)
+  }));
+
+  const poolSet = new Set<number>();
+  for (const col of normalizedColumns) {
+    for (const n of col.numbers) {
+      poolSet.add(n);
+    }
+  }
+  const poolNumbers = Array.from(poolSet).sort((a, b) => a - b);
+
+  const safeCost = Math.max(0, Number((Number(params.cost) || 0).toFixed(2)));
+  const safeSaved = Math.max(0, Number((Number(params.savedAmount) || 0).toFixed(2)));
+  const safeWin = Math.max(0, Number((Number(params.winningAmount) || 0).toFixed(2)));
+
+  const effectiveStatus: 'IN_ATTESA' | 'VERIFICATA' =
+    params.status === 'VERIFICATA' || safeWin > 0 ? 'VERIFICATA' : 'IN_ATTESA';
+
+  let result: PlayResult | undefined = undefined;
+  if (effectiveStatus === 'VERIFICATA') {
+    const matchesPerColumn: ColumnMatchResult[] = normalizedColumns.map((col, idx) => ({
+      columnId: col.id,
+      numbers: col.numbers,
+      matchedNumbers: [],
+      matchCount: 0,
+      hasJolly: false,
+      hasSuperstar: false,
+      superstarPlayed: col.superstar,
+      prizeTier: idx === 0 && safeWin > 0 ? 'Vincita Manuale' : 'Esito Manuale',
+      estimatedPrize: idx === 0 ? safeWin : 0
+    }));
+
+    result = {
+      matchesPerColumn,
+      totalWinning: safeWin,
+      netReturn: Number((safeWin - safeCost).toFixed(2)),
+      bestMatch: 0,
+      hasWin: safeWin > 0,
+      verifiedAt: params.createdAt || new Date().toISOString(),
+      isManualWinning: true
+    };
+  }
+
+  return {
+    id: params.id || `play-manual-${Date.now()}`,
+    createdAt: params.createdAt || new Date().toISOString(),
+    targetContestId: (params.targetContestId || '').trim() || `${new Date().getFullYear()}-001`,
+    mode: 'manual',
+    cost: safeCost,
+    savedAmount: safeSaved,
+    poolNumbers,
+    columns: normalizedColumns,
+    status: effectiveStatus,
+    result,
+    manualNote: params.manualNote?.trim() || undefined
+  };
+}
+
+/**
+ * Updates an existing SavedPlay with a manually edited cost and/or winning amount
+ */
+export function applyManualCostAndWinning(
+  play: SavedPlay,
+  newCost: number,
+  manualWinning: number,
+  markVerified = true
+): SavedPlay {
+  const safeCost = Math.max(0, Number((Number(newCost) || 0).toFixed(2)));
+  const safeWin = Math.max(0, Number((Number(manualWinning) || 0).toFixed(2)));
+
+  if (!markVerified && safeWin === 0) {
+    return {
+      ...play,
+      cost: safeCost,
+      status: 'IN_ATTESA',
+      result: undefined
+    };
+  }
+
+  const existingMatches: ColumnMatchResult[] =
+    play.result && play.result.matchesPerColumn.length === play.columns.length
+      ? play.result.matchesPerColumn.map((m, idx) => ({
+          ...m,
+          prizeTier:
+            safeWin !== play.result?.totalWinning && idx === 0
+              ? safeWin > 0
+                ? 'Vincita Manuale'
+                : 'Nessun Punto'
+              : m.prizeTier,
+          estimatedPrize:
+            safeWin !== play.result?.totalWinning ? (idx === 0 ? safeWin : 0) : m.estimatedPrize
+        }))
+      : play.columns.map((col, idx) => ({
+          columnId: col.id,
+          numbers: col.numbers,
+          matchedNumbers: [],
+          matchCount: 0,
+          hasJolly: false,
+          hasSuperstar: false,
+          superstarPlayed: col.superstar,
+          prizeTier: idx === 0 && safeWin > 0 ? 'Vincita Manuale' : 'Esito Manuale',
+          estimatedPrize: idx === 0 ? safeWin : 0
+        }));
+
+  return {
+    ...play,
+    cost: safeCost,
+    status: 'VERIFICATA',
+    result: {
+      matchesPerColumn: existingMatches,
+      totalWinning: safeWin,
+      netReturn: Number((safeWin - safeCost).toFixed(2)),
+      bestMatch: play.result?.bestMatch || 0,
+      hasWin: safeWin > 0,
+      verifiedAt: new Date().toISOString(),
+      isManualWinning: true
+    }
   };
 }
 

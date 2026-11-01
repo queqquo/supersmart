@@ -10,7 +10,11 @@ import {
   greedyCoveringReduction,
   generateOptimizedSystem,
   parseExtractionText,
-  evaluatePlayedSystem
+  evaluatePlayedSystem,
+  buildGeneratedColumn,
+  parseManualSestineText,
+  createManualSavedPlay,
+  applyManualCostAndWinning
 } from './combinatorics';
 import { FilterOptions, Draw, GeneratedColumn } from '../types/lottery';
 
@@ -118,12 +122,50 @@ test('evaluatePlayedSystem correctly matches winning numbers and awards prizes',
     jolly: 40
   };
 
-  const evalResult = evaluatePlayedSystem(columns, dummyDraw);
+  const evalResult = evaluatePlayedSystem(columns, dummyDraw, 4.0);
   // Column 1 has 3 matches: 10, 20, 30. Plus jolly 40
   assert.equal(evalResult.matchesPerColumn[0].matchCount, 3);
   assert.equal(evalResult.matchesPerColumn[0].hasJolly, true);
   assert.equal(evalResult.matchesPerColumn[0].estimatedPrize, 25);
+  assert.equal(evalResult.netReturn, 21); // 25 - 4.0 customCost
   assert.equal(evalResult.hasWin, true);
+});
+
+test('buildGeneratedColumn, parseManualSestineText, createManualSavedPlay, and applyManualCostAndWinning work accurately', () => {
+  const col = buildGeneratedColumn(1, [88, 12, 5, 42, 31, 64], 77);
+  assert.ok(col !== null);
+  assert.deepEqual(col?.numbers, [5, 12, 31, 42, 64, 88]);
+  assert.equal(col?.superstar, 77);
+
+  // Reject duplicate or out-of-range
+  assert.equal(buildGeneratedColumn(1, [5, 5, 12, 31, 42, 64]), null);
+  assert.equal(buildGeneratedColumn(1, [5, 12, 31, 42, 64, 95]), null);
+
+  const parsedCols = parseManualSestineText('5 14 28 42 67 89 *45\n10, 20, 30, 40, 50, 60');
+  assert.equal(parsedCols.length, 2);
+  assert.deepEqual(parsedCols[0].numbers, [5, 14, 28, 42, 67, 89]);
+  assert.equal(parsedCols[0].superstar, 45);
+  assert.deepEqual(parsedCols[1].numbers, [10, 20, 30, 40, 50, 60]);
+
+  const manualPlay = createManualSavedPlay({
+    targetContestId: '2026-175',
+    columns: parsedCols,
+    cost: 3.5,
+    winningAmount: 25.0,
+    manualNote: 'Schedina bar'
+  });
+
+  assert.equal(manualPlay.mode, 'manual');
+  assert.equal(manualPlay.cost, 3.5);
+  assert.equal(manualPlay.status, 'VERIFICATA');
+  assert.equal(manualPlay.result?.totalWinning, 25.0);
+  assert.equal(manualPlay.result?.netReturn, 21.5);
+  assert.equal(manualPlay.manualNote, 'Schedina bar');
+
+  const updated = applyManualCostAndWinning(manualPlay, 5.0, 105.0, true);
+  assert.equal(updated.cost, 5.0);
+  assert.equal(updated.result?.totalWinning, 105.0);
+  assert.equal(updated.result?.netReturn, 100.0);
 });
 
 test('generateFullHistoricalDataset provides complete official archive from 2009 to October 2026 (all 18 years)', async () => {

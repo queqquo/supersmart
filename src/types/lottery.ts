@@ -87,21 +87,23 @@ export interface PlayResult {
   bestMatch: number;
   hasWin: boolean;
   verifiedAt: string;
+  isManualWinning?: boolean;
 }
 
-export type PlayMode = 'pure_coverage' | 'superstar';
+export type PlayMode = 'pure_coverage' | 'superstar' | 'manual';
 
 export interface SavedPlay {
   id: string;
   createdAt: string;
   targetContestId: string;
   mode: PlayMode;
-  cost: number; // 10.00 € or 9.00 €
+  cost: number; // e.g. 10.00 €, 9.00 €, or custom manual cost
   savedAmount: number; // 0.00 € or 1.00 € for piggybank
   poolNumbers: number[];
   columns: GeneratedColumn[];
   status: 'IN_ATTESA' | 'VERIFICATA';
   result?: PlayResult;
+  manualNote?: string;
 }
 
 export interface LedgerSummary {
