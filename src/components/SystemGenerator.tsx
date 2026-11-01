@@ -75,6 +75,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [manualPoolEdit, setManualPoolEdit] = useState(false);
+  const [recalcFeedback, setRecalcFeedback] = useState(false);
 
   // Calculate stats from draws
   const numberStatsMap = useMemo(() => {
@@ -85,6 +86,15 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   const scoredNumbers = useMemo(() => {
     return scoreAllNumbers(numberStatsMap, weights, 36);
   }, [numberStatsMap, weights]);
+
+  // Map number -> updated NumberStat with live compositeScore
+  const scoredByNumber = useMemo(() => {
+    const map: Record<number, NumberStat> = {};
+    for (const s of scoredNumbers) {
+      map[s.number] = s;
+    }
+    return map;
+  }, [scoredNumbers]);
 
   // Derive default top V pool
   const defaultTopVNumbers = useMemo(() => {
@@ -101,33 +111,44 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   // Slider handlers
   const handleWeightChange = (key: keyof ScoringWeights, val: number) => {
     const updated = { ...weights, [key]: Number(val.toFixed(2)) };
+    setManualPoolEdit(false);
     onUpdateWeights(updated);
     saveWeights(updated);
-    // If not manual editing, resetting manual mode so new weights take effect
-    if (!manualPoolEdit) {
-      // selectedPool will sync via useEffect
-    }
   };
 
   const handleResetWeights = () => {
+    setManualPoolEdit(false);
     onUpdateWeights(DEFAULT_WEIGHTS);
     saveWeights(DEFAULT_WEIGHTS);
-    setManualPoolEdit(false);
   };
 
   const handleApplyTripletWeights = (newWeights: ScoringWeights) => {
+    setManualPoolEdit(false);
     onUpdateWeights(newWeights);
     saveWeights(newWeights);
+  };
+
+  // Explicit "Ricalcola dai Pesi" action
+  const handleRecalculateFromWeights = () => {
+    const freshScored = scoreAllNumbers(numberStatsMap, weights, 36);
+    const freshTopV = freshScored
+      .slice(0, poolSizeV)
+      .map((s) => s.number)
+      .sort((a, b) => a - b);
     setManualPoolEdit(false);
+    setSelectedPool(freshTopV);
+    handleRunOptimization(freshTopV);
+    setRecalcFeedback(true);
+    setTimeout(() => setRecalcFeedback(false), 2500);
   };
 
   // Generate / Run Optimization
   const handleRunOptimization = (overridePool?: number[]) => {
     const targetCount = playMode === 'pure_coverage' ? 10 : 6;
     const poolToUse =
-      Array.isArray(overridePool) && overridePool.length > 0
+      Array.isArray(overridePool) && overridePool.length >= 6
         ? overridePool
-        : manualPoolEdit && selectedPool.length === poolSizeV
+        : manualPoolEdit && selectedPool.length >= 6
         ? selectedPool
         : defaultTopVNumbers;
 
@@ -424,57 +445,100 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
 
           {/* Section: Base Pool Preview (v numbers selected) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Layers className="w-5 h-5 text-amber-400" />
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">
                   Pool Base ({selectedPool.length} Numeri)
                 </h3>
+                {manualPoolEdit && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                    Personalizzato
+                  </span>
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setManualPoolEdit(false);
-                  setSelectedPool(defaultTopVNumbers);
-                }}
-                className="text-xs text-slate-400 hover:text-amber-300"
+                onClick={handleRecalculateFromWeights}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  recalcFeedback
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-slate-800/90 hover:bg-slate-800 text-amber-300 border-slate-700 hover:border-amber-500/40'
+                }`}
+                title="Ricalcola i migliori numeri in base agli slider w₁, w₂, w₃ attuali e rigenera le sestine"
               >
-                Ricalcola dai Pesi
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>{recalcFeedback ? 'Ricalcolato dai Pesi!' : 'Ricalcola dai Pesi'}</span>
               </button>
             </div>
 
-            {/* Balls of the selected pool */}
-            <div className="flex flex-wrap gap-2 p-3 bg-slate-950 rounded-xl border border-slate-800 min-h-[58px]">
+            {/* Balls of the selected pool with live S(x) score */}
+            <div className="flex flex-wrap gap-2.5 p-3 bg-slate-950 rounded-xl border border-slate-800 min-h-[68px]">
               {selectedPool.map((num) => {
-                const stat = numberStatsMap[num];
+                const stat = scoredByNumber[num] || numberStatsMap[num];
                 return (
                   <div
                     key={num}
                     onClick={() => toggleNumberInPool(num)}
-                    className="group relative cursor-pointer"
-                    title={`Numero ${num} | Score: ${stat?.compositeScore} | Ritardo: ${stat?.currentDelay} | Freq: ${stat?.frequencyK}`}
+                    className="group relative cursor-pointer flex flex-col items-center"
+                    title={`Numero ${num} | S(x): ${stat?.compositeScore?.toFixed(3)} | Rit: ${stat?.normalizedDelay?.toFixed(2)} (${stat?.currentDelay}/${stat?.maxHistoricalDelay}) | Freq(36): ${stat?.frequencyK} | Aff: ${stat?.affinityScore?.toFixed(2)}`}
                   >
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-extrabold text-sm flex items-center justify-center font-mono shadow-md border border-amber-300 group-hover:scale-110 transition-transform">
-                      {num}
+                    <div className="relative">
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-extrabold text-sm flex items-center justify-center font-mono shadow-md border border-amber-300 group-hover:scale-110 transition-transform">
+                        {num}
+                      </div>
+                      <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-700 text-[8px] font-bold text-slate-400 flex items-center justify-center">
+                        ×
+                      </span>
                     </div>
-                    <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-700 text-[8px] font-bold text-slate-400 flex items-center justify-center">
-                      ×
+                    <span className="text-[9px] font-mono text-slate-400 mt-1">
+                      {stat?.compositeScore !== undefined ? stat.compositeScore.toFixed(2) : ''}
                     </span>
                   </div>
                 );
               })}
             </div>
 
+            {/* Candidate replacement numbers if user removed a ball from the pool */}
+            {selectedPool.length < poolSizeV && (
+              <div className="p-2.5 rounded-xl bg-slate-950/80 border border-amber-500/30 space-y-1.5">
+                <div className="text-[10px] text-amber-300 font-semibold flex items-center justify-between">
+                  <span>
+                    Hai rimosso {poolSizeV - selectedPool.length} numero/i: clicca un candidato per aggiungerlo oppure clicca "Ricalcola dai Pesi"
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {scoredNumbers
+                    .filter((s) => !selectedPool.includes(s.number))
+                    .slice(0, 8)
+                    .map((s) => (
+                      <button
+                        key={s.number}
+                        type="button"
+                        onClick={() => toggleNumberInPool(s.number)}
+                        className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-500/40 text-xs font-mono font-bold text-slate-200 hover:text-amber-300 transition-colors cursor-pointer"
+                        title={`Aggiungi ${s.number} (Score S(x) = ${s.compositeScore.toFixed(3)})`}
+                      >
+                        +{s.number}{' '}
+                        <span className="text-[9px] text-slate-400">({s.compositeScore.toFixed(2)})</span>
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
+
             <div className="text-[11px] text-slate-400 flex items-center justify-between">
               <span>Combinazioni integrali C({selectedPool.length}, 6):</span>
               <span className="font-mono font-bold text-white">
-                {selectedPool.length === 12
-                  ? '924 sestine'
-                  : selectedPool.length === 10
-                  ? '210 sestine'
-                  : selectedPool.length === 15
-                  ? '5.005 sestine'
-                  : 'Calcolate al volo'}
+                {(() => {
+                  const n = selectedPool.length;
+                  if (n < 6) return '0 sestine';
+                  let res = 1;
+                  for (let i = 1; i <= 6; i++) {
+                    res = (res * (n - i + 1)) / i;
+                  }
+                  return `${Math.round(res).toLocaleString('it-IT')} sestine`;
+                })()}
               </span>
             </div>
           </div>
