@@ -14,7 +14,8 @@ import {
   buildGeneratedColumn,
   parseManualSestineText,
   createManualSavedPlay,
-  applyManualCostAndWinning
+  applyManualCostAndWinning,
+  calculateBudgetSystemAllocation
 } from './combinatorics';
 import { FilterOptions, Draw, GeneratedColumn } from '../types/lottery';
 
@@ -93,6 +94,46 @@ test('generateOptimizedSystem runs and outputs coverage metrics in <500ms', () =
   assert.ok(result.executionTimeMs < 500, `Execution time was ${result.executionTimeMs}ms, should be <500ms`);
   assert.equal(result.coverageMetrics.poolSize, 12);
   assert.ok(result.coverageMetrics.pairsCoveredCount > 0);
+});
+
+test('calculateBudgetSystemAllocation computes exact columns and caps free budget at 100€', () => {
+  // Pure coverage: 1€ per column
+  const b10 = calculateBudgetSystemAllocation(10, 'pure_coverage');
+  assert.equal(b10.targetColumnsCount, 10);
+  assert.equal(b10.actualCost, 10.0);
+  assert.equal(b10.savedAmount, 0.0);
+  assert.equal(b10.isCappedAtMax, false);
+
+  const b15 = calculateBudgetSystemAllocation(15, 'pure_coverage');
+  assert.equal(b15.targetColumnsCount, 15);
+  assert.equal(b15.actualCost, 15.0);
+
+  const b20 = calculateBudgetSystemAllocation(20, 'pure_coverage');
+  assert.equal(b20.targetColumnsCount, 20);
+  assert.equal(b20.actualCost, 20.0);
+
+  // Free budget capped at 100€
+  const b150 = calculateBudgetSystemAllocation(150, 'pure_coverage');
+  assert.equal(b150.isCappedAtMax, true);
+  assert.equal(b150.clampedBudget, 100);
+  assert.equal(b150.targetColumnsCount, 100);
+  assert.equal(b150.actualCost, 100.0);
+
+  // SuperStar mode: 1.50€ per column
+  const s10 = calculateBudgetSystemAllocation(10, 'superstar');
+  assert.equal(s10.targetColumnsCount, 6);
+  assert.equal(s10.actualCost, 9.0);
+  assert.equal(s10.savedAmount, 1.0);
+
+  const s15 = calculateBudgetSystemAllocation(15, 'superstar');
+  assert.equal(s15.targetColumnsCount, 10);
+  assert.equal(s15.actualCost, 15.0);
+  assert.equal(s15.savedAmount, 0.0);
+
+  const s20 = calculateBudgetSystemAllocation(20, 'superstar');
+  assert.equal(s20.targetColumnsCount, 13);
+  assert.equal(s20.actualCost, 19.5);
+  assert.equal(s20.savedAmount, 0.5);
 });
 
 test('parseExtractionText parses natural Italian lottery strings', () => {

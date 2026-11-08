@@ -37,7 +37,10 @@ import {
 import {
   calculateNumberStatistics,
   scoreAllNumbers,
-  generateOptimizedSystem
+  generateOptimizedSystem,
+  calculateBudgetSystemAllocation,
+  MAX_REDUCED_SYSTEM_BUDGET,
+  PRESET_SYSTEM_BUDGETS
 } from '../utils/combinatorics';
 import { runNext100DrawsSimulation } from '../utils/monteCarloSimulation';
 import { DEFAULT_WEIGHTS, DEFAULT_FILTERS, saveWeights, saveFilters } from '../utils/storage';
@@ -69,6 +72,10 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   // Config state
   const [poolSizeV, setPoolSizeV] = useState<number>(12); // v in [10, 15]
   const [playMode, setPlayMode] = useState<PlayMode>('pure_coverage');
+  const [budgetMode, setBudgetMode] = useState<'preset' | 'custom'>('preset');
+  const [selectedBudget, setSelectedBudget] = useState<number>(10);
+  const [customBudgetInput, setCustomBudgetInput] = useState<string>('25');
+  const [budgetCappedWarning, setBudgetCappedWarning] = useState<boolean>(false);
   const [selectedPool, setSelectedPool] = useState<number[]>([]);
   const [systemResult, setSystemResult] = useState<SystemGenerationResult | null>(null);
   const [copied, setCopied] = useState(false);
@@ -76,6 +83,74 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [manualPoolEdit, setManualPoolEdit] = useState(false);
   const [recalcFeedback, setRecalcFeedback] = useState(false);
+
+  // Calculate budget allocation (columns count, actual cost, piggybank remainder)
+  const budgetAllocation = useMemo(
+    () => calculateBudgetSystemAllocation(selectedBudget, playMode),
+    [selectedBudget, playMode]
+  );
+
+  const pureAllocationForBadge = useMemo(
+    () => calculateBudgetSystemAllocation(selectedBudget, 'pure_coverage'),
+    [selectedBudget]
+  );
+
+  const starAllocationForBadge = useMemo(
+    () => calculateBudgetSystemAllocation(selectedBudget, 'superstar'),
+    [selectedBudget]
+  );
+
+  const handleSelectPresetBudget = (preset: number) => {
+    setBudgetMode('preset');
+    setBudgetCappedWarning(false);
+    setSelectedBudget(preset);
+  };
+
+  const handleSelectCustomBudgetMode = () => {
+    setBudgetMode('custom');
+    const parsed = parseFloat(customBudgetInput.replace(',', '.'));
+    if (!Number.isNaN(parsed) && parsed >= 1) {
+      const capped = parsed > MAX_REDUCED_SYSTEM_BUDGET;
+      setBudgetCappedWarning(capped);
+      const clamped = Math.min(MAX_REDUCED_SYSTEM_BUDGET, Math.max(1, Math.round(parsed)));
+      setSelectedBudget(clamped);
+      if (capped) setCustomBudgetInput(String(MAX_REDUCED_SYSTEM_BUDGET));
+    } else {
+      setCustomBudgetInput(String(selectedBudget));
+    }
+  };
+
+  const handleCustomBudgetChange = (rawVal: string) => {
+    setCustomBudgetInput(rawVal);
+    const parsed = parseFloat(rawVal.replace(',', '.'));
+    if (Number.isNaN(parsed)) {
+      return;
+    }
+    if (parsed > MAX_REDUCED_SYSTEM_BUDGET) {
+      setBudgetCappedWarning(true);
+      setSelectedBudget(MAX_REDUCED_SYSTEM_BUDGET);
+    } else if (parsed >= 1) {
+      setBudgetCappedWarning(false);
+      setSelectedBudget(Math.round(parsed));
+    }
+  };
+
+  const handleCustomBudgetBlur = () => {
+    const parsed = parseFloat(customBudgetInput.replace(',', '.'));
+    if (Number.isNaN(parsed) || parsed < 1) {
+      setCustomBudgetInput('1');
+      setSelectedBudget(1);
+      setBudgetCappedWarning(false);
+    } else if (parsed > MAX_REDUCED_SYSTEM_BUDGET) {
+      setCustomBudgetInput(String(MAX_REDUCED_SYSTEM_BUDGET));
+      setSelectedBudget(MAX_REDUCED_SYSTEM_BUDGET);
+      setBudgetCappedWarning(true);
+    } else {
+      const rounded = Math.round(parsed);
+      setCustomBudgetInput(String(rounded));
+      setSelectedBudget(rounded);
+    }
+  };
 
   // Calculate stats from draws
   const numberStatsMap = useMemo(() => {
@@ -144,7 +219,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
 
   // Generate / Run Optimization
   const handleRunOptimization = (overridePool?: number[]) => {
-    const targetCount = playMode === 'pure_coverage' ? 10 : 6;
+    const targetCount = budgetAllocation.targetColumnsCount;
     const poolToUse =
       Array.isArray(overridePool) && overridePool.length >= 6
         ? overridePool
@@ -182,12 +257,12 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     ).weeklySystemPnL;
   }, [draws, systemResult]);
 
-  // Run on mount or when defaultTopVNumbers becomes available
+  // Run on mount or when defaultTopVNumbers, playMode, or budget changes
   useEffect(() => {
-    if (draws.length > 0 && defaultTopVNumbers.length >= poolSizeV) {
+    if (draws.length > 0 && defaultTopVNumbers.length >= 6) {
       handleRunOptimization(defaultTopVNumbers);
     }
-  }, [draws, defaultTopVNumbers, playMode]);
+  }, [draws, defaultTopVNumbers, playMode, budgetAllocation.targetColumnsCount]);
 
   // Save Play to Ledger
   const handleSaveToLedger = () => {
@@ -204,8 +279,8 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       createdAt: new Date().toISOString(),
       targetContestId: targetId,
       mode: playMode,
-      cost: playMode === 'pure_coverage' ? 10.0 : 9.0,
-      savedAmount: playMode === 'pure_coverage' ? 0.0 : 1.0,
+      cost: budgetAllocation.actualCost,
+      savedAmount: budgetAllocation.savedAmount,
       poolNumbers: systemResult.poolNumbers,
       columns: systemResult.columns,
       status: 'IN_ATTESA'
@@ -244,17 +319,17 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Banner / Budget Overview */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-amber-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+      {/* Top Banner / Budget Overview & Budget Selector */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-amber-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden space-y-4">
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 rounded-full blur-3xl -z-10 pointer-events-none" />
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                Budget 10,00 € / Settimana
+                Budget {budgetAllocation.clampedBudget.toFixed(2).replace('.', ',')} € / Settimana
               </span>
               <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                Covering Design C({poolSizeV}, 6, t, m)
+                Covering Design C({poolSizeV}, 6, t, {budgetAllocation.targetColumnsCount})
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">
@@ -273,33 +348,163 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               type="button"
               onClick={() => {
                 setPlayMode('pure_coverage');
-                setTimeout(() => handleRunOptimization(), 10);
               }}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 playMode === 'pure_coverage'
                   ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <span>Copertura Pura</span>
-              <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-950/20">10 Sestine (10€)</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-950/20">
+                {pureAllocationForBadge.targetColumnsCount}{' '}
+                {pureAllocationForBadge.targetColumnsCount === 1 ? 'Sestina' : 'Sestine'} (
+                {pureAllocationForBadge.actualCost.toFixed(0)}€)
+              </span>
             </button>
             <button
               type="button"
               onClick={() => {
                 setPlayMode('superstar');
-                setTimeout(() => handleRunOptimization(), 10);
               }}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 playMode === 'superstar'
                   ? 'bg-purple-600 text-white shadow-md font-extrabold'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <span>Modalità SuperStar</span>
-              <span className="px-1.5 py-0.2 rounded text-[10px] bg-black/20">6 Sestine (9€ + 1€)</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-black/20">
+                {starAllocationForBadge.targetColumnsCount}{' '}
+                {starAllocationForBadge.targetColumnsCount === 1 ? 'Sestina' : 'Sestine'} (
+                {starAllocationForBadge.actualCost.toFixed(2).replace('.00', '')}€
+                {starAllocationForBadge.savedAmount > 0
+                  ? ` + ${starAllocationForBadge.savedAmount.toFixed(2).replace('.00', '')}€`
+                  : ''}
+                )
+              </span>
             </button>
           </div>
+        </div>
+
+        {/* Budget Selection Bar: 10€, 15€, 20€, or Scelta Libera (max 100€) */}
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1 mr-1">
+              <DollarSign className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Budget Sistema Ridotto:</span>
+            </span>
+
+            {PRESET_SYSTEM_BUDGETS.map((preset) => {
+              const isSelected = budgetMode === 'preset' && selectedBudget === preset;
+              const presetCols =
+                playMode === 'pure_coverage' ? preset : Math.floor(preset / 1.5);
+              return (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => handleSelectPresetBudget(preset)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold cursor-pointer flex items-center gap-1.5 border shrink-0 ${
+                    isSelected
+                      ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md shadow-amber-500/20 font-extrabold'
+                      : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-amber-500/40 hover:text-amber-300'
+                  }`}
+                >
+                  <span>{preset} €</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded ${
+                      isSelected
+                        ? 'bg-slate-950/20 text-slate-950 font-extrabold'
+                        : 'bg-slate-900 text-slate-400'
+                    }`}
+                  >
+                    {presetCols} col.
+                  </span>
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={handleSelectCustomBudgetMode}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 border shrink-0 ${
+                budgetMode === 'custom'
+                  ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md shadow-amber-500/20 font-extrabold'
+                  : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-amber-500/40 hover:text-amber-300'
+              }`}
+            >
+              <span>Scelta Libera (max {MAX_REDUCED_SYSTEM_BUDGET} €)</span>
+            </button>
+          </div>
+
+          {/* Custom Budget Input + Slider (when Scelta Libera is selected) or Summary */}
+          {budgetMode === 'custom' ? (
+            <div className="flex flex-wrap items-center gap-2.5 bg-slate-950/90 px-3.5 py-2 rounded-xl border border-amber-500/40">
+              <label
+                htmlFor="custom-budget-input"
+                className="text-xs font-bold text-amber-300 whitespace-nowrap"
+              >
+                Budget Libero (€):
+              </label>
+              <input
+                id="custom-budget-input"
+                type="number"
+                min={1}
+                max={MAX_REDUCED_SYSTEM_BUDGET}
+                step={1}
+                value={customBudgetInput}
+                onChange={(e) => handleCustomBudgetChange(e.target.value)}
+                onBlur={handleCustomBudgetBlur}
+                aria-label="Importo budget libero (max 100€)"
+                className="w-20 rounded-lg bg-slate-900 border border-amber-500/50 px-2.5 py-1 text-center font-mono font-extrabold text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <input
+                type="range"
+                min={1}
+                max={MAX_REDUCED_SYSTEM_BUDGET}
+                step={1}
+                value={budgetAllocation.clampedBudget}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCustomBudgetInput(val);
+                  setBudgetCappedWarning(false);
+                  setSelectedBudget(parseInt(val, 10) || 10);
+                }}
+                aria-label="Slider budget libero (1-100€)"
+                className="w-28 sm:w-36 h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              />
+              <span className="text-xs font-mono text-slate-300 whitespace-nowrap">
+                &rarr;{' '}
+                <strong className="text-amber-400">
+                  {budgetAllocation.targetColumnsCount}{' '}
+                  {budgetAllocation.targetColumnsCount === 1 ? 'sestina' : 'sestine'}
+                </strong>{' '}
+                ({budgetAllocation.actualCost.toFixed(2).replace('.', ',')} €)
+              </span>
+              {budgetCappedWarning && (
+                <span className="text-[11px] font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
+                  Limitato al massimo di {MAX_REDUCED_SYSTEM_BUDGET} €
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="text-xs font-mono text-slate-400 flex items-center gap-2 shrink-0">
+              <span>
+                Sviluppo attivo:{' '}
+                <strong className="text-amber-400">
+                  {budgetAllocation.targetColumnsCount} colonne ridotte
+                </strong>{' '}
+                (Costo:{' '}
+                <strong className="text-white">
+                  {budgetAllocation.actualCost.toFixed(2).replace('.', ',')} €
+                </strong>
+                {budgetAllocation.savedAmount > 0
+                  ? ` + ${budgetAllocation.savedAmount.toFixed(2).replace('.', ',')} € salvadanaio`
+                  : ''}
+                )
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -652,7 +857,11 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
             className="w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 font-extrabold text-base shadow-xl shadow-amber-500/25 hover:from-amber-400 hover:to-amber-300 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border border-amber-300/40"
           >
             <Sparkles className="w-5 h-5 fill-slate-950" />
-            <span>Calcola Sistema Ottimizzato (10,00 €)</span>
+            <span>
+              Calcola Sistema Ottimizzato ({budgetAllocation.actualCost.toFixed(2).replace('.', ',')} € &bull;{' '}
+              {budgetAllocation.targetColumnsCount}{' '}
+              {budgetAllocation.targetColumnsCount === 1 ? 'Sestina' : 'Sestine'})
+            </span>
           </button>
         </div>
 
@@ -717,17 +926,23 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                   <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800">
                     <span className="text-[10px] text-slate-400 block uppercase font-medium">Costo Giocata</span>
                     <span className="text-base font-bold text-white font-mono">
-                      {playMode === 'pure_coverage' ? '10,00 €' : '9,00 €'}
+                      {budgetAllocation.actualCost.toFixed(2).replace('.', ',')} €
                     </span>
                     <span className="text-[10px] text-amber-400 block">
-                      {playMode === 'pure_coverage' ? '10 x 1,00€' : '+ 1€ salvadanaio'}
+                      {playMode === 'pure_coverage'
+                        ? `${budgetAllocation.targetColumnsCount} x 1,00€`
+                        : `${budgetAllocation.targetColumnsCount} x 1,50€${
+                            budgetAllocation.savedAmount > 0
+                              ? ` (+${budgetAllocation.savedAmount.toFixed(2).replace('.', ',')}€ salv.)`
+                              : ''
+                          }`}
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* The Columns: Schedina View */}
-              <div className="space-y-2.5">
+              <div className="space-y-2.5 max-h-[580px] overflow-y-auto pr-1">
                 {systemResult.columns.map((col) => (
                   <div
                     key={col.id}
@@ -892,7 +1107,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                 >
                   {savedSuccess ? <Check className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
                   <span>
-                    {savedSuccess ? 'Giocata Salvata con Successo!' : 'Registra Giocata Settimanale (10,00 €)'}
+                    {savedSuccess
+                      ? 'Giocata Salvata con Successo!'
+                      : `Registra Giocata Settimanale (${budgetAllocation.actualCost.toFixed(2).replace('.', ',')} €)`}
                   </span>
                 </button>
               </div>
@@ -904,7 +1121,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               </div>
               <h3 className="text-base font-bold text-white">Pronto per il Calcolo Combinatorio</h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Fai clic su "Calcola Sistema Ottimizzato" per sviluppare le combinazioni ortogonali a 10 colonne nel rispetto del budget di 10,00 €.
+                Fai clic su "Calcola Sistema Ottimizzato" per sviluppare le combinazioni ortogonali a{' '}
+                {budgetAllocation.targetColumnsCount} colonne nel rispetto del budget di{' '}
+                {budgetAllocation.clampedBudget.toFixed(2).replace('.', ',')} €.
               </p>
               <button
                 type="button"

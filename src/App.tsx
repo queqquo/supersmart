@@ -413,7 +413,7 @@ export default function App() {
             <span>&bull;</span>
             <span>Covering Design C(v, 6)</span>
             <span>&bull;</span>
-            <span className="text-amber-400 font-bold">Budget: 10,00 € / sett.</span>
+            <span className="text-amber-400 font-bold">Budget: 10€ / 15€ / 20€ / max 100€</span>
           </div>
         </div>
       </footer>

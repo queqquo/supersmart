@@ -12,7 +12,8 @@ import {
   SystemGenerationResult,
   ColumnMatchResult,
   PlayResult,
-  SavedPlay
+  SavedPlay,
+  PlayMode
 } from '../types/lottery';
 
 /**
@@ -628,8 +629,12 @@ export function evaluatePlayedSystem(
     });
   }
 
-  // System cost: use customCost if provided, else pure_coverage is 10€, superstar is 9€
-  const cost = customCost !== undefined ? customCost : columns.length === 6 ? 9.0 : 10.0;
+  // System cost: use customCost if provided, else 1.50€ per column with SuperStar or 1.00€ per pure column
+  const hasSuperstarCols = columns.some((c) => c.superstar !== undefined);
+  const cost =
+    customCost !== undefined
+      ? customCost
+      : Number((columns.length * (hasSuperstarCols ? 1.5 : 1.0)).toFixed(2));
   const netReturn = Number((totalWinning - cost).toFixed(2));
 
   return {
@@ -639,6 +644,51 @@ export function evaluatePlayedSystem(
     bestMatch,
     hasWin: totalWinning > 0,
     verifiedAt: new Date().toISOString()
+  };
+}
+
+export const MAX_REDUCED_SYSTEM_BUDGET = 100;
+export const MIN_REDUCED_SYSTEM_BUDGET = 1;
+export const PRESET_SYSTEM_BUDGETS = [10, 15, 20] as const;
+
+export interface BudgetSystemAllocation {
+  requestedBudget: number;
+  clampedBudget: number;
+  isCappedAtMax: boolean;
+  unitCost: number;
+  targetColumnsCount: number;
+  actualCost: number;
+  savedAmount: number;
+}
+
+/**
+ * Calculates the reduced system columns count, actual play cost, and piggybank remainder
+ * for a given budget (10€, 15€, 20€, or custom free budget capped at 100€).
+ */
+export function calculateBudgetSystemAllocation(
+  budgetEuro: number,
+  playMode: PlayMode = 'pure_coverage'
+): BudgetSystemAllocation {
+  const parsed = Number(budgetEuro);
+  const raw = Number.isFinite(parsed) ? parsed : 10;
+  const minBudget = playMode === 'superstar' ? 1.5 : MIN_REDUCED_SYSTEM_BUDGET;
+  const isCappedAtMax = raw > MAX_REDUCED_SYSTEM_BUDGET;
+  const clampedBudget = Number(
+    Math.min(MAX_REDUCED_SYSTEM_BUDGET, Math.max(minBudget, raw)).toFixed(2)
+  );
+  const unitCost = playMode === 'superstar' ? 1.5 : 1.0;
+  const targetColumnsCount = Math.max(1, Math.floor((clampedBudget + 1e-9) / unitCost));
+  const actualCost = Number((targetColumnsCount * unitCost).toFixed(2));
+  const savedAmount = Number(Math.max(0, clampedBudget - actualCost).toFixed(2));
+
+  return {
+    requestedBudget: raw,
+    clampedBudget,
+    isCappedAtMax,
+    unitCost,
+    targetColumnsCount,
+    actualCost,
+    savedAmount
   };
 }
 

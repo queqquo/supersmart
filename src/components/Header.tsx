@@ -59,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-slate-400 hidden sm:block font-medium">
-                Combinatorial Optimizer &bull; Budget 10,00 € / Sett.
+                Combinatorial Optimizer &bull; Sistema Ridotto 10€&ndash;100€ / Sett.
               </span>
             </div>
           </div>
