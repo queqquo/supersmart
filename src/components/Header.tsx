@@ -136,7 +136,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <Dices className="w-4 h-4" />
-            <span>Simulazione 100 Estrazioni</span>
+            <span>Simulazione 100&ndash;100k Estrazioni</span>
           </button>
 
           <button

@@ -104,3 +104,58 @@ test('calculateWeeklySestineExpectedPnL computes exact mean of gains and losses 
   // Mean Single Draw Net per Sestina = 8.00 / 2 = 4.00 €
   assert.equal(summary.meanSingleDrawNetPerSestina, 4);
 });
+
+test('runNext100DrawsSimulation supports 100 to 100,000 draws with clamping and derives generator parameters', () => {
+  const sampleColumns: GeneratedColumn[] = [
+    { id: 1, numbers: [8, 19, 28, 38, 56, 77], sum: 226, evens: 4, odds: 2, lows: 4, highs: 2 },
+    { id: 2, numbers: [12, 23, 34, 45, 67, 81], sum: 262, evens: 2, odds: 4, lows: 4, highs: 2 }
+  ];
+
+  // Test clamping below 100 -> 100
+  const lowClamped = runNext100DrawsSimulation(
+    INITIAL_HISTORICAL_DRAWS,
+    sampleColumns,
+    'bayesian_hybrid_urn',
+    12345,
+    10
+  );
+  assert.equal(lowClamped.totalSimulatedDrawsCount, 100);
+  assert.equal(lowClamped.weeklySystemPnL.drawsCount, 100);
+
+  // Test 100,000 draws (and clamping above 100,000 -> 100,000)
+  const highSim = runNext100DrawsSimulation(
+    INITIAL_HISTORICAL_DRAWS,
+    sampleColumns,
+    'bayesian_hybrid_urn',
+    99999,
+    150000
+  );
+  assert.equal(highSim.totalSimulatedDrawsCount, 100000);
+  assert.equal(highSim.weeklySystemPnL.drawsCount, 100000);
+  assert.equal(highSim.highProbabilitySestina.simulatedBacktestPnL.totalDrawsEvaluated, 100000);
+  assert.equal(highSim.simulatedDraws.length, 500); // Bounded materialized log table
+
+  // Verify sum of all 90 frequencies equals 100,000 * 6 = 600,000
+  const totalMainBallsDrawn = Object.values(highSim.numberFrequenciesInSim).reduce(
+    (acc, c) => acc + c,
+    0
+  );
+  assert.equal(totalMainBallsDrawn, 600000);
+
+  // Verify top12PoolNumbers and recommendedWeights for copying to SystemGenerator
+  assert.equal(highSim.top12PoolNumbers.length, 12);
+  for (const num of highSim.highProbabilitySestina.numbers) {
+    assert.ok(
+      highSim.top12PoolNumbers.includes(num),
+      `High-probability number ${num} must be present in top12PoolNumbers`
+    );
+  }
+  assert.ok(highSim.recommendedWeights.wDelay >= 0.1 && highSim.recommendedWeights.wDelay <= 1.0);
+  assert.ok(
+    highSim.recommendedWeights.wFrequency >= 0.1 && highSim.recommendedWeights.wFrequency <= 1.0
+  );
+  assert.ok(
+    highSim.recommendedWeights.wAffinity >= 0.1 && highSim.recommendedWeights.wAffinity <= 1.0
+  );
+});
+

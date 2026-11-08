@@ -32,7 +32,8 @@ import {
   SystemGenerationResult,
   SavedPlay,
   NumberStat,
-  GeneratedColumn
+  GeneratedColumn,
+  SimulationGeneratorPreset
 } from '../types/lottery';
 import {
   calculateNumberStatistics,
@@ -40,7 +41,8 @@ import {
   generateOptimizedSystem,
   calculateBudgetSystemAllocation,
   MAX_REDUCED_SYSTEM_BUDGET,
-  PRESET_SYSTEM_BUDGETS
+  PRESET_SYSTEM_BUDGETS,
+  buildGeneratedColumn
 } from '../utils/combinatorics';
 import { runNext100DrawsSimulation } from '../utils/monteCarloSimulation';
 import { DEFAULT_WEIGHTS, DEFAULT_FILTERS, saveWeights, saveFilters } from '../utils/storage';
@@ -56,6 +58,8 @@ interface SystemGeneratorProps {
   onOpenSmartPaste: () => void;
   onColumnsGenerated?: (columns: GeneratedColumn[]) => void;
   onOpenSimulationTab?: () => void;
+  appliedSimPreset?: SimulationGeneratorPreset | null;
+  onClearSimPreset?: () => void;
 }
 
 export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
@@ -67,7 +71,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   onSavePlay,
   onOpenSmartPaste,
   onColumnsGenerated,
-  onOpenSimulationTab
+  onOpenSimulationTab,
+  appliedSimPreset,
+  onClearSimPreset
 }) => {
   // Config state
   const [poolSizeV, setPoolSizeV] = useState<number>(12); // v in [10, 15]
@@ -76,12 +82,18 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   const [selectedBudget, setSelectedBudget] = useState<number>(10);
   const [customBudgetInput, setCustomBudgetInput] = useState<string>('25');
   const [budgetCappedWarning, setBudgetCappedWarning] = useState<boolean>(false);
-  const [selectedPool, setSelectedPool] = useState<number[]>([]);
+  const [selectedPool, setSelectedPool] = useState<number[]>(() =>
+    appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6
+      ? appliedSimPreset.top12PoolNumbers
+      : []
+  );
   const [systemResult, setSystemResult] = useState<SystemGenerationResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [manualPoolEdit, setManualPoolEdit] = useState(false);
+  const [manualPoolEdit, setManualPoolEdit] = useState(
+    () => Boolean(appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6)
+  );
   const [recalcFeedback, setRecalcFeedback] = useState(false);
 
   // Calculate budget allocation (columns count, actual cost, piggybank remainder)
@@ -211,14 +223,19 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       .map((s) => s.number)
       .sort((a, b) => a - b);
     setManualPoolEdit(false);
+    onClearSimPreset?.();
     setSelectedPool(freshTopV);
-    handleRunOptimization(freshTopV);
+    handleRunOptimization(freshTopV, null);
     setRecalcFeedback(true);
     setTimeout(() => setRecalcFeedback(false), 2500);
   };
 
   // Generate / Run Optimization
-  const handleRunOptimization = (overridePool?: number[]) => {
+  const handleRunOptimization = (
+    overridePool?: number[],
+    pinnedFirstSestina?: number[] | null,
+    pinnedSuperstar?: number
+  ) => {
     const targetCount = budgetAllocation.targetColumnsCount;
     const poolToUse =
       Array.isArray(overridePool) && overridePool.length >= 6
@@ -241,6 +258,42 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       playMode === 'superstar' ? superstarPool : undefined
     );
 
+    // If a simulation preset is active (or pinnedFirstSestina provided), ensure Colonna #1 is the High-Probability Sestina
+    const activePinnedSestina =
+      pinnedFirstSestina !== undefined
+        ? pinnedFirstSestina
+        : appliedSimPreset
+        ? appliedSimPreset.highProbabilityNumbers
+        : null;
+    const activePinnedSuperstar =
+      pinnedSuperstar !== undefined
+        ? pinnedSuperstar
+        : appliedSimPreset?.recommendedSuperstar;
+
+    if (activePinnedSestina && activePinnedSestina.length === 6 && result.columns.length > 0) {
+      const pinnedKey = [...activePinnedSestina].sort((a, b) => a - b).join('-');
+      const existingIdx = result.columns.findIndex(
+        (c) => [...c.numbers].sort((a, b) => a - b).join('-') === pinnedKey
+      );
+      const firstCol = buildGeneratedColumn(
+        1,
+        activePinnedSestina,
+        playMode === 'superstar' ? activePinnedSuperstar : undefined
+      );
+
+      if (firstCol) {
+        let updatedCols: GeneratedColumn[];
+        if (existingIdx >= 0) {
+          const others = result.columns.filter((_, idx) => idx !== existingIdx);
+          updatedCols = [firstCol, ...others].map((c, idx) => ({ ...c, id: idx + 1 }));
+        } else {
+          const others = result.columns.slice(0, Math.max(0, targetCount - 1));
+          updatedCols = [firstCol, ...others].map((c, idx) => ({ ...c, id: idx + 1 }));
+        }
+        result.columns = updatedCols;
+      }
+    }
+
     setSystemResult(result);
     onColumnsGenerated?.(result.columns);
     setSavedSuccess(false);
@@ -257,10 +310,32 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     ).weeklySystemPnL;
   }, [draws, systemResult]);
 
+  // Apply imported simulation preset when provided
+  useEffect(() => {
+    if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
+      setPoolSizeV(appliedSimPreset.top12PoolNumbers.length);
+      setManualPoolEdit(true);
+      setSelectedPool(appliedSimPreset.top12PoolNumbers);
+      handleRunOptimization(
+        appliedSimPreset.top12PoolNumbers,
+        appliedSimPreset.highProbabilityNumbers,
+        appliedSimPreset.recommendedSuperstar
+      );
+    }
+  }, [appliedSimPreset]);
+
   // Run on mount or when defaultTopVNumbers, playMode, or budget changes
   useEffect(() => {
-    if (draws.length > 0 && defaultTopVNumbers.length >= 6) {
-      handleRunOptimization(defaultTopVNumbers);
+    if (draws.length > 0) {
+      if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
+        handleRunOptimization(
+          appliedSimPreset.top12PoolNumbers,
+          appliedSimPreset.highProbabilityNumbers,
+          appliedSimPreset.recommendedSuperstar
+        );
+      } else if (defaultTopVNumbers.length >= 6) {
+        handleRunOptimization(defaultTopVNumbers);
+      }
     }
   }, [draws, defaultTopVNumbers, playMode, budgetAllocation.targetColumnsCount]);
 
@@ -319,6 +394,44 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Banner when High-Probability Sestina & Parameters are imported from Monte Carlo Simulation */}
+      {appliedSimPreset && (
+        <div className="bg-gradient-to-r from-emerald-950/80 via-slate-900 to-amber-950/50 border-2 border-emerald-500/50 rounded-2xl p-4 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase tracking-wider bg-emerald-500 text-slate-950 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" />
+                Parametri & Sestina Importati dalla Simulazione (
+                {appliedSimPreset.simulatedDrawsCount.toLocaleString('it-IT')} Estrazioni)
+              </span>
+              <span className="text-xs font-mono text-amber-300 font-bold">
+                Colonna #01 Fissata: {appliedSimPreset.highProbabilityNumbers.join(' - ')} (★
+                {appliedSimPreset.recommendedSuperstar})
+              </span>
+            </div>
+            <p className="text-xs text-slate-300">
+              Pool Top 12 applicato ({appliedSimPreset.top12PoolNumbers.join(', ')}) e pesi S(x)
+              impostati a{' '}
+              <strong className="text-white font-mono">
+                w₁={appliedSimPreset.recommendedWeights.wDelay.toFixed(2)}, w₂=
+                {appliedSimPreset.recommendedWeights.wFrequency.toFixed(2)}, w₃=
+                {appliedSimPreset.recommendedWeights.wAffinity.toFixed(2)}
+              </strong>
+              .
+            </p>
+          </div>
+          {onClearSimPreset && (
+            <button
+              type="button"
+              onClick={handleRecalculateFromWeights}
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold shrink-0 cursor-pointer"
+            >
+              Ripristina Pool da Storico
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Top Banner / Budget Overview & Budget Selector */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-amber-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden space-y-4">
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 rounded-full blur-3xl -z-10 pointer-events-none" />

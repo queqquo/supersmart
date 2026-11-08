@@ -168,10 +168,14 @@ export interface WeeklySestinePnLSummary {
 
 export interface HundredDrawsSimulationResult {
   methodology: SimulationMethodology;
-  simulatedDraws: Draw[]; // 100 simulated future draws
-  numberFrequenciesInSim: Record<number, number>; // 1..90 -> count in 100 draws
+  totalSimulatedDrawsCount: number; // 100 to 100,000 simulated draws
+  simulatedDraws: Draw[]; // Materialized simulated future draws for log table (up to 500)
+  numberFrequenciesInSim: Record<number, number>; // 1..90 -> count in N draws
   jollyFrequenciesInSim: Record<number, number>;
   superstarFrequenciesInSim: Record<number, number>;
+  top12PoolNumbers: number[];
+  recommendedWeights: ScoringWeights;
+  recommendedFilters: FilterOptions;
   highProbabilitySestina: {
     numbers: [number, number, number, number, number, number];
     recommendedJolly: number;
@@ -186,6 +190,20 @@ export interface HundredDrawsSimulationResult {
   };
   weeklySystemPnL: WeeklySestinePnLSummary;
   executionTimeMs: number;
+}
+
+export interface SimulationGeneratorPreset {
+  id: string;
+  appliedAt: string;
+  simulatedDrawsCount: number;
+  methodology: SimulationMethodology;
+  highProbabilityNumbers: [number, number, number, number, number, number];
+  recommendedJolly: number;
+  recommendedSuperstar: number;
+  top12PoolNumbers: number[];
+  recommendedWeights: ScoringWeights;
+  recommendedFilters: FilterOptions;
+  confidenceIndex: number;
 }
 
 export type HistoricalSelectionMode = 'strict_net_profit' | 'historical_benchmark_surplus';

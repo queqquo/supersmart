@@ -9,15 +9,30 @@ import {
   SimulationMethodology,
   SingleSestinaPnL,
   WeeklySestinePnLSummary,
-  HundredDrawsSimulationResult
+  HundredDrawsSimulationResult,
+  ScoringWeights,
+  FilterOptions
 } from '../types/lottery';
 import {
   generateCombinations,
   checkEvenOdd,
   checkHighLow,
   checkSumRange,
-  checkConsecutiveAndDecades
+  checkConsecutiveAndDecades,
+  calculateNumberStatistics
 } from './combinatorics';
+
+export const MIN_SIMULATION_DRAWS = 100;
+export const MAX_SIMULATION_DRAWS = 100000;
+export const MAX_LOGGED_SIMULATED_DRAWS = 500;
+export const PRESET_SIMULATION_COUNTS = [100, 1000, 5000, 10000, 50000, 100000] as const;
+
+export function clampSimulationDrawsCount(count: number): number {
+  if (!Number.isFinite(count) || Number.isNaN(count)) {
+    return MIN_SIMULATION_DRAWS;
+  }
+  return Math.min(MAX_SIMULATION_DRAWS, Math.max(MIN_SIMULATION_DRAWS, Math.round(count)));
+}
 
 /**
  * Seedable PRNG (Mulberry32) for reproducible or stochastic physical urn simulations
@@ -33,57 +48,29 @@ export function createPRNG(seed: number): () => number {
 }
 
 /**
- * Weighted sampling without replacement from an urn of balls (Efraimidis-Spirakis / sequential physical urn)
+ * Compute official SuperEnalotto average payout given matchCount, hasJolly, hasSuperstar
  */
-function sampleWeightedWithoutReplacement(
-  balls: number[],
-  weights: Record<number, number>,
-  count: number,
-  rng: () => number
-): number[] {
-  const pool = [...balls];
-  const selected: number[] = [];
-
-  for (let k = 0; k < count && pool.length > 0; k++) {
-    let totalW = 0;
-    for (let i = 0; i < pool.length; i++) {
-      totalW += Math.max(weights[pool[i]] ?? 1, 0.0001);
-    }
-
-    let r = rng() * totalW;
-    let chosenIdx = pool.length - 1;
-    for (let i = 0; i < pool.length; i++) {
-      r -= Math.max(weights[pool[i]] ?? 1, 0.0001);
-      if (r <= 0) {
-        chosenIdx = i;
-        break;
-      }
-    }
-
-    selected.push(pool[chosenIdx]);
-    pool.splice(chosenIdx, 1);
+function computeOfficialPrize(
+  matchCount: number,
+  hasJolly: boolean,
+  hasSuperstar: boolean
+): number {
+  if (matchCount === 6) {
+    return hasSuperstar ? 2500000 : 1500000;
+  } else if (matchCount === 5 && hasJolly) {
+    return hasSuperstar ? 650000 : 350000;
+  } else if (matchCount === 5) {
+    return hasSuperstar ? 100000 : 32000;
+  } else if (matchCount === 4) {
+    return hasSuperstar ? 30000 : 300;
+  } else if (matchCount === 3) {
+    return hasSuperstar ? 2500 : 25;
+  } else if (matchCount === 2) {
+    return hasSuperstar ? 100 : 5;
+  } else if (hasSuperstar) {
+    return matchCount === 1 ? 10 : 5;
   }
-
-  return selected;
-}
-
-/**
- * Pure physical hypergeometric urn shuffle (Fisher-Yates) without replacement
- */
-function sampleUniformWithoutReplacement(
-  balls: number[],
-  count: number,
-  rng: () => number
-): number[] {
-  const urn = [...balls];
-  // Physical mixing shuffle (Fisher-Yates)
-  for (let i = urn.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const temp = urn[i];
-    urn[i] = urn[j];
-    urn[j] = temp;
-  }
-  return urn.slice(0, count);
+  return 0;
 }
 
 /**
@@ -98,37 +85,33 @@ export function evaluateSingleColumnOnDraw(
   hasSuperstar: boolean;
   prize: number;
 } {
-  const drawSet = new Set(draw.numbers);
+  const d0 = draw.numbers[0];
+  const d1 = draw.numbers[1];
+  const d2 = draw.numbers[2];
+  const d3 = draw.numbers[3];
+  const d4 = draw.numbers[4];
+  const d5 = draw.numbers[5];
+
   let matchCount = 0;
+  let hasJolly = false;
+  const jolly = draw.jolly;
+
   for (let i = 0; i < col.numbers.length; i++) {
-    if (drawSet.has(col.numbers[i])) {
+    const n = col.numbers[i];
+    if (n === d0 || n === d1 || n === d2 || n === d3 || n === d4 || n === d5) {
       matchCount++;
+    }
+    if (n === jolly) {
+      hasJolly = true;
     }
   }
 
-  const hasJolly = col.numbers.includes(draw.jolly);
   const hasSuperstar =
     col.superstar !== undefined &&
     draw.superstar !== undefined &&
     col.superstar === draw.superstar;
 
-  // Official SuperEnalotto average payout structure (excluding outlier 50M jackpot spikes to avoid distorting expected value, or realistic expected 6-point payout)
-  let prize = 0;
-  if (matchCount === 6) {
-    prize = hasSuperstar ? 2500000 : 1500000;
-  } else if (matchCount === 5 && hasJolly) {
-    prize = hasSuperstar ? 650000 : 350000;
-  } else if (matchCount === 5) {
-    prize = hasSuperstar ? 100000 : 32000;
-  } else if (matchCount === 4) {
-    prize = hasSuperstar ? 30000 : 300;
-  } else if (matchCount === 3) {
-    prize = hasSuperstar ? 2500 : 25;
-  } else if (matchCount === 2) {
-    prize = hasSuperstar ? 100 : 5;
-  } else if (hasSuperstar) {
-    prize = matchCount === 1 ? 10 : 5;
-  }
+  const prize = computeOfficialPrize(matchCount, hasJolly, hasSuperstar);
 
   return {
     matchCount,
@@ -163,30 +146,47 @@ export function evaluateSingleSestinaPnL(
     superstarHits: 0
   };
 
-  for (let i = 0; i < drawsToEvaluate.length; i++) {
-    const draw = drawsToEvaluate[i];
-    const outcome = evaluateSingleColumnOnDraw(column, draw);
+  const mask = new Uint8Array(91);
+  for (let i = 0; i < column.numbers.length; i++) {
+    const num = column.numbers[i];
+    if (num >= 1 && num <= 90) mask[num] = 1;
+  }
+  const colSuperstar = column.superstar ?? -1;
 
-    totalGrossGain += outcome.prize;
-    // Unrecovered cost on this draw
-    const drawLoss = Math.max(0, costPerDraw - outcome.prize);
+  for (let i = 0; i < totalDrawsEvaluated; i++) {
+    const draw = drawsToEvaluate[i];
+    const nums = draw.numbers;
+    const matchCount =
+      mask[nums[0]] +
+      mask[nums[1]] +
+      mask[nums[2]] +
+      mask[nums[3]] +
+      mask[nums[4]] +
+      mask[nums[5]];
+    const hasJolly = mask[draw.jolly] === 1;
+    const hasSuperstar = colSuperstar > 0 && draw.superstar === colSuperstar;
+
+    const prize = computeOfficialPrize(matchCount, hasJolly, hasSuperstar);
+
+    totalGrossGain += prize;
+    const drawLoss = costPerDraw > prize ? costPerDraw - prize : 0;
     totalGrossLoss += drawLoss;
 
-    if (outcome.hasSuperstar) {
+    if (hasSuperstar) {
       hitsBreakdown.superstarHits++;
     }
 
-    if (outcome.matchCount === 6) {
+    if (matchCount === 6) {
       hitsBreakdown.points6++;
-    } else if (outcome.matchCount === 5 && outcome.hasJolly) {
+    } else if (matchCount === 5 && hasJolly) {
       hitsBreakdown.points5plus1++;
-    } else if (outcome.matchCount === 5) {
+    } else if (matchCount === 5) {
       hitsBreakdown.points5++;
-    } else if (outcome.matchCount === 4) {
+    } else if (matchCount === 4) {
       hitsBreakdown.points4++;
-    } else if (outcome.matchCount === 3) {
+    } else if (matchCount === 3) {
       hitsBreakdown.points3++;
-    } else if (outcome.matchCount === 2) {
+    } else if (matchCount === 2) {
       hitsBreakdown.points2++;
     } else {
       hitsBreakdown.points0or1++;
@@ -214,17 +214,107 @@ export function evaluateSingleSestinaPnL(
 }
 
 /**
- * Calculate expected gains and losses for all weekly generated sestine.
- * The primary aggregate value is the mean of the losses and gains calculated on each individual sestina.
+ * Fast evaluation of a single column against compact simulated draws buffer (Uint8Array of length N * 8)
  */
-export function calculateWeeklySestineExpectedPnL(
-  columns: GeneratedColumn[],
-  simulatedDraws: Draw[]
+function evaluateSingleSestinaPnLCompact(
+  column: GeneratedColumn,
+  compactDraws: Uint8Array,
+  totalDrawsEvaluated: number
+): SingleSestinaPnL {
+  const costPerDraw = column.superstar !== undefined ? 1.5 : 1.0;
+  const totalCost = Number((costPerDraw * totalDrawsEvaluated).toFixed(2));
+
+  let totalGrossGain = 0;
+  let totalGrossLoss = 0;
+
+  const hitsBreakdown = {
+    points0or1: 0,
+    points2: 0,
+    points3: 0,
+    points4: 0,
+    points5: 0,
+    points5plus1: 0,
+    points6: 0,
+    superstarHits: 0
+  };
+
+  const mask = new Uint8Array(91);
+  for (let i = 0; i < column.numbers.length; i++) {
+    const num = column.numbers[i];
+    if (num >= 1 && num <= 90) mask[num] = 1;
+  }
+  const colSuperstar = column.superstar ?? -1;
+
+  for (let i = 0; i < totalDrawsEvaluated; i++) {
+    const offset = i * 8;
+    const matchCount =
+      mask[compactDraws[offset]] +
+      mask[compactDraws[offset + 1]] +
+      mask[compactDraws[offset + 2]] +
+      mask[compactDraws[offset + 3]] +
+      mask[compactDraws[offset + 4]] +
+      mask[compactDraws[offset + 5]];
+    const hasJolly = mask[compactDraws[offset + 6]] === 1;
+    const hasSuperstar = colSuperstar > 0 && compactDraws[offset + 7] === colSuperstar;
+
+    const prize = computeOfficialPrize(matchCount, hasJolly, hasSuperstar);
+
+    totalGrossGain += prize;
+    const drawLoss = costPerDraw > prize ? costPerDraw - prize : 0;
+    totalGrossLoss += drawLoss;
+
+    if (hasSuperstar) {
+      hitsBreakdown.superstarHits++;
+    }
+
+    if (matchCount === 6) {
+      hitsBreakdown.points6++;
+    } else if (matchCount === 5 && hasJolly) {
+      hitsBreakdown.points5plus1++;
+    } else if (matchCount === 5) {
+      hitsBreakdown.points5++;
+    } else if (matchCount === 4) {
+      hitsBreakdown.points4++;
+    } else if (matchCount === 3) {
+      hitsBreakdown.points3++;
+    } else if (matchCount === 2) {
+      hitsBreakdown.points2++;
+    } else {
+      hitsBreakdown.points0or1++;
+    }
+  }
+
+  const totalNetProfitLoss = Number((totalGrossGain - totalCost).toFixed(2));
+  const denom = Math.max(totalDrawsEvaluated, 1);
+
+  return {
+    columnId: column.id,
+    numbers: column.numbers,
+    superstar: column.superstar,
+    costPerDraw,
+    totalDrawsEvaluated,
+    totalCost,
+    totalGrossGain: Number(totalGrossGain.toFixed(2)),
+    totalGrossLoss: Number(totalGrossLoss.toFixed(2)),
+    totalNetProfitLoss,
+    averageGainPerDraw: Number((totalGrossGain / denom).toFixed(4)),
+    averageLossPerDraw: Number((totalGrossLoss / denom).toFixed(4)),
+    averageNetPerDraw: Number((totalNetProfitLoss / denom).toFixed(4)),
+    hitsBreakdown
+  };
+}
+
+/**
+ * Summarize per-sestina PnL array into WeeklySestinePnLSummary
+ */
+function summarizePerSestinaResults(
+  perSestinaResults: SingleSestinaPnL[],
+  drawsCount: number
 ): WeeklySestinePnLSummary {
-  if (columns.length === 0) {
+  if (perSestinaResults.length === 0) {
     return {
       sestineCount: 0,
-      drawsCount: simulatedDraws.length,
+      drawsCount,
       perSestinaResults: [],
       meanTotalGainPerSestina: 0,
       meanTotalLossPerSestina: 0,
@@ -237,12 +327,7 @@ export function calculateWeeklySestineExpectedPnL(
     };
   }
 
-  const perSestinaResults = columns.map((col) =>
-    evaluateSingleSestinaPnL(col, simulatedDraws)
-  );
-
   const count = perSestinaResults.length;
-
   let sumTotalGain = 0;
   let sumTotalLoss = 0;
   let sumTotalCost = 0;
@@ -271,7 +356,7 @@ export function calculateWeeklySestineExpectedPnL(
 
   return {
     sestineCount: count,
-    drawsCount: simulatedDraws.length,
+    drawsCount,
     perSestinaResults,
     meanTotalGainPerSestina: Number((sumTotalGain / count).toFixed(2)),
     meanTotalLossPerSestina: Number((sumTotalLoss / count).toFixed(2)),
@@ -285,31 +370,94 @@ export function calculateWeeklySestineExpectedPnL(
 }
 
 /**
- * Simulate the next 100 SuperEnalotto draws using the official 2-urn extraction methodology
- * and synthesize the High-Probability Consensus Sestina.
+ * Calculate expected gains and losses for all weekly generated sestine.
+ * The primary aggregate value is the mean of the losses and gains calculated on each individual sestina.
+ */
+export function calculateWeeklySestineExpectedPnL(
+  columns: GeneratedColumn[],
+  simulatedDraws: Draw[]
+): WeeklySestinePnLSummary {
+  if (columns.length === 0) {
+    return summarizePerSestinaResults([], simulatedDraws.length);
+  }
+  const perSestinaResults = columns.map((col) =>
+    evaluateSingleSestinaPnL(col, simulatedDraws)
+  );
+  return summarizePerSestinaResults(perSestinaResults, simulatedDraws.length);
+}
+
+/**
+ * Derive optimal scoring weights (wDelay, wFrequency, wAffinity) that align with the simulated
+ * Top 12 pool and High-Probability Sestina relative to the historical archive statistics.
+ */
+function deriveSimulationRecommendedWeights(
+  historicalDraws: Draw[],
+  top12Pool: number[],
+  highProbNumbers: number[]
+): ScoringWeights {
+  if (historicalDraws.length === 0) {
+    return { wDelay: 0.5, wFrequency: 0.35, wAffinity: 0.25 };
+  }
+
+  const statsMap = calculateNumberStatistics(historicalDraws, 36);
+  let maxFreqK = 1;
+  for (let n = 1; n <= 90; n++) {
+    if (statsMap[n] && statsMap[n].frequencyK > maxFreqK) {
+      maxFreqK = statsMap[n].frequencyK;
+    }
+  }
+
+  let delaySignal = 0;
+  let freqSignal = 0;
+  let affSignal = 0;
+
+  const hpSet = new Set(highProbNumbers);
+  for (const num of top12Pool) {
+    const st = statsMap[num];
+    if (!st) continue;
+    const boost = hpSet.has(num) ? 1.5 : 1.0;
+    delaySignal += st.normalizedDelay * boost;
+    freqSignal += (st.frequencyK / maxFreqK) * boost;
+    affSignal += st.affinityScore * boost;
+  }
+
+  // Ensure positive minimum signals and normalize onto [0.15, 0.95] rounded to 0.05
+  const dNorm = Math.max(delaySignal / Math.max(top12Pool.length, 1), 0.12);
+  const fNorm = Math.max(freqSignal / Math.max(top12Pool.length, 1), 0.12);
+  const aNorm = Math.max(affSignal / Math.max(top12Pool.length, 1), 0.12);
+
+  const maxComponent = Math.max(dNorm, fNorm, aNorm, 0.001);
+  const roundStep = (val: number) =>
+    Number(Math.min(1.0, Math.max(0.1, Math.round((val * 0.85) / 0.05) * 0.05)).toFixed(2));
+
+  return {
+    wDelay: roundStep(dNorm / maxComponent),
+    wFrequency: roundStep(fNorm / maxComponent),
+    wAffinity: roundStep(aNorm / maxComponent)
+  };
+}
+
+/**
+ * Simulate the next N SuperEnalotto draws (from 100 up to 100,000) using the official 2-urn extraction methodology
+ * and synthesize the High-Probability Consensus Sestina + optimal generator parameters.
  */
 export function runNext100DrawsSimulation(
   historicalDraws: Draw[],
   weeklyColumns: GeneratedColumn[],
   methodology: SimulationMethodology = 'bayesian_hybrid_urn',
-  seed: number = Date.now()
+  seed: number = Date.now(),
+  numDrawsToSimulate: number = MIN_SIMULATION_DRAWS
 ): HundredDrawsSimulationResult {
   const startTime = performance.now();
+  const totalSimulatedDrawsCount = clampSimulationDrawsCount(numDrawsToSimulate);
   const rng = createPRNG(seed);
   const all90Balls = Array.from({ length: 90 }, (_, i) => i + 1);
 
-  // 1. Build empirical priors from historical draws
-  const histFreq: Record<number, number> = {};
-  const currentDelay: Record<number, number> = {};
-  const maxDelay: Record<number, number> = {};
-  const superstarHistFreq: Record<number, number> = {};
-
-  for (let n = 1; n <= 90; n++) {
-    histFreq[n] = 0;
-    currentDelay[n] = 0;
-    maxDelay[n] = 25;
-    superstarHistFreq[n] = 0;
-  }
+  // 1. Build empirical priors from historical draws using typed arrays
+  const histFreq = new Int32Array(91);
+  const curDelayArr = new Int32Array(91);
+  const invMaxDelay = new Float64Array(91);
+  const superstarHistFreq = new Int32Array(91);
 
   const sortedHistory = [...historicalDraws].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
@@ -317,11 +465,12 @@ export function runNext100DrawsSimulation(
 
   for (let i = 0; i < sortedHistory.length; i++) {
     const d = sortedHistory[i];
-    for (const num of d.numbers) {
-      histFreq[num] = (histFreq[num] || 0) + 1;
+    const nums = d.numbers;
+    for (let k = 0; k < 6; k++) {
+      histFreq[nums[k]]++;
     }
-    if (d.superstar) {
-      superstarHistFreq[d.superstar] = (superstarHistFreq[d.superstar] || 0) + 1;
+    if (d.superstar && d.superstar >= 1 && d.superstar <= 90) {
+      superstarHistFreq[d.superstar]++;
     }
   }
 
@@ -332,150 +481,265 @@ export function runNext100DrawsSimulation(
       if (sortedHistory[i].numbers.includes(n)) break;
       del++;
     }
-    currentDelay[n] = del;
-    maxDelay[n] = Math.max(del + 10, 60);
+    curDelayArr[n] = del;
+    const maxDel = Math.max(del + 10, 60);
+    invMaxDelay[n] = 1 / maxDel;
   }
 
-  // Co-occurrence matrix from history (Markovian affinity)
-  const coMatrix: number[][] = Array.from({ length: 91 }, () =>
-    new Array(91).fill(0)
-  );
-  for (const d of sortedHistory) {
-    for (let i = 0; i < d.numbers.length; i++) {
-      for (let j = i + 1; j < d.numbers.length; j++) {
-        const a = d.numbers[i];
-        const b = d.numbers[j];
-        coMatrix[a][b]++;
-        coMatrix[b][a]++;
+  // Co-occurrence matrix from history (Markovian affinity) in flat Int32Array
+  const coMatrixFlat = new Int32Array(91 * 91);
+  for (let idx = 0; idx < sortedHistory.length; idx++) {
+    const nums = sortedHistory[idx].numbers;
+    for (let i = 0; i < 6; i++) {
+      const a = nums[i];
+      const aRow = a * 91;
+      for (let j = i + 1; j < 6; j++) {
+        const b = nums[j];
+        coMatrixFlat[aRow + b]++;
+        coMatrixFlat[b * 91 + a]++;
       }
     }
   }
 
-  // 2. Step-by-step simulation of the next 100 extractions
-  const simulatedDraws: Draw[] = [];
-  const numberFrequenciesInSim: Record<number, number> = {};
-  const jollyFrequenciesInSim: Record<number, number> = {};
-  const superstarFrequenciesInSim: Record<number, number> = {};
-  const simPairMatrix: number[][] = Array.from({ length: 91 }, () =>
-    new Array(91).fill(0)
-  );
+  // Precompute constant Bayesian priors per ball
+  const totalHistDraws = Math.max(sortedHistory.length, 1);
+  const baseFreqFactor = new Float64Array(91);
+  const starCumWeights = new Float64Array(91);
+  const freqDenom = (totalHistDraws * 6) / 90 + 4;
+  const starDenom = Math.max(totalHistDraws / 45, 1);
+  let cumStarW = 0;
 
   for (let n = 1; n <= 90; n++) {
-    numberFrequenciesInSim[n] = 0;
-    jollyFrequenciesInSim[n] = 0;
-    superstarFrequenciesInSim[n] = 0;
+    baseFreqFactor[n] = (histFreq[n] + 4) / freqDenom;
+    const starW = 1 + (superstarHistFreq[n] / starDenom) * 0.25;
+    cumStarW += starW;
+    starCumWeights[n] = cumStarW;
   }
+
+  // 2. Step-by-step simulation of the next N extractions (100 to 100,000)
+  const loggedDrawsLimit = Math.min(totalSimulatedDrawsCount, MAX_LOGGED_SIMULATED_DRAWS);
+  const simulatedDraws: Draw[] = new Array(loggedDrawsLimit);
+  const compactDraws = new Uint8Array(totalSimulatedDrawsCount * 8);
+
+  const simFreqArr = new Int32Array(91);
+  const jollyFreqArr = new Int32Array(91);
+  const starFreqArr = new Int32Array(91);
+  const simPairFlat = new Int32Array(91 * 91);
 
   const latestRealDraw = sortedHistory[0];
   let lastContest = latestRealDraw ? latestRealDraw.contestNumber : 45;
   let currentYear = latestRealDraw ? latestRealDraw.year : 2026;
   const simDate = latestRealDraw ? new Date(latestRealDraw.date) : new Date();
-  let previousSix: number[] = latestRealDraw
-    ? [...latestRealDraw.numbers]
-    : [7, 18, 33, 52, 64, 88];
 
-  const totalHistDraws = Math.max(sortedHistory.length, 1);
+  let p0 = latestRealDraw ? latestRealDraw.numbers[0] : 7;
+  let p1 = latestRealDraw ? latestRealDraw.numbers[1] : 18;
+  let p2 = latestRealDraw ? latestRealDraw.numbers[2] : 33;
+  let p3 = latestRealDraw ? latestRealDraw.numbers[3] : 52;
+  let p4 = latestRealDraw ? latestRealDraw.numbers[4] : 64;
+  let p5 = latestRealDraw ? latestRealDraw.numbers[5] : 88;
 
-  for (let step = 1; step <= 100; step++) {
-    let sevenBalls: number[];
-    let superstarBall: number;
+  const ballWeightsArr = new Float64Array(91);
+  const uniformUrn = new Int32Array(90);
+  for (let i = 0; i < 90; i++) uniformUrn[i] = i + 1;
+  const pickedMain = new Int32Array(6);
+
+  for (let step = 0; step < totalSimulatedDrawsCount; step++) {
+    let jollyBall = 1;
+    let superstarBall = 1;
 
     if (methodology === 'bayesian_hybrid_urn') {
-      // Calculate dynamic Bayesian weights for the 90 balls in the primary urn
-      const ballWeights: Record<number, number> = {};
-      const starWeights: Record<number, number> = {};
-
+      let totalW = 0;
       for (let n = 1; n <= 90; n++) {
-        // Dirichlet-smoothed empirical frequency
-        const freqFactor = (histFreq[n] + 4) / (totalHistDraws * 6 / 90 + 4);
-        // Elastic delay pressure (Weibull-like hazard rate)
-        const delayRatio = Math.min(currentDelay[n] / maxDelay[n], 1.5);
+        let delayRatio = curDelayArr[n] * invMaxDelay[n];
+        if (delayRatio > 1.5) delayRatio = 1.5;
         const delayFactor = 1 + 0.45 * delayRatio;
-        // Markovian transition affinity with previous draw
-        let affSum = 0;
-        for (const prevN of previousSix) {
-          affSum += coMatrix[n][prevN] || 0;
+
+        const baseIdx = n * 91;
+        const affSum =
+          coMatrixFlat[baseIdx + p0] +
+          coMatrixFlat[baseIdx + p1] +
+          coMatrixFlat[baseIdx + p2] +
+          coMatrixFlat[baseIdx + p3] +
+          coMatrixFlat[baseIdx + p4] +
+          coMatrixFlat[baseIdx + p5];
+        let affBonus = affSum * 0.02;
+        if (affBonus > 0.35) affBonus = 0.35;
+
+        const w = baseFreqFactor[n] * delayFactor * (1 + affBonus);
+        ballWeightsArr[n] = w;
+        totalW += w;
+      }
+
+      // Draw 7 balls without replacement from Urn 1
+      for (let k = 0; k < 7; k++) {
+        let r = rng() * totalW;
+        let chosen = 90;
+        for (let n = 1; n <= 90; n++) {
+          const w = ballWeightsArr[n];
+          if (w > 0) {
+            r -= w;
+            if (r <= 0) {
+              chosen = n;
+              break;
+            }
+          }
         }
-        const affinityFactor = 1 + Math.min(affSum / 50, 0.35);
-
-        ballWeights[n] = freqFactor * delayFactor * affinityFactor;
-        starWeights[n] = 1 + (superstarHistFreq[n] || 0) / Math.max(totalHistDraws / 45, 1) * 0.25;
+        // Fallback if floating point rounding left r > 0
+        if (ballWeightsArr[chosen] === 0) {
+          for (let n = 90; n >= 1; n--) {
+            if (ballWeightsArr[n] > 0) {
+              chosen = n;
+              break;
+            }
+          }
+        }
+        totalW -= ballWeightsArr[chosen];
+        ballWeightsArr[chosen] = 0;
+        if (k < 6) {
+          pickedMain[k] = chosen;
+        } else {
+          jollyBall = chosen;
+        }
       }
 
-      // Official Urn 1: Draw 7 balls without replacement (6 Sestina + 1 Jolly)
-      sevenBalls = sampleWeightedWithoutReplacement(all90Balls, ballWeights, 7, rng);
-      // Official Urn 2: Independent SuperStar Urn (90 balls)
-      superstarBall = sampleWeightedWithoutReplacement(all90Balls, starWeights, 1, rng)[0];
+      // Draw 1 SuperStar ball from independent Urn 2 using binary search on cumulative weights
+      const rStar = rng() * cumStarW;
+      let lo = 1;
+      let hi = 90;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (starCumWeights[mid] < rStar) {
+          lo = mid + 1;
+        } else {
+          hi = mid;
+        }
+      }
+      superstarBall = lo;
     } else {
-      // Pure Hypergeometric Official Urn (Equiprobable Fisher-Yates shuffle without replacement)
-      sevenBalls = sampleUniformWithoutReplacement(all90Balls, 7, rng);
-      superstarBall = sampleUniformWithoutReplacement(all90Balls, 1, rng)[0];
-    }
-
-    const sixMain = sevenBalls.slice(0, 6).sort((a, b) => a - b) as [
-      number,
-      number,
-      number,
-      number,
-      number,
-      number
-    ];
-    const jollyBall = sevenBalls[6];
-
-    // Update dynamic delays for next simulated draw
-    const drawnSet = new Set(sixMain);
-    for (let n = 1; n <= 90; n++) {
-      if (drawnSet.has(n)) {
-        currentDelay[n] = 0;
-        numberFrequenciesInSim[n]++;
-      } else {
-        currentDelay[n]++;
+      // Pure Hypergeometric Official Urn: partial Fisher-Yates shuffle for first 7 balls
+      for (let i = 0; i < 7; i++) {
+        const j = i + Math.floor(rng() * (90 - i));
+        const tmp = uniformUrn[i];
+        uniformUrn[i] = uniformUrn[j];
+        uniformUrn[j] = tmp;
       }
+      pickedMain[0] = uniformUrn[0];
+      pickedMain[1] = uniformUrn[1];
+      pickedMain[2] = uniformUrn[2];
+      pickedMain[3] = uniformUrn[3];
+      pickedMain[4] = uniformUrn[4];
+      pickedMain[5] = uniformUrn[5];
+      jollyBall = uniformUrn[6];
+      superstarBall = Math.floor(rng() * 90) + 1;
     }
-    jollyFrequenciesInSim[jollyBall]++;
-    superstarFrequenciesInSim[superstarBall]++;
+
+    // Insertion sort on pickedMain (6 elements)
+    for (let i = 1; i < 6; i++) {
+      const key = pickedMain[i];
+      let j = i - 1;
+      while (j >= 0 && pickedMain[j] > key) {
+        pickedMain[j + 1] = pickedMain[j];
+        j--;
+      }
+      pickedMain[j + 1] = key;
+    }
+
+    const m0 = pickedMain[0];
+    const m1 = pickedMain[1];
+    const m2 = pickedMain[2];
+    const m3 = pickedMain[3];
+    const m4 = pickedMain[4];
+    const m5 = pickedMain[5];
+
+    // Update dynamic delays & frequencies
+    for (let n = 1; n <= 90; n++) {
+      curDelayArr[n]++;
+    }
+    curDelayArr[m0] = 0;
+    curDelayArr[m1] = 0;
+    curDelayArr[m2] = 0;
+    curDelayArr[m3] = 0;
+    curDelayArr[m4] = 0;
+    curDelayArr[m5] = 0;
+
+    simFreqArr[m0]++;
+    simFreqArr[m1]++;
+    simFreqArr[m2]++;
+    simFreqArr[m3]++;
+    simFreqArr[m4]++;
+    simFreqArr[m5]++;
+    jollyFreqArr[jollyBall]++;
+    starFreqArr[superstarBall]++;
 
     // Record simulated pair co-occurrences
     for (let i = 0; i < 6; i++) {
+      const a = pickedMain[i];
+      const aRow = a * 91;
       for (let j = i + 1; j < 6; j++) {
-        const a = sixMain[i];
-        const b = sixMain[j];
-        simPairMatrix[a][b]++;
-        simPairMatrix[b][a]++;
+        const b = pickedMain[j];
+        simPairFlat[aRow + b]++;
+        simPairFlat[b * 91 + a]++;
       }
     }
 
-    previousSix = sixMain;
+    p0 = m0;
+    p1 = m1;
+    p2 = m2;
+    p3 = m3;
+    p4 = m4;
+    p5 = m5;
 
-    // Advance calendar date (Tue / Thu / Sat)
-    simDate.setDate(simDate.getDate() + 2);
-    if (simDate.getDay() === 0) simDate.setDate(simDate.getDate() + 2); // Skip Sun/Mon
-    lastContest++;
-    if (lastContest > 156) {
-      lastContest = 1;
-      currentYear++;
+    // Store in compact buffer for full N-draw PnL evaluation
+    const baseOffset = step * 8;
+    compactDraws[baseOffset] = m0;
+    compactDraws[baseOffset + 1] = m1;
+    compactDraws[baseOffset + 2] = m2;
+    compactDraws[baseOffset + 3] = m3;
+    compactDraws[baseOffset + 4] = m4;
+    compactDraws[baseOffset + 5] = m5;
+    compactDraws[baseOffset + 6] = jollyBall;
+    compactDraws[baseOffset + 7] = superstarBall;
+
+    // Materialize Draw object for the logged table (first 500 draws)
+    if (step < loggedDrawsLimit) {
+      simDate.setDate(simDate.getDate() + 2);
+      if (simDate.getDay() === 0) simDate.setDate(simDate.getDate() + 2);
+      lastContest++;
+      if (lastContest > 156) {
+        lastContest = 1;
+        currentYear++;
+      }
+
+      simulatedDraws[step] = {
+        id: `SIM-${currentYear}-${String(lastContest).padStart(3, '0')}`,
+        contestNumber: lastContest,
+        year: currentYear,
+        date: simDate.toISOString().split('T')[0],
+        numbers: [m0, m1, m2, m3, m4, m5],
+        jolly: jollyBall,
+        superstar: superstarBall
+      };
     }
-
-    simulatedDraws.push({
-      id: `SIM-${currentYear}-${String(lastContest).padStart(3, '0')}`,
-      contestNumber: lastContest,
-      year: currentYear,
-      date: simDate.toISOString().split('T')[0],
-      numbers: sixMain,
-      jolly: jollyBall,
-      superstar: superstarBall
-    });
   }
 
-  // 3. Construct the High-Probability Sestina from the 100 simulation results
-  // Rank all 90 numbers by simulated frequency + pair synergy
+  // Convert frequency arrays to Record<number, number>
+  const numberFrequenciesInSim: Record<number, number> = {};
+  const jollyFrequenciesInSim: Record<number, number> = {};
+  const superstarFrequenciesInSim: Record<number, number> = {};
+  for (let n = 1; n <= 90; n++) {
+    numberFrequenciesInSim[n] = simFreqArr[n];
+    jollyFrequenciesInSim[n] = jollyFreqArr[n];
+    superstarFrequenciesInSim[n] = starFreqArr[n];
+  }
+
+  // 3. Construct the High-Probability Sestina from the N simulation results
   const candidateRanking = [...all90Balls].sort((a, b) => {
-    const diff = numberFrequenciesInSim[b] - numberFrequenciesInSim[a];
+    const diff = simFreqArr[b] - simFreqArr[a];
     if (diff !== 0) return diff;
-    return (histFreq[b] || 0) - (histFreq[a] || 0);
+    return histFreq[b] - histFreq[a];
   });
 
-  // Take top 12 numbers from the 100-draw simulation to develop all C(12, 6) = 924 combinations
+  // Take top 12 numbers from the N-draw simulation to develop all C(12, 6) = 924 combinations
   const top12Pool = candidateRanking.slice(0, 12).sort((a, b) => a - b);
   const all924Combos = generateCombinations(top12Pool, 6);
 
@@ -491,7 +755,9 @@ export function runNext100DrawsSimulation(
     validCombos = all924Combos;
   }
 
-  // Score each valid combination against the 100 simulated draws (individual frequency + simulated pair synergy + direct multi-point hits in the 100 draws)
+  // Scale factor so sumPenalty stays proportional regardless of N (100 vs 100,000)
+  const scaleFactor = 100 / totalSimulatedDrawsCount;
+
   let bestCombo = validCombos[0];
   let bestComboScore = -Infinity;
 
@@ -499,14 +765,15 @@ export function runNext100DrawsSimulation(
     let freqScore = 0;
     let pairSynergy = 0;
     for (let i = 0; i < 6; i++) {
-      freqScore += numberFrequenciesInSim[combo[i]] * 10;
+      const ci = combo[i];
+      freqScore += simFreqArr[ci] * 10 * scaleFactor;
+      const rowOffset = ci * 91;
       for (let j = i + 1; j < 6; j++) {
-        pairSynergy += simPairMatrix[combo[i]][combo[j]] * 25;
+        pairSynergy += simPairFlat[rowOffset + combo[j]] * 25 * scaleFactor;
       }
     }
 
-    // Distance from ideal Gaussian sum 273
-    const sum = combo.reduce((a, b) => a + b, 0);
+    const sum = combo[0] + combo[1] + combo[2] + combo[3] + combo[4] + combo[5];
     const sumPenalty = Math.abs(sum - 273) * 0.25;
 
     const totalScore = freqScore + pairSynergy - sumPenalty;
@@ -530,8 +797,8 @@ export function runNext100DrawsSimulation(
   let recommendedJolly = 1;
   let maxJollyFreq = -1;
   for (let n = 1; n <= 90; n++) {
-    if (!winningSet.has(n) && jollyFrequenciesInSim[n] > maxJollyFreq) {
-      maxJollyFreq = jollyFrequenciesInSim[n];
+    if (!winningSet.has(n) && jollyFreqArr[n] > maxJollyFreq) {
+      maxJollyFreq = jollyFreqArr[n];
       recommendedJolly = n;
     }
   }
@@ -540,8 +807,8 @@ export function runNext100DrawsSimulation(
   let recommendedSuperstar = 1;
   let maxStarFreq = -1;
   for (let n = 1; n <= 90; n++) {
-    if (superstarFrequenciesInSim[n] > maxStarFreq) {
-      maxStarFreq = superstarFrequenciesInSim[n];
+    if (starFreqArr[n] > maxStarFreq) {
+      maxStarFreq = starFreqArr[n];
       recommendedSuperstar = n;
     }
   }
@@ -555,14 +822,18 @@ export function runNext100DrawsSimulation(
     if (n % 2 === 0) evens++;
     if (n <= 45) lows++;
     sum += n;
-    freqSum += numberFrequenciesInSim[n];
+    freqSum += simFreqArr[n];
   }
 
-  // Convergence index (normalized confidence score between 72% and 96% based on simulation concentration)
-  const expectedAvgFreq = 6 * (600 / 90); // 40
+  // Convergence index (normalized confidence score between 72% and 97% based on simulation concentration & sample size)
+  const expectedAvgFreq = 6 * ((totalSimulatedDrawsCount * 6) / 90);
+  const sampleSizeBonus = Math.min(4, Math.log10(totalSimulatedDrawsCount / 100) * 1.5);
   const confidenceIndex = Math.min(
-    96,
-    Math.max(72, Math.round(65 + (freqSum / expectedAvgFreq) * 18))
+    97,
+    Math.max(
+      72,
+      Math.round(65 + (freqSum / Math.max(expectedAvgFreq, 1)) * 18 + sampleSizeBonus)
+    )
   );
 
   const highProbCol: GeneratedColumn = {
@@ -576,25 +847,50 @@ export function runNext100DrawsSimulation(
     highs: 6 - lows
   };
 
-  const simulatedBacktestPnL = evaluateSingleSestinaPnL(
+  const simulatedBacktestPnL = evaluateSingleSestinaPnLCompact(
     { ...highProbCol, superstar: undefined },
-    simulatedDraws
+    compactDraws,
+    totalSimulatedDrawsCount
   );
 
-  // 4. Evaluate weekly generated sestine against the 100 simulated draws
-  const weeklySystemPnL = calculateWeeklySestineExpectedPnL(
-    weeklyColumns,
-    simulatedDraws
+  // 4. Evaluate weekly generated sestine against all N simulated draws
+  const perSestinaResults = weeklyColumns.map((col) =>
+    evaluateSingleSestinaPnLCompact(col, compactDraws, totalSimulatedDrawsCount)
   );
+  const weeklySystemPnL = summarizePerSestinaResults(
+    perSestinaResults,
+    totalSimulatedDrawsCount
+  );
+
+  // 5. Derive recommended generator weights and filter parameters from simulation
+  const recommendedWeights = deriveSimulationRecommendedWeights(
+    sortedHistory,
+    top12Pool,
+    winningSix
+  );
+
+  const recommendedFilters: FilterOptions = {
+    evenOdd: checkEvenOdd(winningSix),
+    highLow: checkHighLow(winningSix),
+    sumRange: true,
+    minSum: Math.min(190, sum - 15),
+    maxSum: Math.max(350, sum + 15),
+    consecutive: checkConsecutiveAndDecades(winningSix, 2, 2),
+    decades: checkConsecutiveAndDecades(winningSix, 2, 2)
+  };
 
   const endTime = performance.now();
 
   return {
     methodology,
+    totalSimulatedDrawsCount,
     simulatedDraws,
     numberFrequenciesInSim,
     jollyFrequenciesInSim,
     superstarFrequenciesInSim,
+    top12PoolNumbers: top12Pool,
+    recommendedWeights,
+    recommendedFilters,
     highProbabilitySestina: {
       numbers: winningSix,
       recommendedJolly,

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Dices,
   Sparkles,
@@ -19,41 +19,64 @@ import {
   Calculator,
   ChevronLeft,
   ChevronRight,
-  Layers
+  Sliders,
+  ArrowRightCircle
 } from 'lucide-react';
 import {
   Draw,
   GeneratedColumn,
   SimulationMethodology,
   HundredDrawsSimulationResult,
-  SavedPlay
+  SavedPlay,
+  SimulationGeneratorPreset
 } from '../types/lottery';
-import { runNext100DrawsSimulation } from '../utils/monteCarloSimulation';
+import {
+  runNext100DrawsSimulation,
+  MIN_SIMULATION_DRAWS,
+  MAX_SIMULATION_DRAWS,
+  PRESET_SIMULATION_COUNTS,
+  clampSimulationDrawsCount
+} from '../utils/monteCarloSimulation';
 
 interface SimulationEngineProps {
   draws: Draw[];
   weeklyColumns: GeneratedColumn[];
   onSavePlay: (play: SavedPlay) => void;
+  onApplyToGenerator?: (preset: SimulationGeneratorPreset) => void;
 }
 
 export const SimulationEngine: React.FC<SimulationEngineProps> = ({
   draws,
   weeklyColumns,
-  onSavePlay
+  onSavePlay,
+  onApplyToGenerator
 }) => {
   const [methodology, setMethodology] = useState<SimulationMethodology>('bayesian_hybrid_urn');
+  const [numDrawsToSimulate, setNumDrawsToSimulate] = useState<number>(100);
+  const [customDrawsInput, setCustomDrawsInput] = useState<string>('100');
+  const [drawsRangeWarning, setDrawsRangeWarning] = useState<string | null>(null);
   const [simSeed, setSimSeed] = useState<number>(() => Date.now());
   const [copiedSestina, setCopiedSestina] = useState(false);
   const [savedHighProb, setSavedHighProb] = useState(false);
+  const [appliedToGen, setAppliedToGen] = useState(false);
   const [simPage, setSimPage] = useState(1);
   const pageSize = 10;
 
-  // Run the 100-draw official methodology simulation
+  // Run the N-draw official methodology simulation (100 to 100,000 draws)
   const simResult: HundredDrawsSimulationResult = useMemo(() => {
-    return runNext100DrawsSimulation(draws, weeklyColumns, methodology, simSeed);
-  }, [draws, weeklyColumns, methodology, simSeed]);
+    return runNext100DrawsSimulation(
+      draws,
+      weeklyColumns,
+      methodology,
+      simSeed,
+      numDrawsToSimulate
+    );
+  }, [draws, weeklyColumns, methodology, simSeed, numDrawsToSimulate]);
 
-  // Top 12 most frequent numbers in the 100 simulated draws
+  const totalDrawsCount = simResult.totalSimulatedDrawsCount;
+  const formattedDrawsCount = totalDrawsCount.toLocaleString('it-IT');
+
+  // Top 12 most frequent numbers in the N simulated draws
   const topSimulatedNumbers = useMemo(() => {
     return Object.entries(simResult.numberFrequenciesInSim)
       .map(([num, count]) => ({ number: Number(num), count }))
@@ -68,20 +91,103 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
     return simResult.simulatedDraws.slice(start, start + pageSize);
   }, [simResult.simulatedDraws, simPage]);
 
+  const handleSelectPresetCount = (count: number) => {
+    setDrawsRangeWarning(null);
+    setNumDrawsToSimulate(count);
+    setCustomDrawsInput(String(count));
+    setSimPage(1);
+    setSavedHighProb(false);
+    setAppliedToGen(false);
+  };
+
+  const handleCustomDrawsInputChange = (rawVal: string) => {
+    setCustomDrawsInput(rawVal);
+    const cleaned = rawVal.replace(/\./g, '').replace(/,/g, '').trim();
+    if (!cleaned) return;
+    const parsed = parseInt(cleaned, 10);
+    if (Number.isNaN(parsed)) return;
+
+    if (parsed > MAX_SIMULATION_DRAWS) {
+      setDrawsRangeWarning(
+        `Limite massimo consentito: ${MAX_SIMULATION_DRAWS.toLocaleString('it-IT')} estrazioni`
+      );
+      setNumDrawsToSimulate(MAX_SIMULATION_DRAWS);
+      setSimPage(1);
+    } else if (parsed >= MIN_SIMULATION_DRAWS) {
+      setDrawsRangeWarning(null);
+      setNumDrawsToSimulate(parsed);
+      setSimPage(1);
+    } else {
+      setDrawsRangeWarning(
+        `Minimo ${MIN_SIMULATION_DRAWS} estrazioni (verrà applicato ${MIN_SIMULATION_DRAWS})`
+      );
+    }
+  };
+
+  const handleCustomDrawsInputBlur = () => {
+    const cleaned = customDrawsInput.replace(/\./g, '').replace(/,/g, '').trim();
+    const parsed = parseInt(cleaned, 10);
+    const clamped = clampSimulationDrawsCount(parsed);
+    if (parsed > MAX_SIMULATION_DRAWS) {
+      setDrawsRangeWarning(
+        `Limitato al massimo di ${MAX_SIMULATION_DRAWS.toLocaleString('it-IT')} estrazioni`
+      );
+    } else if (parsed < MIN_SIMULATION_DRAWS || Number.isNaN(parsed)) {
+      setDrawsRangeWarning(`Impostato al minimo di ${MIN_SIMULATION_DRAWS} estrazioni`);
+    } else {
+      setDrawsRangeWarning(null);
+    }
+    setNumDrawsToSimulate(clamped);
+    setCustomDrawsInput(String(clamped));
+    setSimPage(1);
+  };
+
   const handleRerunSimulation = () => {
     setSimSeed(Date.now() + Math.floor(Math.random() * 100000));
     setSimPage(1);
     setSavedHighProb(false);
+    setAppliedToGen(false);
   };
 
   const handleCopyHighProbSestina = () => {
     const hp = simResult.highProbabilitySestina;
-    const text = `Sestina Alta Probabilità (100 Simulazioni): ${hp.numbers.join(
-      ' - '
-    )} | Jolly Consigliato: ${hp.recommendedJolly} | SuperStar: ${hp.recommendedSuperstar}`;
+    const rw = simResult.recommendedWeights;
+    const text = [
+      `Sestina Alta Probabilità (${formattedDrawsCount} Simulazioni): ${hp.numbers.join(' - ')}`,
+      `Jolly Consigliato: ${hp.recommendedJolly} | SuperStar: ${hp.recommendedSuperstar}`,
+      `Pool Top 12 Simulato: ${simResult.top12PoolNumbers.join(', ')}`,
+      `Parametri Pesi S(x): w1(Rit)=${rw.wDelay.toFixed(2)}, w2(Freq)=${rw.wFrequency.toFixed(2)}, w3(Aff)=${rw.wAffinity.toFixed(2)}`,
+      `Equilibrio: Somma=${hp.sum}, Pari/Dispari=${hp.evens}/${hp.odds}, Alti/Bassi=${hp.highs}/${hp.lows}`
+    ].join(' | ');
     navigator.clipboard.writeText(text);
     setCopiedSestina(true);
     setTimeout(() => setCopiedSestina(false), 2500);
+  };
+
+  const handleApplySestinaAndParamsToGenerator = () => {
+    const hp = simResult.highProbabilitySestina;
+    const preset: SimulationGeneratorPreset = {
+      id: `sim-preset-${Date.now()}`,
+      appliedAt: new Date().toISOString(),
+      simulatedDrawsCount: totalDrawsCount,
+      methodology,
+      highProbabilityNumbers: [...hp.numbers] as [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ],
+      recommendedJolly: hp.recommendedJolly,
+      recommendedSuperstar: hp.recommendedSuperstar,
+      top12PoolNumbers: [...simResult.top12PoolNumbers],
+      recommendedWeights: { ...simResult.recommendedWeights },
+      recommendedFilters: { ...simResult.recommendedFilters },
+      confidenceIndex: hp.confidenceIndex
+    };
+    setAppliedToGen(true);
+    onApplyToGenerator?.(preset);
   };
 
   const handleSaveHighProbToLedger = () => {
@@ -121,16 +227,17 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
 
   const hp = simResult.highProbabilitySestina;
   const pnl = simResult.weeklySystemPnL;
+  const rw = simResult.recommendedWeights;
 
   return (
     <div className="space-y-6">
       {/* Top Control Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900/95 to-amber-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900/95 to-amber-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                Motore Monte Carlo &bull; 100 Concorsi Futuri
+                Motore Monte Carlo &bull; {formattedDrawsCount} Concorsi Futuri
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
@@ -138,13 +245,14 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">
-              Simulatore Ufficiale 100 Estrazioni & Analisi Guadagni/Perdite
+              Simulatore Ufficiale ({formattedDrawsCount} Estrazioni) & Analisi Guadagni/Perdite
             </h2>
             <p className="text-xs text-slate-400 max-w-3xl">
               Riproduce fedelmente la metodologia di estrazione ufficiale del SuperEnalotto a{' '}
               <strong className="text-slate-200">2 Urne Separate senza reimmissione</strong> (Urna 1:
               90 sfere per i 6 numeri + 7ª sfera Jolly; Urna 2 indipendente: 90 sfere per il numero
-              SuperStar) per le prossime 100 estrazioni consecutive.
+              SuperStar) su un orizzonte configurabile da{' '}
+              <strong className="text-amber-300">100 fino a 100.000 estrazioni consecutive</strong>.
             </p>
           </div>
 
@@ -181,18 +289,93 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer active:scale-95"
             >
               <RefreshCw className="w-4 h-4" />
-              <span>Risimula 100 Estrazioni</span>
+              <span>Risimula {formattedDrawsCount} Estrazioni</span>
             </button>
+          </div>
+        </div>
+
+        {/* Simulation Draws Count Selector Bar (100 to 100,000 Draws) */}
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mr-1">
+              <Dices className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Estrazioni da Simulare (100 &ndash; 100.000):</span>
+            </span>
+
+            {PRESET_SIMULATION_COUNTS.map((presetCount) => {
+              const isSelected = totalDrawsCount === presetCount;
+              return (
+                <button
+                  key={presetCount}
+                  type="button"
+                  onClick={() => handleSelectPresetCount(presetCount)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all border shrink-0 ${
+                    isSelected
+                      ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md shadow-amber-500/20 font-extrabold'
+                      : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-amber-500/40 hover:text-amber-300'
+                  }`}
+                >
+                  {presetCount.toLocaleString('it-IT')}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Free Input + Range Slider (100 .. 100,000) */}
+          <div className="flex flex-wrap items-center gap-2.5 bg-slate-950/90 px-3.5 py-2 rounded-xl border border-slate-800">
+            <label
+              htmlFor="sim-draws-count-input"
+              className="text-xs font-bold text-amber-300 whitespace-nowrap"
+            >
+              Scelta Libera:
+            </label>
+            <input
+              id="sim-draws-count-input"
+              type="number"
+              min={MIN_SIMULATION_DRAWS}
+              max={MAX_SIMULATION_DRAWS}
+              step={100}
+              value={customDrawsInput}
+              onChange={(e) => handleCustomDrawsInputChange(e.target.value)}
+              onBlur={handleCustomDrawsInputBlur}
+              aria-label="Numero di estrazioni da simulare (da 100 a 100000)"
+              className="w-28 rounded-lg bg-slate-900 border border-amber-500/50 px-2.5 py-1 text-center font-mono font-extrabold text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            <input
+              type="range"
+              min={MIN_SIMULATION_DRAWS}
+              max={MAX_SIMULATION_DRAWS}
+              step={100}
+              value={totalDrawsCount}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10) || 100;
+                const clamped = clampSimulationDrawsCount(val);
+                setDrawsRangeWarning(null);
+                setNumDrawsToSimulate(clamped);
+                setCustomDrawsInput(String(clamped));
+                setSimPage(1);
+              }}
+              aria-label="Slider numero estrazioni da simulare (100-100000)"
+              className="w-32 sm:w-44 h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+            />
+            <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">
+              Attive: <strong className="text-amber-400">{formattedDrawsCount}</strong> estr.
+            </span>
+            {drawsRangeWarning && (
+              <span className="text-[11px] font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
+                {drawsRangeWarning}
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* SECTION 1: High-Probability Sestina synthesized from the 100 simulations */}
+      {/* SECTION 1: High-Probability Sestina synthesized from the N simulations */}
       <div className="bg-slate-900 border-2 border-amber-500/40 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
         <div className="absolute -right-10 -top-10 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+          <div className="space-y-3 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-amber-500 text-slate-950 flex items-center gap-1.5 shadow">
                 <Award className="w-3.5 h-3.5" />
@@ -204,12 +387,12 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             </div>
 
             <h3 className="text-lg sm:text-xl font-extrabold text-white">
-              Super-Sestina di Consenso Statistico (100 Estrazioni Simulate)
+              Super-Sestina di Consenso Statistico ({formattedDrawsCount} Estrazioni Simulate)
             </h3>
             <p className="text-xs text-slate-400 max-w-2xl">
-              Elaborata incrociando i picchi di frequenza delle 100 simulazioni, la matrice di
-              co-occorrenza degli ambi/terni simulati e i filtri di equilibrio gaussiano (Somma{' '}
-              <strong className="text-slate-200">{hp.sum}</strong>, Pari/Dispari{' '}
+              Elaborata incrociando i picchi di frequenza delle {formattedDrawsCount} simulazioni, la
+              matrice di co-occorrenza degli ambi/terni simulati e i filtri di equilibrio gaussiano
+              (Somma <strong className="text-slate-200">{hp.sum}</strong>, Pari/Dispari{' '}
               <strong className="text-slate-200">
                 {hp.evens}/{hp.odds}
               </strong>
@@ -228,7 +411,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                     {num}
                   </div>
                   <span className="text-[10px] font-mono text-amber-300/90">
-                    {simResult.numberFrequenciesInSim[num]}x
+                    {simResult.numberFrequenciesInSim[num].toLocaleString('it-IT')}x
                   </span>
                 </div>
               ))}
@@ -249,34 +432,96 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                 <span className="text-[10px] font-bold text-purple-400 uppercase">SuperStar</span>
               </div>
             </div>
+
+            {/* Derived Parameters Summary Box (for copying into SystemGenerator) */}
+            <div className="mt-4 p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Parametri & Pool Ottimali Estratti dalla Simulazione</span>
+                </span>
+                <span className="text-[11px] font-mono text-slate-400">
+                  Pronti per il Generatore Ottimizzato
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80 flex items-center justify-between">
+                  <span className="text-slate-400">Pesi S(x) Consigliati:</span>
+                  <span className="font-mono font-bold text-white">
+                    <span className="text-rose-300">w₁={rw.wDelay.toFixed(2)}</span> &bull;{' '}
+                    <span className="text-sky-300">w₂={rw.wFrequency.toFixed(2)}</span> &bull;{' '}
+                    <span className="text-emerald-300">w₃={rw.wAffinity.toFixed(2)}</span>
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80 flex flex-wrap items-center justify-between gap-1.5">
+                  <span className="text-slate-400 shrink-0">Pool Top 12:</span>
+                  <span className="font-mono font-bold text-amber-300">
+                    {simResult.top12PoolNumbers.join(' · ')}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Right side: Backtest on the 100 simulated draws & Actions */}
-          <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 lg:w-80 shrink-0 space-y-3">
+          {/* Right side: Backtest on the N simulated draws & Actions */}
+          <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 lg:w-96 shrink-0 space-y-3">
             <div className="text-xs font-bold text-slate-300 uppercase tracking-wider border-b border-slate-800 pb-2">
-              Resa sulle 100 Estrazioni Simulate
+              Resa sulle {formattedDrawsCount} Estrazioni Simulate
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs font-mono">
               <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
                 <span className="text-[10px] text-slate-400 block">Punti 2 / 3+</span>
                 <span className="font-bold text-emerald-400">
-                  {hp.simulatedBacktestPnL.hitsBreakdown.points2}x (2pt) /{' '}
-                  {hp.simulatedBacktestPnL.hitsBreakdown.points3 +
+                  {hp.simulatedBacktestPnL.hitsBreakdown.points2.toLocaleString('it-IT')}x (2pt) /{' '}
+                  {(
+                    hp.simulatedBacktestPnL.hitsBreakdown.points3 +
                     hp.simulatedBacktestPnL.hitsBreakdown.points4 +
                     hp.simulatedBacktestPnL.hitsBreakdown.points5 +
-                    hp.simulatedBacktestPnL.hitsBreakdown.points6}
+                    hp.simulatedBacktestPnL.hitsBreakdown.points5plus1 +
+                    hp.simulatedBacktestPnL.hitsBreakdown.points6
+                  ).toLocaleString('it-IT')}
                   x (3+pt)
                 </span>
               </div>
               <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
                 <span className="text-[10px] text-slate-400 block">Vincita Lorda Sim.</span>
                 <span className="font-bold text-amber-400">
-                  {hp.simulatedBacktestPnL.totalGrossGain.toFixed(2)} €
+                  {hp.simulatedBacktestPnL.totalGrossGain.toLocaleString('it-IT', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                  })}{' '}
+                  €
                 </span>
               </div>
             </div>
 
             <div className="flex flex-col gap-2 pt-1">
+              {/* Primary Action Requested by User: Copy Sestina & Parameters into Optimized Generator */}
+              {onApplyToGenerator && (
+                <button
+                  type="button"
+                  onClick={handleApplySestinaAndParamsToGenerator}
+                  className={`w-full py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
+                    appliedToGen
+                      ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/20'
+                      : 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-300 hover:to-amber-500 text-slate-950 shadow-amber-500/25 border border-amber-300'
+                  }`}
+                >
+                  {appliedToGen ? (
+                    <Check className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <ArrowRightCircle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>
+                    {appliedToGen
+                      ? 'Applicato nel Generatore Ottimizzato!'
+                      : 'Copia Sestina e Parametri nel Generatore'}
+                  </span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={handleCopyHighProbSestina}
@@ -287,16 +532,20 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                 ) : (
                   <Copy className="w-3.5 h-3.5" />
                 )}
-                <span>{copiedSestina ? 'Sestina Copiata!' : 'Copia Sestina Alta Probabilità'}</span>
+                <span>
+                  {copiedSestina
+                    ? 'Sestina e Parametri Copiati!'
+                    : 'Copia Sestina & Parametri (Appunti)'}
+                </span>
               </button>
 
               <button
                 type="button"
                 onClick={handleSaveHighProbToLedger}
-                className={`w-full py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                className={`w-full py-2 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
                   savedHighProb
-                    ? 'bg-emerald-500 text-slate-950'
-                    : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md'
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                    : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/40'
                 }`}
               >
                 {savedHighProb ? (
@@ -328,22 +577,25 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               <strong className="text-amber-300">
                 media aritmetica delle perdite e dei guadagni su ogni singola sestina
               </strong>{' '}
-              ({pnl.sestineCount} sestine settimanali testate sulle {pnl.drawsCount} estrazioni
+              ({pnl.sestineCount} sestine settimanali testate sulle {formattedDrawsCount} estrazioni
               casuali simulate).
             </p>
           </div>
 
           <div className="px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300">
-            Formula: <span className="text-amber-400 font-bold">μ = (1/{pnl.sestineCount}) · Σᵢ (Guadagnoᵢ - Perditaᵢ)</span>
+            Formula:{' '}
+            <span className="text-amber-400 font-bold">
+              μ = (1/{pnl.sestineCount}) · Σᵢ (Guadagnoᵢ - Perditaᵢ)
+            </span>
           </div>
         </div>
 
         {/* 4 Highlight Cards: Mean Values per Single Sestina */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Primary Metric: Mean Net Profit/Loss per Sestina (over 100 draws) */}
+          {/* Primary Metric: Mean Net Profit/Loss per Sestina (over N draws) */}
           <div className="p-4 rounded-2xl bg-slate-950 border-2 border-amber-500/40 space-y-1">
             <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300 block">
-              Media Guadagni/Perdite per Sestina (100 Conc.)
+              Media Guadagni/Perdite per Sestina ({formattedDrawsCount} Conc.)
             </span>
             <div className="flex items-center gap-2 pt-1">
               {pnl.meanNetProfitLossPerSestina >= 0 ? (
@@ -398,7 +650,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
           {/* Mean Cost & Best Sestina */}
           <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-              Spesa Media per Sestina (100 Estrazioni)
+              Spesa Media per Sestina ({formattedDrawsCount} Estrazioni)
             </span>
             <span className="text-2xl font-extrabold text-white font-mono block pt-1">
               {pnl.meanTotalCostPerSestina.toFixed(2)} €
@@ -417,7 +669,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                 <th className="py-3 px-4">Sestina</th>
                 <th className="py-3 px-4">Numeri Giocati</th>
                 <th className="py-3 px-4 text-center">Vincite (2pt / 3pt / 4+pt)</th>
-                <th className="py-3 px-4 text-right">Spesa (100 Conc.)</th>
+                <th className="py-3 px-4 text-right">Spesa ({formattedDrawsCount} Conc.)</th>
                 <th className="py-3 px-4 text-right">Guadagno Presunto</th>
                 <th className="py-3 px-4 text-right">Perdita Presunta</th>
                 <th className="py-3 px-4 text-right">Bilancio Netto Sestina</th>
@@ -455,7 +707,9 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                     </td>
                     <td className="py-3 px-4 text-center font-mono text-slate-300">
                       <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800">
-                        {row.hitsBreakdown.points2} / {row.hitsBreakdown.points3} / {highHits}
+                        {row.hitsBreakdown.points2.toLocaleString('it-IT')} /{' '}
+                        {row.hitsBreakdown.points3.toLocaleString('it-IT')} /{' '}
+                        {highHits.toLocaleString('it-IT')}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right font-mono text-slate-400">
@@ -523,15 +777,15 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
         </div>
       </div>
 
-      {/* SECTION 3: Top Numbers & 100 Simulated Extractions Log */}
+      {/* SECTION 3: Top Numbers & Simulated Extractions Log */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Top 12 Most Drawn Numbers in the 100 Simulations (4 cols) */}
+        {/* Left: Top 12 Most Drawn Numbers in the N Simulations (4 cols) */}
         <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <BarChart2 className="w-5 h-5 text-amber-400" />
               <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                Picchi Frequenza (100 Sim.)
+                Picchi Frequenza ({formattedDrawsCount} Sim.)
               </h3>
             </div>
             <span className="text-[10px] font-mono text-slate-400">Top 12 Estratti</span>
@@ -553,7 +807,8 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                       </span>
                     </div>
                     <span className="font-mono font-bold text-white">
-                      {item.count} <span className="text-[10px] text-slate-500">estrazioni</span>
+                      {item.count.toLocaleString('it-IT')}{' '}
+                      <span className="text-[10px] text-slate-500">estrazioni</span>
                     </span>
                   </div>
                   <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden">
@@ -568,14 +823,23 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
           </div>
         </div>
 
-        {/* Right: Table of the 100 Simulated Extractions (8 cols) */}
+        {/* Right: Table of the Simulated Extractions (8 cols) */}
         <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <Dices className="w-5 h-5 text-amber-400" />
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                Registro delle 100 Estrazioni Future Simulate
-              </h3>
+              <div>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Registro Estrazioni Future Simulate ({formattedDrawsCount} Totali)
+                </h3>
+                {totalDrawsCount > simResult.simulatedDraws.length && (
+                  <p className="text-[10px] text-slate-400">
+                    Visualizzate le prime {simResult.simulatedDraws.length} estrazioni nel registro
+                    dettagliato; statistiche e bilanci calcolati su tutte le {formattedDrawsCount}{' '}
+                    estrazioni.
+                  </p>
+                )}
+              </div>
             </div>
             <span className="text-xs font-mono text-slate-400">
               Pagina {simPage} di {totalSimPages}
@@ -629,9 +893,9 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
           {/* Pagination */}
           <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs text-slate-400">
             <span>
-              Estrazioni {(simPage - 1) * pageSize + 1} –{' '}
+              Estrazioni {(simPage - 1) * pageSize + 1} &ndash;{' '}
               {Math.min(simPage * pageSize, simResult.simulatedDraws.length)} di{' '}
-              {simResult.simulatedDraws.length}
+              {simResult.simulatedDraws.length} in tabella ({formattedDrawsCount} simulate)
             </span>
             <div className="flex items-center gap-2">
               <button

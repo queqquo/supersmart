@@ -18,7 +18,8 @@ import {
   SavedPlay,
   ScoringWeights,
   FilterOptions,
-  GeneratedColumn
+  GeneratedColumn,
+  SimulationGeneratorPreset
 } from './types/lottery';
 import {
   calculateNumberStatistics,
@@ -79,6 +80,7 @@ export default function App() {
   }, [draws, weights, filters]);
 
   const [weeklyColumns, setWeeklyColumns] = useState<GeneratedColumn[]>([]);
+  const [appliedSimPreset, setAppliedSimPreset] = useState<SimulationGeneratorPreset | null>(null);
 
   // OAuth & Access Control State
   const [acl, setAcl] = useState<UserAccessRecord[]>(() => loadACL());
@@ -256,6 +258,16 @@ export default function App() {
     saveFilters(newFilters);
   };
 
+  // Apply high-probability sestina, pool, and parameters from SimulationEngine to SystemGenerator
+  const handleApplySimulationPreset = (preset: SimulationGeneratorPreset) => {
+    setWeights(preset.recommendedWeights);
+    saveWeights(preset.recommendedWeights);
+    setFilters(preset.recommendedFilters);
+    saveFilters(preset.recommendedFilters);
+    setAppliedSimPreset(preset);
+    setActiveTab('generator');
+  };
+
   // Add / Insert new Draw (via Smart Paste or Import)
   const handleSaveDraw = (newDraw: Draw) => {
     const updated = insertDraw(newDraw);
@@ -339,6 +351,8 @@ export default function App() {
             onOpenSmartPaste={() => setIsSmartPasteOpen(true)}
             onColumnsGenerated={setWeeklyColumns}
             onOpenSimulationTab={() => setActiveTab('simulation')}
+            appliedSimPreset={appliedSimPreset}
+            onClearSimPreset={() => setAppliedSimPreset(null)}
           />
         )}
 
@@ -347,6 +361,7 @@ export default function App() {
             draws={draws}
             weeklyColumns={weeklyColumns.length > 0 ? weeklyColumns : defaultWeeklyColumns}
             onSavePlay={handleSavePlay}
+            onApplyToGenerator={handleApplySimulationPreset}
           />
         )}
 
