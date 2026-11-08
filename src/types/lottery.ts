@@ -51,12 +51,15 @@ export interface GeneratedColumn {
   highs: number;
 }
 
+export type CoverageTarget = 'ambi' | 'terni';
+
 export interface SystemGenerationResult {
   poolNumbers: number[];
   columns: GeneratedColumn[];
   totalCombinations: number;
   filteredCombinationsCount: number;
   executionTimeMs: number;
+  coverageTarget?: CoverageTarget;
   coverageMetrics: {
     poolSize: number;
     pairsCoveredCount: number;
@@ -168,6 +171,7 @@ export interface WeeklySestinePnLSummary {
 
 export interface HundredDrawsSimulationResult {
   methodology: SimulationMethodology;
+  coverageTarget: CoverageTarget;
   totalSimulatedDrawsCount: number; // 100 to 100,000 simulated draws
   simulatedDraws: Draw[]; // Materialized simulated future draws for log table (up to 500)
   numberFrequenciesInSim: Record<number, number>; // 1..90 -> count in N draws
@@ -197,6 +201,7 @@ export interface SimulationGeneratorPreset {
   appliedAt: string;
   simulatedDrawsCount: number;
   methodology: SimulationMethodology;
+  coverageTarget: CoverageTarget;
   highProbabilityNumbers: [number, number, number, number, number, number];
   recommendedJolly: number;
   recommendedSuperstar: number;

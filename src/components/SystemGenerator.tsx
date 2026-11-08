@@ -33,7 +33,8 @@ import {
   SavedPlay,
   NumberStat,
   GeneratedColumn,
-  SimulationGeneratorPreset
+  SimulationGeneratorPreset,
+  CoverageTarget
 } from '../types/lottery';
 import {
   calculateNumberStatistics,
@@ -60,6 +61,8 @@ interface SystemGeneratorProps {
   onOpenSimulationTab?: () => void;
   appliedSimPreset?: SimulationGeneratorPreset | null;
   onClearSimPreset?: () => void;
+  coverageTarget?: CoverageTarget;
+  onUpdateCoverageTarget?: (target: CoverageTarget) => void;
 }
 
 export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
@@ -73,11 +76,20 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   onColumnsGenerated,
   onOpenSimulationTab,
   appliedSimPreset,
-  onClearSimPreset
+  onClearSimPreset,
+  coverageTarget = 'ambi',
+  onUpdateCoverageTarget
 }) => {
   // Config state
   const [poolSizeV, setPoolSizeV] = useState<number>(12); // v in [10, 15]
   const [playMode, setPlayMode] = useState<PlayMode>('pure_coverage');
+  const [localCoverageTarget, setLocalCoverageTarget] = useState<CoverageTarget>(coverageTarget);
+  const activeCoverageTarget = onUpdateCoverageTarget ? coverageTarget : localCoverageTarget;
+
+  const handleSelectCoverageTarget = (target: CoverageTarget) => {
+    setLocalCoverageTarget(target);
+    onUpdateCoverageTarget?.(target);
+  };
   const [budgetMode, setBudgetMode] = useState<'preset' | 'custom'>('preset');
   const [selectedBudget, setSelectedBudget] = useState<number>(10);
   const [customBudgetInput, setCustomBudgetInput] = useState<string>('25');
@@ -255,7 +267,8 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       poolToUse,
       filters,
       targetCount,
-      playMode === 'superstar' ? superstarPool : undefined
+      playMode === 'superstar' ? superstarPool : undefined,
+      activeCoverageTarget
     );
 
     // If a simulation preset is active (or pinnedFirstSestina provided), ensure Colonna #1 is the High-Probability Sestina
@@ -306,9 +319,11 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       draws,
       systemResult.columns,
       'bayesian_hybrid_urn',
-      202604
+      202604,
+      100,
+      activeCoverageTarget
     ).weeklySystemPnL;
-  }, [draws, systemResult]);
+  }, [draws, systemResult, activeCoverageTarget]);
 
   // Apply imported simulation preset when provided
   useEffect(() => {
@@ -316,6 +331,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       setPoolSizeV(appliedSimPreset.top12PoolNumbers.length);
       setManualPoolEdit(true);
       setSelectedPool(appliedSimPreset.top12PoolNumbers);
+      if (appliedSimPreset.coverageTarget) {
+        setLocalCoverageTarget(appliedSimPreset.coverageTarget);
+      }
       handleRunOptimization(
         appliedSimPreset.top12PoolNumbers,
         appliedSimPreset.highProbabilityNumbers,
@@ -324,7 +342,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     }
   }, [appliedSimPreset]);
 
-  // Run on mount or when defaultTopVNumbers, playMode, or budget changes
+  // Run on mount or when defaultTopVNumbers, playMode, budget, or coverageTarget changes
   useEffect(() => {
     if (draws.length > 0) {
       if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
@@ -337,7 +355,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
         handleRunOptimization(defaultTopVNumbers);
       }
     }
-  }, [draws, defaultTopVNumbers, playMode, budgetAllocation.targetColumnsCount]);
+  }, [draws, defaultTopVNumbers, playMode, budgetAllocation.targetColumnsCount, activeCoverageTarget]);
 
   // Save Play to Ledger
   const handleSaveToLedger = () => {
@@ -442,16 +460,20 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                 Budget {budgetAllocation.clampedBudget.toFixed(2).replace('.', ',')} € / Settimana
               </span>
               <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                Covering Design C({poolSizeV}, 6, t, {budgetAllocation.targetColumnsCount})
+                Covering Design C({poolSizeV}, 6, {activeCoverageTarget === 'terni' ? '3' : '2'},{' '}
+                {budgetAllocation.targetColumnsCount})
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">
               Ottimizzatore Combinatorio SuperEnalotto
             </h2>
             <p className="text-xs text-slate-400 max-w-2xl">
-              Algoritmo ortogonale a costo zero che massimizza la copertura di ambi e terni da un pool di{' '}
-              <strong className="text-slate-200">{poolSizeV} numeri</strong> selezionati tramite scoring
-              pesato sui ritardi storici, frequenze cicliche e affinità spia.
+              Algoritmo ortogonale a costo zero che massimizza la copertura di{' '}
+              <strong className="text-amber-300">
+                {activeCoverageTarget === 'terni' ? 'terni (t = 3, Punto 3)' : 'ambi (t = 2, Punto 2)'}
+              </strong>{' '}
+              da un pool di <strong className="text-slate-200">{poolSizeV} numeri</strong> selezionati
+              tramite scoring pesato sui ritardi storici, frequenze cicliche e affinità spia.
             </p>
           </div>
 
@@ -618,6 +640,71 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               </span>
             </div>
           )}
+        </div>
+
+        {/* Coverage Target Quick Selector: Massimizza Ambi (t = 2) vs Massimizza Terni (t = 3) */}
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mr-1 shrink-0">
+              <span>Obiettivo Copertura:</span>
+            </span>
+
+            <button
+              type="button"
+              onClick={() => handleSelectCoverageTarget('ambi')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 border transition-all shrink-0 ${
+                activeCoverageTarget === 'ambi'
+                  ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md shadow-amber-500/20 font-extrabold'
+                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-amber-500/40 hover:text-amber-300'
+              }`}
+            >
+              <span>🎯 Massimizza Ambi (t = 2)</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                  activeCoverageTarget === 'ambi'
+                    ? 'bg-slate-950/20 text-slate-950 font-extrabold'
+                    : 'bg-slate-900 text-slate-400'
+                }`}
+              >
+                Garanzia Punto 2
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSelectCoverageTarget('terni')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 border transition-all shrink-0 ${
+                activeCoverageTarget === 'terni'
+                  ? 'bg-sky-500 text-slate-950 border-sky-300 shadow-md shadow-sky-500/20 font-extrabold'
+                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-sky-500/40 hover:text-sky-300'
+              }`}
+            >
+              <span>🚀 Massimizza Terni (t = 3)</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                  activeCoverageTarget === 'terni'
+                    ? 'bg-slate-950/20 text-slate-950 font-extrabold'
+                    : 'bg-slate-900 text-slate-400'
+                }`}
+              >
+                Ortogonale Punto 3
+              </span>
+            </button>
+          </div>
+
+          <div className="text-[11px] font-mono text-slate-400">
+            {activeCoverageTarget === 'terni' ? (
+              <span>
+                Modalità <strong className="text-sky-400">C({poolSizeV}, 6, 3)</strong>: priorità
+                triplette inedite (&times;14) e penalità collisione terni
+              </span>
+            ) : (
+              <span>
+                Modalità <strong className="text-amber-400">C({poolSizeV}, 6, 2)</strong>: priorità
+                coppie inedite (&times;8) per saturazione 100% ambi
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1006,23 +1093,51 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
 
                 {/* Metrics Stats row */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
-                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[10px] text-slate-400 block uppercase font-medium">Copertura Ambi</span>
+                  <div
+                    className={`bg-slate-950/80 p-3 rounded-xl border ${
+                      activeCoverageTarget === 'ambi'
+                        ? 'border-amber-500/60 ring-1 ring-amber-500/30'
+                        : 'border-slate-800'
+                    }`}
+                  >
+                    <span className="text-[10px] text-slate-400 block uppercase font-medium">
+                      Copertura Ambi {activeCoverageTarget === 'ambi' ? '🎯' : ''}
+                    </span>
                     <span className="text-base font-bold text-amber-400 font-mono">
-                      {systemResult.coverageMetrics.pairsCoveredCount} / {systemResult.coverageMetrics.pairsTotalInPool}
+                      {systemResult.coverageMetrics.pairsCoveredCount} /{' '}
+                      {systemResult.coverageMetrics.pairsTotalInPool}
                     </span>
                     <span className="text-[10px] text-slate-500 block">
-                      {Math.round((systemResult.coverageMetrics.pairsCoveredCount / systemResult.coverageMetrics.pairsTotalInPool) * 100)}% del pool
+                      {Math.round(
+                        (systemResult.coverageMetrics.pairsCoveredCount /
+                          Math.max(systemResult.coverageMetrics.pairsTotalInPool, 1)) *
+                          100
+                      )}
+                      % del pool
                     </span>
                   </div>
 
-                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[10px] text-slate-400 block uppercase font-medium">Copertura Terni</span>
+                  <div
+                    className={`bg-slate-950/80 p-3 rounded-xl border ${
+                      activeCoverageTarget === 'terni'
+                        ? 'border-sky-500/60 ring-1 ring-sky-500/30'
+                        : 'border-slate-800'
+                    }`}
+                  >
+                    <span className="text-[10px] text-slate-400 block uppercase font-medium">
+                      Copertura Terni {activeCoverageTarget === 'terni' ? '🚀' : ''}
+                    </span>
                     <span className="text-base font-bold text-sky-400 font-mono">
-                      {systemResult.coverageMetrics.tripletsCoveredCount} / {systemResult.coverageMetrics.tripletsTotalInPool}
+                      {systemResult.coverageMetrics.tripletsCoveredCount} /{' '}
+                      {systemResult.coverageMetrics.tripletsTotalInPool}
                     </span>
                     <span className="text-[10px] text-slate-500 block">
-                      {Math.round((systemResult.coverageMetrics.tripletsCoveredCount / systemResult.coverageMetrics.tripletsTotalInPool) * 100)}% del pool
+                      {Math.round(
+                        (systemResult.coverageMetrics.tripletsCoveredCount /
+                          Math.max(systemResult.coverageMetrics.tripletsTotalInPool, 1)) *
+                          100
+                      )}
+                      % del pool
                     </span>
                   </div>
 

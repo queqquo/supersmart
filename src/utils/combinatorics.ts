@@ -13,7 +13,8 @@ import {
   ColumnMatchResult,
   PlayResult,
   SavedPlay,
-  PlayMode
+  PlayMode,
+  CoverageTarget
 } from '../types/lottery';
 
 /**
@@ -145,7 +146,8 @@ export function applyStatisticalFilters(
 export function greedyCoveringReduction(
   candidates: number[][],
   poolNumbers: number[],
-  targetCount: number
+  targetCount: number,
+  coverageTarget: CoverageTarget = 'ambi'
 ): number[][] {
   if (candidates.length <= targetCount) {
     return candidates;
@@ -171,12 +173,14 @@ export function greedyCoveringReduction(
 
     // Number presence balance reward/penalty
     let balancePenalty = 0;
+    const overUseMultiplier = coverageTarget === 'terni' ? 6 : 15;
+    const underUseBonus = coverageTarget === 'terni' ? 4 : 10;
     for (const num of combo) {
       const currentCount = numberUsage[num] || 0;
       if (currentCount >= targetNumberPresence) {
-        balancePenalty += Math.pow(currentCount - targetNumberPresence + 1, 2) * 15;
+        balancePenalty += Math.pow(currentCount - targetNumberPresence + 1, 2) * overUseMultiplier;
       } else {
-        score += 10;
+        score += underUseBonus;
       }
     }
 
@@ -191,20 +195,29 @@ export function greedyCoveringReduction(
       }
     }
 
-    // New triplet coverage
+    // New triplet coverage & triplet collision count
     let newTriplets = 0;
+    let repeatedTriplets = 0;
     for (let i = 0; i < combo.length; i++) {
       for (let j = i + 1; j < combo.length; j++) {
         for (let m = j + 1; m < combo.length; m++) {
           const tripKey = `${combo[i]},${combo[j]},${combo[m]}`;
           if (!coveredTriplets.has(tripKey)) {
             newTriplets++;
+          } else {
+            repeatedTriplets++;
           }
         }
       }
     }
 
-    score += newPairs * 8 + newTriplets * 2 - balancePenalty;
+    if (coverageTarget === 'terni') {
+      // Orthogonal C(v, 6, 3) mode: prioritize new triplets (t=3) and penalize triplet collisions
+      score += newTriplets * 14 + newPairs * 1.5 - repeatedTriplets * 6 - balancePenalty;
+    } else {
+      // Orthogonal C(v, 6, 2) mode: prioritize new pairs (t=2)
+      score += newPairs * 8 + newTriplets * 2 - balancePenalty;
+    }
     return score;
   }
 
@@ -473,7 +486,8 @@ export function generateOptimizedSystem(
   poolNumbers: number[],
   filters: FilterOptions,
   targetColumnsCount: number,
-  superstarPool?: number[]
+  superstarPool?: number[],
+  coverageTarget: CoverageTarget = 'ambi'
 ): SystemGenerationResult {
   const startTime = performance.now();
   const sortedPool = [...poolNumbers].sort((a, b) => a - b);
@@ -497,8 +511,13 @@ export function generateOptimizedSystem(
     }
   }
 
-  // 3. Greedy Covering Design
-  const selectedCombos = greedyCoveringReduction(filtered, sortedPool, targetColumnsCount);
+  // 3. Greedy Covering Design (t=2 for ambi or t=3 for terni)
+  const selectedCombos = greedyCoveringReduction(
+    filtered,
+    sortedPool,
+    targetColumnsCount,
+    coverageTarget
+  );
 
   // 4. Form columns with metrics and SuperStar if requested
   const generatedColumns: GeneratedColumn[] = selectedCombos.map((numbers, idx) => {
@@ -542,6 +561,7 @@ export function generateOptimizedSystem(
     totalCombinations: allCombos.length,
     filteredCombinationsCount: filtered.length,
     executionTimeMs: Math.round(endTime - startTime),
+    coverageTarget,
     coverageMetrics
   };
 }

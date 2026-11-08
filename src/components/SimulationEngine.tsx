@@ -28,7 +28,8 @@ import {
   SimulationMethodology,
   HundredDrawsSimulationResult,
   SavedPlay,
-  SimulationGeneratorPreset
+  SimulationGeneratorPreset,
+  CoverageTarget
 } from '../types/lottery';
 import {
   runNext100DrawsSimulation,
@@ -43,15 +44,29 @@ interface SimulationEngineProps {
   weeklyColumns: GeneratedColumn[];
   onSavePlay: (play: SavedPlay) => void;
   onApplyToGenerator?: (preset: SimulationGeneratorPreset) => void;
+  coverageTarget?: CoverageTarget;
+  onUpdateCoverageTarget?: (target: CoverageTarget) => void;
 }
 
 export const SimulationEngine: React.FC<SimulationEngineProps> = ({
   draws,
   weeklyColumns,
   onSavePlay,
-  onApplyToGenerator
+  onApplyToGenerator,
+  coverageTarget = 'ambi',
+  onUpdateCoverageTarget
 }) => {
   const [methodology, setMethodology] = useState<SimulationMethodology>('bayesian_hybrid_urn');
+  const [localCoverageTarget, setLocalCoverageTarget] = useState<CoverageTarget>(coverageTarget);
+  const activeCoverageTarget = onUpdateCoverageTarget ? coverageTarget : localCoverageTarget;
+
+  const handleSelectCoverageTarget = (target: CoverageTarget) => {
+    setLocalCoverageTarget(target);
+    onUpdateCoverageTarget?.(target);
+    setAppliedToGen(false);
+    setSavedHighProb(false);
+  };
+
   const [numDrawsToSimulate, setNumDrawsToSimulate] = useState<number>(100);
   const [customDrawsInput, setCustomDrawsInput] = useState<string>('100');
   const [drawsRangeWarning, setDrawsRangeWarning] = useState<string | null>(null);
@@ -69,9 +84,10 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
       weeklyColumns,
       methodology,
       simSeed,
-      numDrawsToSimulate
+      numDrawsToSimulate,
+      activeCoverageTarget
     );
-  }, [draws, weeklyColumns, methodology, simSeed, numDrawsToSimulate]);
+  }, [draws, weeklyColumns, methodology, simSeed, numDrawsToSimulate, activeCoverageTarget]);
 
   const totalDrawsCount = simResult.totalSimulatedDrawsCount;
   const formattedDrawsCount = totalDrawsCount.toLocaleString('it-IT');
@@ -171,6 +187,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
       appliedAt: new Date().toISOString(),
       simulatedDrawsCount: totalDrawsCount,
       methodology,
+      coverageTarget: activeCoverageTarget,
       highProbabilityNumbers: [...hp.numbers] as [
         number,
         number,
@@ -364,6 +381,71 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             {drawsRangeWarning && (
               <span className="text-[11px] font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
                 {drawsRangeWarning}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Coverage Target Quick Selector in Simulation: Massimizza Ambi (t = 2) vs Massimizza Terni (t = 3) */}
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mr-1 shrink-0">
+              <span>Obiettivo Copertura:</span>
+            </span>
+
+            <button
+              type="button"
+              onClick={() => handleSelectCoverageTarget('ambi')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 border transition-all shrink-0 ${
+                activeCoverageTarget === 'ambi'
+                  ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md shadow-amber-500/20 font-extrabold'
+                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-amber-500/40 hover:text-amber-300'
+              }`}
+            >
+              <span>🎯 Massimizza Ambi (t = 2)</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                  activeCoverageTarget === 'ambi'
+                    ? 'bg-slate-950/20 text-slate-950 font-extrabold'
+                    : 'bg-slate-900 text-slate-400'
+                }`}
+              >
+                Sinergia Coppie (Punto 2)
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSelectCoverageTarget('terni')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 border transition-all shrink-0 ${
+                activeCoverageTarget === 'terni'
+                  ? 'bg-sky-500 text-slate-950 border-sky-300 shadow-md shadow-sky-500/20 font-extrabold'
+                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-sky-500/40 hover:text-sky-300'
+              }`}
+            >
+              <span>🚀 Massimizza Terni (t = 3)</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                  activeCoverageTarget === 'terni'
+                    ? 'bg-slate-950/20 text-slate-950 font-extrabold'
+                    : 'bg-slate-900 text-slate-400'
+                }`}
+              >
+                Ortogonale Punto 3
+              </span>
+            </button>
+          </div>
+
+          <div className="text-[11px] font-mono text-slate-400">
+            {activeCoverageTarget === 'terni' ? (
+              <span>
+                Sintesi orientata ai <strong className="text-sky-400">Terni (t = 3)</strong>:
+                massimizza le triplette co-occorrenti nelle {formattedDrawsCount} simulazioni
+              </span>
+            ) : (
+              <span>
+                Sintesi orientata agli <strong className="text-amber-400">Ambi (t = 2)</strong>:
+                massimizza le coppie co-occorrenti nelle {formattedDrawsCount} simulazioni
               </span>
             )}
           </div>

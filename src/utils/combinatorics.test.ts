@@ -227,3 +227,29 @@ test('generateFullHistoricalDataset provides complete official archive from 2009
     assert.ok(yearsPresent.has(yr), `Year ${yr} must be present in historical archive`);
   }
 });
+
+test('generateOptimizedSystem supports both Massimizza Ambi (t=2) and Massimizza Terni (t=3) coverage targets', () => {
+  const pool = [4, 11, 18, 25, 32, 39, 46, 53, 60, 67, 74, 81];
+  const filters = {
+    evenOdd: true,
+    highLow: true,
+    sumRange: true,
+    minSum: 190,
+    maxSum: 350,
+    consecutive: true,
+    decades: true
+  };
+
+  const resAmbi = generateOptimizedSystem(pool, filters, 10, undefined, 'ambi');
+  const resTerni = generateOptimizedSystem(pool, filters, 10, undefined, 'terni');
+
+  assert.equal(resAmbi.coverageTarget, 'ambi');
+  assert.equal(resTerni.coverageTarget, 'terni');
+  assert.equal(resAmbi.columns.length, 10);
+  assert.equal(resTerni.columns.length, 10);
+  assert.ok(
+    resTerni.coverageMetrics.tripletsCoveredCount >= resAmbi.coverageMetrics.tripletsCoveredCount,
+    `Terni mode should cover at least as many triplets (${resTerni.coverageMetrics.tripletsCoveredCount}) as Ambi mode (${resAmbi.coverageMetrics.tripletsCoveredCount})`
+  );
+});
+

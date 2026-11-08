@@ -11,7 +11,8 @@ import {
   WeeklySestinePnLSummary,
   HundredDrawsSimulationResult,
   ScoringWeights,
-  FilterOptions
+  FilterOptions,
+  CoverageTarget
 } from '../types/lottery';
 import {
   generateCombinations,
@@ -446,7 +447,8 @@ export function runNext100DrawsSimulation(
   weeklyColumns: GeneratedColumn[],
   methodology: SimulationMethodology = 'bayesian_hybrid_urn',
   seed: number = Date.now(),
-  numDrawsToSimulate: number = MIN_SIMULATION_DRAWS
+  numDrawsToSimulate: number = MIN_SIMULATION_DRAWS,
+  coverageTarget: CoverageTarget = 'ambi'
 ): HundredDrawsSimulationResult {
   const startTime = performance.now();
   const totalSimulatedDrawsCount = clampSimulationDrawsCount(numDrawsToSimulate);
@@ -758,25 +760,72 @@ export function runNext100DrawsSimulation(
   // Scale factor so sumPenalty stays proportional regardless of N (100 vs 100,000)
   const scaleFactor = 100 / totalSimulatedDrawsCount;
 
+  // When optimizing for Terni (t = 3), compute exact simulated triplet co-occurrences among top12Pool
+  const poolIndexMap = new Int8Array(91).fill(-1);
+  for (let i = 0; i < top12Pool.length; i++) {
+    poolIndexMap[top12Pool[i]] = i;
+  }
+  const simTripletCube = new Int32Array(12 * 12 * 12);
+  if (coverageTarget === 'terni') {
+    const matchedIdx = new Int8Array(6);
+    for (let step = 0; step < totalSimulatedDrawsCount; step++) {
+      const base = step * 8;
+      let mCount = 0;
+      for (let k = 0; k < 6; k++) {
+        const idx = poolIndexMap[compactDraws[base + k]];
+        if (idx >= 0) {
+          matchedIdx[mCount++] = idx;
+        }
+      }
+      if (mCount >= 3) {
+        for (let a = 0; a < mCount - 2; a++) {
+          const ia = matchedIdx[a] * 144;
+          for (let b = a + 1; b < mCount - 1; b++) {
+            const ib = matchedIdx[b] * 12;
+            for (let c = b + 1; c < mCount; c++) {
+              simTripletCube[ia + ib + matchedIdx[c]]++;
+            }
+          }
+        }
+      }
+    }
+  }
+
   let bestCombo = validCombos[0];
   let bestComboScore = -Infinity;
 
   for (const combo of validCombos) {
     let freqScore = 0;
     let pairSynergy = 0;
+    let tripletSynergy = 0;
+
     for (let i = 0; i < 6; i++) {
       const ci = combo[i];
       freqScore += simFreqArr[ci] * 10 * scaleFactor;
       const rowOffset = ci * 91;
       for (let j = i + 1; j < 6; j++) {
-        pairSynergy += simPairFlat[rowOffset + combo[j]] * 25 * scaleFactor;
+        const cj = combo[j];
+        pairSynergy += simPairFlat[rowOffset + cj] * (coverageTarget === 'terni' ? 10 : 25) * scaleFactor;
+        if (coverageTarget === 'terni') {
+          const ia = poolIndexMap[ci];
+          const ib = poolIndexMap[cj];
+          if (ia >= 0 && ib >= 0) {
+            const baseTri = ia * 144 + ib * 12;
+            for (let m = j + 1; m < 6; m++) {
+              const ic = poolIndexMap[combo[m]];
+              if (ic >= 0) {
+                tripletSynergy += simTripletCube[baseTri + ic] * 65 * scaleFactor;
+              }
+            }
+          }
+        }
       }
     }
 
     const sum = combo[0] + combo[1] + combo[2] + combo[3] + combo[4] + combo[5];
     const sumPenalty = Math.abs(sum - 273) * 0.25;
 
-    const totalScore = freqScore + pairSynergy - sumPenalty;
+    const totalScore = freqScore + pairSynergy + tripletSynergy - sumPenalty;
     if (totalScore > bestComboScore) {
       bestComboScore = totalScore;
       bestCombo = combo;
@@ -883,6 +932,7 @@ export function runNext100DrawsSimulation(
 
   return {
     methodology,
+    coverageTarget,
     totalSimulatedDrawsCount,
     simulatedDraws,
     numberFrequenciesInSim,

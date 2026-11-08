@@ -19,7 +19,8 @@ import {
   ScoringWeights,
   FilterOptions,
   GeneratedColumn,
-  SimulationGeneratorPreset
+  SimulationGeneratorPreset,
+  CoverageTarget
 } from './types/lottery';
 import {
   calculateNumberStatistics,
@@ -72,12 +73,14 @@ export default function App() {
   const [isSmartPasteOpen, setIsSmartPasteOpen] = useState(false);
 
   // Compute initial weekly columns so Simulation tab always has the current weekly system even if opened directly
+  const [coverageTarget, setCoverageTarget] = useState<CoverageTarget>('ambi');
+
   const defaultWeeklyColumns = useMemo<GeneratedColumn[]>(() => {
     const stats = calculateNumberStatistics(draws, 36);
     const scored = scoreAllNumbers(stats, weights, 36);
     const pool = scored.slice(0, 12).map((s) => s.number).sort((a, b) => a - b);
-    return generateOptimizedSystem(pool, filters, 10).columns;
-  }, [draws, weights, filters]);
+    return generateOptimizedSystem(pool, filters, 10, undefined, coverageTarget).columns;
+  }, [draws, weights, filters, coverageTarget]);
 
   const [weeklyColumns, setWeeklyColumns] = useState<GeneratedColumn[]>([]);
   const [appliedSimPreset, setAppliedSimPreset] = useState<SimulationGeneratorPreset | null>(null);
@@ -264,6 +267,9 @@ export default function App() {
     saveWeights(preset.recommendedWeights);
     setFilters(preset.recommendedFilters);
     saveFilters(preset.recommendedFilters);
+    if (preset.coverageTarget) {
+      setCoverageTarget(preset.coverageTarget);
+    }
     setAppliedSimPreset(preset);
     setActiveTab('generator');
   };
@@ -353,6 +359,8 @@ export default function App() {
             onOpenSimulationTab={() => setActiveTab('simulation')}
             appliedSimPreset={appliedSimPreset}
             onClearSimPreset={() => setAppliedSimPreset(null)}
+            coverageTarget={coverageTarget}
+            onUpdateCoverageTarget={setCoverageTarget}
           />
         )}
 
@@ -362,6 +370,8 @@ export default function App() {
             weeklyColumns={weeklyColumns.length > 0 ? weeklyColumns : defaultWeeklyColumns}
             onSavePlay={handleSavePlay}
             onApplyToGenerator={handleApplySimulationPreset}
+            coverageTarget={coverageTarget}
+            onUpdateCoverageTarget={setCoverageTarget}
           />
         )}
 
