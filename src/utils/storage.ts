@@ -27,7 +27,8 @@ export const DEFAULT_FILTERS: FilterOptions = {
   minSum: 190,
   maxSum: 350,
   consecutive: true,
-  decades: true
+  decades: true,
+  cadences: true
 };
 
 // --- IndexedDB Helper for High-Capacity Zero-Cost Persistence of Saved Plays ---
@@ -435,7 +436,10 @@ export function saveWeights(weights: ScoringWeights): void {
 export function loadFilters(): FilterOptions {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.FILTERS);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { ...DEFAULT_FILTERS, ...parsed };
+    }
   } catch (e) {
     console.warn('Error loading filters:', e);
   }

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Dices,
   Sparkles,
@@ -20,7 +20,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Sliders,
-  ArrowRightCircle
+  ArrowRightCircle,
+  Cpu,
+  ShieldCheck
 } from 'lucide-react';
 import {
   Draw,
@@ -29,15 +31,19 @@ import {
   HundredDrawsSimulationResult,
   SavedPlay,
   SimulationGeneratorPreset,
-  CoverageTarget
+  CoverageTarget,
+  SmartPoolRecommendationResult
 } from '../types/lottery';
 import {
   runNext100DrawsSimulation,
+  generateSmartPoolRecommendation,
   MIN_SIMULATION_DRAWS,
   MAX_SIMULATION_DRAWS,
   PRESET_SIMULATION_COUNTS,
   clampSimulationDrawsCount
 } from '../utils/monteCarloSimulation';
+import { runSimulationInWorker } from '../utils/simulationWorkerClient';
+import { DEFAULT_FILTERS } from '../utils/storage';
 
 interface SimulationEngineProps {
   draws: Draw[];
@@ -53,10 +59,11 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
   weeklyColumns,
   onSavePlay,
   onApplyToGenerator,
-  coverageTarget = 'ambi',
+  coverageTarget = 'terni',
   onUpdateCoverageTarget
 }) => {
-  const [methodology, setMethodology] = useState<SimulationMethodology>('bayesian_hybrid_urn');
+  // Punto 3: Urna ipergeometrica pura ('hypergeometric_pure_urn') come default per evitare data leakage
+  const [methodology, setMethodology] = useState<SimulationMethodology>('hypergeometric_pure_urn');
   const [localCoverageTarget, setLocalCoverageTarget] = useState<CoverageTarget>(coverageTarget);
   const activeCoverageTarget = onUpdateCoverageTarget ? coverageTarget : localCoverageTarget;
 
@@ -64,6 +71,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
     setLocalCoverageTarget(target);
     onUpdateCoverageTarget?.(target);
     setAppliedToGen(false);
+    setAppliedSmartPoolToGen(false);
     setSavedHighProb(false);
   };
 
@@ -77,16 +85,87 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
   const [simPage, setSimPage] = useState(1);
   const pageSize = 10;
 
-  // Run the N-draw official methodology simulation (100 to 100,000 draws)
-  const simResult: HundredDrawsSimulationResult = useMemo(() => {
-    return runNext100DrawsSimulation(
+  // Punto 3: Walk-Forward Smart Pool (10-15 numeri consigliati per il prossimo concorso)
+  const [smartPoolSize, setSmartPoolSize] = useState<number>(12);
+  const [appliedSmartPoolToGen, setAppliedSmartPoolToGen] = useState<boolean>(false);
+
+  const smartPoolRec: SmartPoolRecommendationResult = useMemo(() => {
+    return generateSmartPoolRecommendation(draws, smartPoolSize);
+  }, [draws, smartPoolSize]);
+
+  const smartPoolDecadesCount = useMemo(
+    () =>
+      Object.values(smartPoolRec.decadeDistribution).filter((cnt) => cnt > 0).length,
+    [smartPoolRec]
+  );
+
+  const smartPoolCadencesCount = useMemo(
+    () =>
+      Object.values(smartPoolRec.cadenceDistribution).filter((cnt) => cnt > 0).length,
+    [smartPoolRec]
+  );
+
+  // Punto 5: Web Worker simulation state + initial synchronous baseline
+  const [simResult, setSimResult] = useState<HundredDrawsSimulationResult>(() =>
+    runNext100DrawsSimulation(
       draws,
       weeklyColumns,
-      methodology,
+      'hypergeometric_pure_urn',
       simSeed,
-      numDrawsToSimulate,
+      100,
       activeCoverageTarget
-    );
+    )
+  );
+  const [isSimulating, setIsSimulating] = useState<boolean>(false);
+  const [simProgress, setSimProgress] = useState<{ completed: number; total: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setIsSimulating(true);
+    setSimProgress({ completed: 0, total: numDrawsToSimulate });
+
+    runSimulationInWorker(
+      {
+        historicalDraws: draws,
+        weeklyColumns,
+        methodology,
+        seed: simSeed,
+        numDrawsToSimulate,
+        coverageTarget: activeCoverageTarget
+      },
+      (completedDraws, totalDraws) => {
+        if (!cancelled) {
+          setSimProgress({ completed: completedDraws, total: totalDraws });
+        }
+      }
+    )
+      .then((res) => {
+        if (!cancelled) {
+          setSimResult(res);
+          setIsSimulating(false);
+          setSimProgress(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          const fallback = runNext100DrawsSimulation(
+            draws,
+            weeklyColumns,
+            methodology,
+            simSeed,
+            numDrawsToSimulate,
+            activeCoverageTarget
+          );
+          setSimResult(fallback);
+          setIsSimulating(false);
+          setSimProgress(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [draws, weeklyColumns, methodology, simSeed, numDrawsToSimulate, activeCoverageTarget]);
 
   const totalDrawsCount = simResult.totalSimulatedDrawsCount;
@@ -201,9 +280,33 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
       top12PoolNumbers: [...simResult.top12PoolNumbers],
       recommendedWeights: { ...simResult.recommendedWeights },
       recommendedFilters: { ...simResult.recommendedFilters },
-      confidenceIndex: hp.confidenceIndex
+      confidenceIndex: hp.confidenceIndex,
+      sourceLabel: `Simulazione Monte Carlo (${formattedDrawsCount} estrazioni)`
     };
     setAppliedToGen(true);
+    onApplyToGenerator?.(preset);
+  };
+
+  // Punto 3: Copia Pool Consigliato (10-15 num) nel Generatore Sestine con Garanzia Terno (coverageTarget = 'terni', 10€ / 10 colonne)
+  const handleApplySmartPoolToGenerator = () => {
+    const preset: SimulationGeneratorPreset = {
+      id: `walk-forward-pool-${Date.now()}`,
+      appliedAt: new Date().toISOString(),
+      simulatedDrawsCount: smartPoolRec.walkForwardWindowSize,
+      methodology: 'hypergeometric_pure_urn',
+      coverageTarget: 'terni',
+      recommendedJolly: simResult.highProbabilitySestina.recommendedJolly,
+      recommendedSuperstar: simResult.highProbabilitySestina.recommendedSuperstar,
+      top12PoolNumbers: [...smartPoolRec.recommendedPool],
+      recommendedWeights: { ...smartPoolRec.mappedScoringWeights },
+      recommendedFilters: { ...DEFAULT_FILTERS, cadences: true },
+      confidenceIndex: 92,
+      enforceTenEuroBudget: true,
+      sourceLabel: `Walk-Forward Optimization (${smartPoolRec.poolSize} numeri • Ultimi ${smartPoolRec.walkForwardWindowSize} Concorsi Reali)`
+    };
+    setLocalCoverageTarget('terni');
+    onUpdateCoverageTarget?.('terni');
+    setAppliedSmartPoolToGen(true);
     onApplyToGenerator?.(preset);
   };
 
@@ -245,6 +348,10 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
   const hp = simResult.highProbabilitySestina;
   const pnl = simResult.weeklySystemPnL;
   const rw = simResult.recommendedWeights;
+  const progressPct =
+    simProgress && simProgress.total > 0
+      ? Math.min(100, Math.round((simProgress.completed / simProgress.total) * 100))
+      : 0;
 
   return (
     <div className="space-y-6">
@@ -254,11 +361,14 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                Motore Monte Carlo &bull; {formattedDrawsCount} Concorsi Futuri
+                Motore Monte Carlo Web Worker &bull; {formattedDrawsCount} Concorsi Futuri
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {simResult.executionTimeMs} ms
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                Payout Dinamico Anti-Crowd [0.75x &ndash; 1.65x]
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">
@@ -268,8 +378,9 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               Riproduce fedelmente la metodologia di estrazione ufficiale del SuperEnalotto a{' '}
               <strong className="text-slate-200">2 Urne Separate senza reimmissione</strong> (Urna 1:
               90 sfere per i 6 numeri + 7ª sfera Jolly; Urna 2 indipendente: 90 sfere per il numero
-              SuperStar) su un orizzonte configurabile da{' '}
-              <strong className="text-amber-300">100 fino a 100.000 estrazioni consecutive</strong>.
+              SuperStar) su un orizzonte da{' '}
+              <strong className="text-amber-300">100 fino a 250.000 estrazioni consecutive</strong>{' '}
+              con quote dinamiche <strong className="text-sky-300">Anti-Crowd</strong>.
             </p>
           </div>
 
@@ -278,49 +389,78 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             <div className="flex items-center p-1 bg-slate-950 rounded-xl border border-slate-800">
               <button
                 type="button"
-                onClick={() => setMethodology('bayesian_hybrid_urn')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  methodology === 'bayesian_hybrid_urn'
-                    ? 'bg-amber-500 text-slate-950 shadow'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Urna Statistica Bayesiana
-              </button>
-              <button
-                type="button"
                 onClick={() => setMethodology('hypergeometric_pure_urn')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   methodology === 'hypergeometric_pure_urn'
                     ? 'bg-sky-500 text-slate-950 shadow'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
+                title="Urna Fisica Ipergeometrica Pura (Fisher-Yates uniforme su 90 sfere senza data leakage)"
               >
-                Urna Fisica Equiprobabile
+                Urna Fisica Equiprobabile (Pura)
+              </button>
+              <button
+                type="button"
+                onClick={() => setMethodology('bayesian_hybrid_urn')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  methodology === 'bayesian_hybrid_urn'
+                    ? 'bg-amber-500 text-slate-950 shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Scenario secondario di stress-test con pesatura storica bayesiana"
+              >
+                Scenario Stress-Test Bayesiano
               </button>
             </div>
 
             <button
               type="button"
               onClick={handleRerunSimulation}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer active:scale-95"
+              disabled={isSimulating}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-60 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer active:scale-95"
             >
-              <RefreshCw className="w-4 h-4" />
-              <span>Risimula {formattedDrawsCount} Estrazioni</span>
+              <RefreshCw className={`w-4 h-4 ${isSimulating ? 'animate-spin' : ''}`} />
+              <span>
+                {isSimulating
+                  ? `Calcolo Worker (${progressPct}%)...`
+                  : `Risimula ${formattedDrawsCount} Estrazioni`}
+              </span>
             </button>
           </div>
         </div>
 
-        {/* Simulation Draws Count Selector Bar (100 to 100,000 Draws) */}
+        {/* Web Worker Progress Bar when running large simulations */}
+        {isSimulating && simProgress && (
+          <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/40 space-y-1.5">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-amber-300 font-bold flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5 animate-pulse" />
+                <span>
+                  Web Worker Monte Carlo in esecuzione: {simProgress.completed.toLocaleString('it-IT')}{' '}
+                  / {simProgress.total.toLocaleString('it-IT')} estrazioni
+                </span>
+              </span>
+              <span className="text-emerald-400 font-extrabold">{progressPct}%</span>
+            </div>
+            <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 via-sky-400 to-emerald-400 transition-all duration-150"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Simulation Draws Count Selector Bar (100 to 250,000 Draws) */}
         <div className="pt-3 border-t border-slate-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mr-1">
               <Dices className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Estrazioni da Simulare (100 &ndash; 100.000):</span>
+              <span>Estrazioni da Simulare (100 &ndash; 250.000):</span>
             </span>
 
             {PRESET_SIMULATION_COUNTS.map((presetCount) => {
-              const isSelected = totalDrawsCount === presetCount;
+              const isSelected = numDrawsToSimulate === presetCount;
               return (
                 <button
                   key={presetCount}
@@ -338,7 +478,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             })}
           </div>
 
-          {/* Free Input + Range Slider (100 .. 100,000) */}
+          {/* Free Input + Range Slider (100 .. 250,000) */}
           <div className="flex flex-wrap items-center gap-2.5 bg-slate-950/90 px-3.5 py-2 rounded-xl border border-slate-800">
             <label
               htmlFor="sim-draws-count-input"
@@ -355,7 +495,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               value={customDrawsInput}
               onChange={(e) => handleCustomDrawsInputChange(e.target.value)}
               onBlur={handleCustomDrawsInputBlur}
-              aria-label="Numero di estrazioni da simulare (da 100 a 100000)"
+              aria-label="Numero di estrazioni da simulare (da 100 a 250000)"
               className="w-28 rounded-lg bg-slate-900 border border-amber-500/50 px-2.5 py-1 text-center font-mono font-extrabold text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
             />
             <input
@@ -363,7 +503,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               min={MIN_SIMULATION_DRAWS}
               max={MAX_SIMULATION_DRAWS}
               step={100}
-              value={totalDrawsCount}
+              value={numDrawsToSimulate}
               onChange={(e) => {
                 const val = parseInt(e.target.value, 10) || 100;
                 const clamped = clampSimulationDrawsCount(val);
@@ -372,7 +512,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                 setCustomDrawsInput(String(clamped));
                 setSimPage(1);
               }}
-              aria-label="Slider numero estrazioni da simulare (100-100000)"
+              aria-label="Slider numero estrazioni da simulare (100-250000)"
               className="w-32 sm:w-44 h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
             />
             <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">
@@ -452,6 +592,136 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
         </div>
       </div>
 
+      {/* PUNTO 3: Motore Walk-Forward per i 10-15 Numeri Consigliati (Separato dall'Urna Fisica) */}
+      <div className="bg-gradient-to-r from-slate-900 via-sky-950/25 to-slate-900 border-2 border-sky-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+          <div className="space-y-3 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-sky-500 text-slate-950 flex items-center gap-1.5 shadow">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Walk-Forward Optimization &bull; Zero Data Leakage
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                Finestra Mobile: Ultimi {smartPoolRec.walkForwardWindowSize} Concorsi Reali
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-slate-950 text-sky-300 border border-slate-800">
+                Dispersione: {smartPoolDecadesCount} Decine &bull; {smartPoolCadencesCount} Cadenze
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg sm:text-xl font-extrabold text-white">
+                  Pool Consigliato Walk-Forward ({smartPoolRec.poolSize} Numeri ad Alta Priorità
+                  Statistica)
+                </h3>
+                <p className="text-xs text-slate-400 max-w-2xl">
+                  Addestrato out-of-sample sui concorsi reali usando esclusivamente i dati fino al
+                  concorso <code className="text-sky-300">t - 1</code> per predire il concorso{' '}
+                  <code className="text-sky-300">t</code>, con vincolo di bilanciamento per decine e
+                  cadenze.
+                </p>
+              </div>
+
+              {/* Selector for Pool Size: 10 to 15 numbers */}
+              <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0">
+                <span className="text-xs font-bold text-slate-300 px-2">Dimensione Pool:</span>
+                {[10, 11, 12, 13, 14, 15].map((sz) => (
+                  <button
+                    key={sz}
+                    type="button"
+                    onClick={() => {
+                      setSmartPoolSize(sz);
+                      setAppliedSmartPoolToGen(false);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-mono font-extrabold cursor-pointer transition-all ${
+                      smartPoolSize === sz
+                        ? 'bg-sky-500 text-slate-950 shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {sz}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Recommended 10-15 Pool Balls */}
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              {smartPoolRec.recommendedPool.map((num) => (
+                <div key={num} className="flex flex-col items-center gap-1">
+                  <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-sky-300 via-sky-500 to-blue-600 text-slate-950 font-black text-sm sm:text-base flex items-center justify-center shadow-lg shadow-sky-500/25 border-2 border-sky-200 font-mono">
+                    {num}
+                  </div>
+                  <span className="text-[9px] font-mono text-slate-400">
+                    D{Math.min(Math.floor(num / 10), 9)}·C{num % 10}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Optimal Walk-Forward Weights Summary */}
+            <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+                <span className="text-slate-400">Strategia Vincente ({smartPoolRec.bestStrategy.label}):</span>
+                <span className="font-mono font-bold text-sky-300">
+                  Hot={smartPoolRec.bestStrategy.wFreqHot.toFixed(2)} &bull; Cold=
+                  {smartPoolRec.bestStrategy.wFreqCold.toFixed(2)} &bull; Rit=
+                  {smartPoolRec.bestStrategy.wDelay.toFixed(2)} &bull; CoOcc=
+                  {smartPoolRec.bestStrategy.wCoOccurrence.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+                <span className="text-slate-400">
+                  Risultato Walk-Forward ({smartPoolRec.walkForwardWindowSize} conc.):
+                </span>
+                <span className="font-mono font-bold text-emerald-400">
+                  {smartPoolRec.bestStrategy.quaterneHitCount +
+                    smartPoolRec.bestStrategy.cinquineHitCount}
+                  x (4+pt) &bull; {smartPoolRec.bestStrategy.terniHitCount}x Terni &bull;{' '}
+                  {smartPoolRec.bestStrategy.ambiHitCount}x Ambi
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Action Box: Copia Pool Consigliato (10-15 num) nel Generatore Sestine */}
+          <div className="bg-slate-950/90 border border-sky-500/30 rounded-2xl p-4 lg:w-96 shrink-0 space-y-3">
+            <div className="text-xs font-bold text-sky-300 uppercase tracking-wider border-b border-slate-800 pb-2">
+              Trasferimento Diretto Matrice Garanzia Terno
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Imposta i <strong className="text-white">{smartPoolRec.poolSize} numeri</strong>{' '}
+              selezionati dal Walk-Forward nel Generatore Sestine e attiva automaticamente la
+              modalità <strong className="text-sky-300">Garanzia Terno (t = 3, 10€ / 10 colonne)</strong>.
+            </p>
+
+            {onApplyToGenerator && (
+              <button
+                type="button"
+                onClick={handleApplySmartPoolToGenerator}
+                className={`w-full py-3 px-3.5 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
+                  appliedSmartPoolToGen
+                    ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/20'
+                    : 'bg-gradient-to-r from-sky-400 via-sky-500 to-blue-600 hover:from-sky-300 hover:to-blue-500 text-slate-950 shadow-sky-500/25 border border-sky-300'
+                }`}
+              >
+                {appliedSmartPoolToGen ? (
+                  <Check className="w-4 h-4 shrink-0" />
+                ) : (
+                  <ArrowRightCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>
+                  {appliedSmartPoolToGen
+                    ? `Pool (${smartPoolRec.poolSize} num) Applicato con Garanzia Terno!`
+                    : `Copia Pool Consigliato (${smartPoolRec.poolSize} num) nel Generatore Sestine`}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* SECTION 1: High-Probability Sestina synthesized from the N simulations */}
       <div className="bg-slate-900 border-2 border-amber-500/40 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
         <div className="absolute -right-10 -top-10 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -493,7 +763,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                     {num}
                   </div>
                   <span className="text-[10px] font-mono text-amber-300/90">
-                    {simResult.numberFrequenciesInSim[num].toLocaleString('it-IT')}x
+                    {(simResult.numberFrequenciesInSim[num] || 0).toLocaleString('it-IT')}x
                   </span>
                 </div>
               ))}
@@ -651,7 +921,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             <div className="flex items-center gap-2">
               <Calculator className="w-5 h-5 text-amber-400" />
               <h3 className="text-lg font-extrabold text-white">
-                Guadagni e Perdite Presunte delle Sestine Settimanali
+                Guadagni e Perdite Presunte delle Sestine Settimanali (Payout Dinamico Anti-Crowd)
               </h3>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -660,7 +930,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                 media aritmetica delle perdite e dei guadagni su ogni singola sestina
               </strong>{' '}
               ({pnl.sestineCount} sestine settimanali testate sulle {formattedDrawsCount} estrazioni
-              casuali simulate).
+              con moltiplicatore Anti-Crowd 0.75x&ndash;1.65x).
             </p>
           </div>
 
@@ -932,38 +1202,51 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold">
-                  <th className="py-2.5 px-3">Concorso Sim.</th>
+                  <th className="py-2.5 px-3">Sim #</th>
+                  <th className="py-2.5 px-3">Concorso Futuro</th>
                   <th className="py-2.5 px-3">Data Stimata</th>
                   <th className="py-2.5 px-3">Sestina Estratta (Urna 1)</th>
-                  <th className="py-2.5 px-3 text-center">Jolly (7ª Sfera)</th>
+                  <th className="py-2.5 px-3 text-center">Jolly</th>
                   <th className="py-2.5 px-3 text-center">SuperStar (Urna 2)</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/80">
-                {currentSimulatedDraws.map((d) => (
-                  <tr key={d.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-2.5 px-3 font-mono font-bold text-slate-200">{d.id}</td>
-                    <td className="py-2.5 px-3 font-mono text-slate-400">{d.date}</td>
+              <tbody className="divide-y divide-slate-800/70">
+                {currentSimulatedDraws.map((draw, idx) => (
+                  <tr key={draw.id} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="py-2.5 px-3 font-mono font-bold text-amber-400">
+                      #{String((simPage - 1) * pageSize + idx + 1).padStart(3, '0')}
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-slate-300">
+                      Conc. {draw.contestNumber}/{draw.year}
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-slate-400">{draw.date}</td>
                     <td className="py-2.5 px-3">
-                      <div className="flex items-center gap-1">
-                        {d.numbers.map((n) => (
-                          <span
-                            key={n}
-                            className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-bold text-[11px] flex items-center justify-center"
-                          >
-                            {n}
-                          </span>
-                        ))}
+                      <div className="flex items-center gap-1.5">
+                        {draw.numbers.map((n) => {
+                          const isInHighProb = hp.numbers.includes(n);
+                          return (
+                            <span
+                              key={n}
+                              className={`w-6 h-6 rounded-full font-mono font-bold text-[11px] flex items-center justify-center ${
+                                isInHighProb
+                                  ? 'bg-amber-500 text-slate-950 font-black ring-2 ring-amber-300'
+                                  : 'bg-slate-800 text-slate-200 border border-slate-700'
+                              }`}
+                            >
+                              {n}
+                            </span>
+                          );
+                        })}
                       </div>
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       <span className="inline-flex w-6 h-6 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono font-bold text-[11px] items-center justify-center">
-                        {d.jolly}
+                        {draw.jolly}
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       <span className="inline-flex px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono font-bold text-[11px] items-center justify-center">
-                        ★ {d.superstar}
+                        ★{draw.superstar}
                       </span>
                     </td>
                   </tr>
@@ -972,34 +1255,30 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             </table>
           </div>
 
-          {/* Pagination */}
-          <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs text-slate-400">
-            <span>
-              Estrazioni {(simPage - 1) * pageSize + 1} &ndash;{' '}
-              {Math.min(simPage * pageSize, simResult.simulatedDraws.length)} di{' '}
-              {simResult.simulatedDraws.length} in tabella ({formattedDrawsCount} simulate)
+          {/* Pagination Controls */}
+          <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+            <span className="text-[11px] text-slate-400">
+              Evidenziati in <strong className="text-amber-400">oro</strong> i numeri presenti nella
+              Super-Sestina ad Alta Probabilità
             </span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                disabled={simPage === 1}
                 onClick={() => setSimPage((p) => Math.max(1, p - 1))}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
-                aria-label="Pagina precedente simulazioni"
+                disabled={simPage === 1}
+                className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 hover:border-amber-500/40 text-xs flex items-center gap-1 cursor-pointer"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Prec.</span>
               </button>
-              <span className="font-mono text-slate-200">
-                {simPage} / {totalSimPages}
-              </span>
               <button
                 type="button"
-                disabled={simPage === totalSimPages}
                 onClick={() => setSimPage((p) => Math.min(totalSimPages, p + 1))}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
-                aria-label="Pagina successiva simulazioni"
+                disabled={simPage === totalSimPages}
+                className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 hover:border-amber-500/40 text-xs flex items-center gap-1 cursor-pointer"
               >
-                <ChevronRight className="w-4 h-4" />
+                <span>Succ.</span>
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>

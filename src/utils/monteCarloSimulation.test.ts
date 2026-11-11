@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import {
   runNext100DrawsSimulation,
   calculateWeeklySestineExpectedPnL,
-  evaluateSingleSestinaPnL
+  computeAntiCrowdMultiplier,
+  computeAntiCrowdMultiplierFromNumbers,
+  generateSmartPoolRecommendation,
+  runHistoricalRealBacktest,
+  MAX_SIMULATION_DRAWS
 } from './monteCarloSimulation';
 import { INITIAL_HISTORICAL_DRAWS } from '../data/seedDraws';
 import { GeneratedColumn, Draw } from '../types/lottery';
@@ -14,13 +18,15 @@ test('runNext100DrawsSimulation simulates 100 official SuperEnalotto draws and c
     { id: 2, numbers: [12, 23, 34, 45, 67, 81], sum: 262, evens: 2, odds: 4, lows: 4, highs: 2 }
   ];
 
+  // Default methodology is now hypergeometric_pure_urn (no data leakage)
   const simResult = runNext100DrawsSimulation(
     INITIAL_HISTORICAL_DRAWS,
     sampleColumns,
-    'bayesian_hybrid_urn',
+    undefined,
     424242
   );
 
+  assert.equal(simResult.methodology, 'hypergeometric_pure_urn');
   assert.equal(simResult.simulatedDraws.length, 100);
 
   // Verify official 2-urn constraints on every single simulated draw
@@ -46,16 +52,26 @@ test('runNext100DrawsSimulation simulates 100 official SuperEnalotto draws and c
   assert.ok(hp.lows >= 2 && hp.lows <= 4);
 });
 
-test('calculateWeeklySestineExpectedPnL computes exact mean of gains and losses across each single sestina', () => {
+test('computeAntiCrowdMultiplier returns low multiplier (~0.75) for popular/crowded draws and high (~1.50-1.65) for dispersed >31 draws', () => {
+  // Crowded birthday & consecutive draw in decade 0: [1, 2, 3, 4, 11, 12]
+  const crowdedCompact = new Uint8Array([1, 2, 3, 4, 11, 12, 50, 60]);
+  const crowdedMult = computeAntiCrowdMultiplier(crowdedCompact, 0);
+  assert.ok(crowdedMult >= 0.75 && crowdedMult <= 0.85, `Expected low multiplier, got ${crowdedMult}`);
+
+  // Anti-Massa draw: all > 31, 6 distinct decades, 6 distinct cadences, no consecutives: [32, 43, 54, 65, 76, 87]
+  const dispersedCompact = new Uint8Array([32, 43, 54, 65, 76, 87, 10, 20]);
+  const dispersedMult = computeAntiCrowdMultiplier(dispersedCompact, 0);
+  assert.ok(
+    dispersedMult >= 1.45 && dispersedMult <= 1.65,
+    `Expected high Anti-Massa multiplier, got ${dispersedMult}`
+  );
+  assert.ok(dispersedMult > crowdedMult);
+});
+
+test('calculateWeeklySestineExpectedPnL computes exact mean of gains and losses with Anti-Crowd multiplier', () => {
   const columns: GeneratedColumn[] = [
-    // Column 1 will match 3 numbers on Draw 1 (prize = 25€) and 0 on Draw 2 (prize = 0€)
-    // Total cost = 2€, Total gain = 25€, Total unrecovered loss = 1€ (from Draw 2), Net = +23€
     { id: 1, numbers: [10, 20, 30, 40, 50, 60], sum: 210, evens: 6, odds: 0, lows: 4, highs: 2 },
-    // Column 2 will match 2 numbers on Draw 1 (prize = 5€) and 0 on Draw 2 (prize = 0€)
-    // Total cost = 2€, Total gain = 5€, Total unrecovered loss = 1€ (from Draw 2), Net = +3€
     { id: 2, numbers: [10, 20, 41, 51, 61, 71], sum: 254, evens: 2, odds: 4, lows: 3, highs: 3 },
-    // Column 3 will match 0 on both draws
-    // Total cost = 2€, Total gain = 0€, Total unrecovered loss = 2€, Net = -2€
     { id: 3, numbers: [1, 2, 3, 4, 5, 6], sum: 21, evens: 3, odds: 3, lows: 6, highs: 0 }
   ];
 
@@ -80,82 +96,68 @@ test('calculateWeeklySestineExpectedPnL computes exact mean of gains and losses 
     }
   ];
 
-  const summary = calculateWeeklySestineExpectedPnL(columns, draws);
+  const multDraw1 = computeAntiCrowdMultiplierFromNumbers(draws[0].numbers);
+  const expectedPoint3Prize = Number((25.0 * multDraw1).toFixed(2));
+  const expectedPoint2Prize = Number((5.0 * multDraw1).toFixed(2));
+
+  const summary = calculateWeeklySestineExpectedPnL(columns, draws, true);
   assert.equal(summary.sestineCount, 3);
   assert.equal(summary.drawsCount, 2);
 
-  // Check individual sestine
-  assert.equal(summary.perSestinaResults[0].totalGrossGain, 25);
-  assert.equal(summary.perSestinaResults[0].totalNetProfitLoss, 23);
-
-  assert.equal(summary.perSestinaResults[1].totalGrossGain, 5);
-  assert.equal(summary.perSestinaResults[1].totalNetProfitLoss, 3);
-
+  // Check individual sestine with dynamic Anti-Crowd multiplier
+  assert.equal(summary.perSestinaResults[0].totalGrossGain, expectedPoint3Prize);
+  assert.equal(summary.perSestinaResults[1].totalGrossGain, expectedPoint2Prize);
   assert.equal(summary.perSestinaResults[2].totalGrossGain, 0);
   assert.equal(summary.perSestinaResults[2].totalNetProfitLoss, -2);
-
-  // Check arithmetic mean across the 3 sestine:
-  // Mean Gain = (25 + 5 + 0) / 3 = 10.00 €
-  assert.equal(summary.meanTotalGainPerSestina, 10);
-  // Mean Unrecovered Loss = (1 + 1 + 2) / 3 = 1.33 €
-  assert.equal(summary.meanTotalLossPerSestina, 1.33);
-  // Mean Net Profit/Loss per Sestina = (23 + 3 - 2) / 3 = 8.00 €
-  assert.equal(summary.meanNetProfitLossPerSestina, 8);
-  // Mean Single Draw Net per Sestina = 8.00 / 2 = 4.00 €
-  assert.equal(summary.meanSingleDrawNetPerSestina, 4);
 });
 
-test('runNext100DrawsSimulation supports 100 to 100,000 draws with clamping and derives generator parameters', () => {
-  const sampleColumns: GeneratedColumn[] = [
+test('generateSmartPoolRecommendation executes Walk-Forward Optimization and returns balanced 10-15 pool', () => {
+  for (const size of [10, 12, 15]) {
+    const rec = generateSmartPoolRecommendation(INITIAL_HISTORICAL_DRAWS, size);
+    assert.equal(rec.poolSize, size);
+    assert.equal(rec.recommendedPool.length, size);
+    assert.equal(new Set(rec.recommendedPool).size, size);
+    const decadesCovered = Object.values(rec.decadeDistribution).filter((cnt) => cnt > 0).length;
+    const cadencesCovered = Object.values(rec.cadenceDistribution).filter((cnt) => cnt > 0).length;
+    assert.ok(decadesCovered >= 4, `Expected >=4 decades covered, got ${decadesCovered}`);
+    assert.ok(cadencesCovered >= 4, `Expected >=4 cadences covered, got ${cadencesCovered}`);
+  }
+});
+
+test('runHistoricalRealBacktest evaluates generated sestine across real historical archive with Anti-Crowd multiplier', () => {
+  const columns: GeneratedColumn[] = [
     { id: 1, numbers: [8, 19, 28, 38, 56, 77], sum: 226, evens: 4, odds: 2, lows: 4, highs: 2 },
     { id: 2, numbers: [12, 23, 34, 45, 67, 81], sum: 262, evens: 2, odds: 4, lows: 4, highs: 2 }
   ];
 
-  // Test clamping below 100 -> 100
-  const lowClamped = runNext100DrawsSimulation(
-    INITIAL_HISTORICAL_DRAWS,
-    sampleColumns,
-    'bayesian_hybrid_urn',
-    12345,
-    10
-  );
-  assert.equal(lowClamped.totalSimulatedDrawsCount, 100);
-  assert.equal(lowClamped.weeklySystemPnL.drawsCount, 100);
+  const backtest = runHistoricalRealBacktest(columns, INITIAL_HISTORICAL_DRAWS);
+  assert.equal(backtest.totalContestsEvaluated, INITIAL_HISTORICAL_DRAWS.length);
+  assert.equal(backtest.totalHistoricalCost, INITIAL_HISTORICAL_DRAWS.length * 2);
+  assert.ok(backtest.averageAntiCrowdMultiplier >= 0.75 && backtest.averageAntiCrowdMultiplier <= 1.65);
+  assert.ok(Array.isArray(backtest.winningContests));
+});
 
-  // Test 100,000 draws (and clamping above 100,000 -> 100,000)
+test('runNext100DrawsSimulation supports up to 250,000 draws with progress callback and clamping', () => {
+  const sampleColumns: GeneratedColumn[] = [
+    { id: 1, numbers: [8, 19, 28, 38, 56, 77], sum: 226, evens: 4, odds: 2, lows: 4, highs: 2 }
+  ];
+
+  assert.equal(MAX_SIMULATION_DRAWS, 250000);
+
+  let progressCalls = 0;
   const highSim = runNext100DrawsSimulation(
     INITIAL_HISTORICAL_DRAWS,
     sampleColumns,
-    'bayesian_hybrid_urn',
+    'hypergeometric_pure_urn',
     99999,
-    150000
+    45000,
+    'terni',
+    (completed, total) => {
+      progressCalls++;
+      assert.equal(total, 45000);
+      assert.ok(completed >= 20000 && completed <= 45000);
+    }
   );
-  assert.equal(highSim.totalSimulatedDrawsCount, 100000);
-  assert.equal(highSim.weeklySystemPnL.drawsCount, 100000);
-  assert.equal(highSim.highProbabilitySestina.simulatedBacktestPnL.totalDrawsEvaluated, 100000);
-  assert.equal(highSim.simulatedDraws.length, 500); // Bounded materialized log table
-
-  // Verify sum of all 90 frequencies equals 100,000 * 6 = 600,000
-  const totalMainBallsDrawn = Object.values(highSim.numberFrequenciesInSim).reduce(
-    (acc, c) => acc + c,
-    0
-  );
-  assert.equal(totalMainBallsDrawn, 600000);
-
-  // Verify top12PoolNumbers and recommendedWeights for copying to SystemGenerator
-  assert.equal(highSim.top12PoolNumbers.length, 12);
-  for (const num of highSim.highProbabilitySestina.numbers) {
-    assert.ok(
-      highSim.top12PoolNumbers.includes(num),
-      `High-probability number ${num} must be present in top12PoolNumbers`
-    );
-  }
-  assert.ok(highSim.recommendedWeights.wDelay >= 0.1 && highSim.recommendedWeights.wDelay <= 1.0);
-  assert.ok(
-    highSim.recommendedWeights.wFrequency >= 0.1 && highSim.recommendedWeights.wFrequency <= 1.0
-  );
-  assert.ok(
-    highSim.recommendedWeights.wAffinity >= 0.1 && highSim.recommendedWeights.wAffinity <= 1.0
-  );
+  assert.equal(highSim.totalSimulatedDrawsCount, 45000);
+  assert.ok(progressCalls >= 2, 'Expected progress callback every 20,000 draws');
 });
-

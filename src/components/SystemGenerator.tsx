@@ -15,14 +15,16 @@ import {
   Clock,
   TrendingUp,
   TrendingDown,
-  Percent,
   ChevronDown,
   ChevronUp,
   BookmarkPlus,
-  Info,
   DollarSign,
   Dices,
-  Calculator
+  Calculator,
+  History,
+  Award,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import {
   Draw,
@@ -34,7 +36,8 @@ import {
   NumberStat,
   GeneratedColumn,
   SimulationGeneratorPreset,
-  CoverageTarget
+  CoverageTarget,
+  HistoricalRealBacktestResult
 } from '../types/lottery';
 import {
   calculateNumberStatistics,
@@ -45,8 +48,11 @@ import {
   PRESET_SYSTEM_BUDGETS,
   buildGeneratedColumn
 } from '../utils/combinatorics';
-import { runNext100DrawsSimulation } from '../utils/monteCarloSimulation';
-import { DEFAULT_WEIGHTS, DEFAULT_FILTERS, saveWeights, saveFilters } from '../utils/storage';
+import {
+  runNext100DrawsSimulation,
+  runHistoricalRealBacktest
+} from '../utils/monteCarloSimulation';
+import { DEFAULT_WEIGHTS, saveWeights, saveFilters } from '../utils/storage';
 import { EvolutionarySliderTrainer } from './EvolutionarySliderTrainer';
 
 interface SystemGeneratorProps {
@@ -72,12 +78,11 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   filters,
   onUpdateFilters,
   onSavePlay,
-  onOpenSmartPaste,
   onColumnsGenerated,
   onOpenSimulationTab,
   appliedSimPreset,
   onClearSimPreset,
-  coverageTarget = 'ambi',
+  coverageTarget = 'terni',
   onUpdateCoverageTarget
 }) => {
   // Config state
@@ -107,6 +112,11 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     () => Boolean(appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6)
   );
   const [recalcFeedback, setRecalcFeedback] = useState(false);
+
+  // Backtest Reale Istantaneo filter & pagination state (Point 4)
+  const [backtestFilter, setBacktestFilter] = useState<'all' | 'terni' | 'quaternePlus'>('all');
+  const [backtestPage, setBacktestPage] = useState<number>(1);
+  const backtestPageSize = 8;
 
   // Calculate budget allocation (columns count, actual cost, piggybank remainder)
   const budgetAllocation = useMemo(
@@ -246,9 +256,12 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   const handleRunOptimization = (
     overridePool?: number[],
     pinnedFirstSestina?: number[] | null,
-    pinnedSuperstar?: number
+    pinnedSuperstar?: number,
+    overrideTargetCount?: number,
+    overrideCoverageTarget?: CoverageTarget
   ) => {
-    const targetCount = budgetAllocation.targetColumnsCount;
+    const targetCount = overrideTargetCount ?? budgetAllocation.targetColumnsCount;
+    const covTarget = overrideCoverageTarget ?? activeCoverageTarget;
     const poolToUse =
       Array.isArray(overridePool) && overridePool.length >= 6
         ? overridePool
@@ -268,16 +281,14 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       filters,
       targetCount,
       playMode === 'superstar' ? superstarPool : undefined,
-      activeCoverageTarget
+      covTarget
     );
 
-    // If a simulation preset is active (or pinnedFirstSestina provided), ensure Colonna #1 is the High-Probability Sestina
+    // If a simulation preset is active with a 6-number pinned sestina, ensure Colonna #1 is that sestina
     const activePinnedSestina =
       pinnedFirstSestina !== undefined
         ? pinnedFirstSestina
-        : appliedSimPreset
-        ? appliedSimPreset.highProbabilityNumbers
-        : null;
+        : appliedSimPreset?.highProbabilityNumbers ?? null;
     const activePinnedSuperstar =
       pinnedSuperstar !== undefined
         ? pinnedSuperstar
@@ -308,37 +319,94 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     }
 
     setSystemResult(result);
+    setBacktestPage(1);
     onColumnsGenerated?.(result.columns);
     setSavedSuccess(false);
   };
 
-  // Compute expected gains/losses mean per individual sestina across 100 simulated draws
+  // Compute expected gains/losses mean per individual sestina across 100 simulated draws (Pure Physical Urn)
   const expectedWeeklyPnL = useMemo(() => {
     if (!systemResult || systemResult.columns.length === 0) return null;
     return runNext100DrawsSimulation(
       draws,
       systemResult.columns,
-      'bayesian_hybrid_urn',
+      'hypergeometric_pure_urn',
       202604,
       100,
       activeCoverageTarget
     ).weeklySystemPnL;
   }, [draws, systemResult, activeCoverageTarget]);
 
-  // Apply imported simulation preset when provided
+  // Punto 4: Verifica Vincite su Storico Reale (Backtest Reale Istantaneo con moltiplicatore Anti-Crowd)
+  const realHistoricalBacktest: HistoricalRealBacktestResult | null = useMemo(() => {
+    if (!systemResult || systemResult.columns.length === 0 || draws.length === 0) return null;
+    return runHistoricalRealBacktest(systemResult.columns, draws);
+  }, [systemResult, draws]);
+
+  const filteredWinningContests = useMemo(() => {
+    if (!realHistoricalBacktest) return [];
+    if (backtestFilter === 'terni') {
+      return realHistoricalBacktest.winningContests.filter((w) => w.points3Count > 0);
+    }
+    if (backtestFilter === 'quaternePlus') {
+      return realHistoricalBacktest.winningContests.filter(
+        (w) =>
+          w.points4Count + w.points5Count + w.points5Plus1Count + w.points6Count > 0
+      );
+    }
+    return realHistoricalBacktest.winningContests;
+  }, [realHistoricalBacktest, backtestFilter]);
+
+  const totalBacktestPages = Math.max(
+    1,
+    Math.ceil(filteredWinningContests.length / backtestPageSize)
+  );
+  const currentBacktestContests = useMemo(() => {
+    const start = (backtestPage - 1) * backtestPageSize;
+    return filteredWinningContests.slice(start, start + backtestPageSize);
+  }, [filteredWinningContests, backtestPage]);
+
+  // Set of all numbers present in the generated system columns for highlighting in historical backtest
+  const systemNumbersSet = useMemo(() => {
+    const s = new Set<number>();
+    if (systemResult) {
+      for (const col of systemResult.columns) {
+        for (const n of col.numbers) s.add(n);
+      }
+    }
+    return s;
+  }, [systemResult]);
+
+  // Apply imported simulation / Walk-Forward preset when provided
   useEffect(() => {
     if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
       setPoolSizeV(appliedSimPreset.top12PoolNumbers.length);
       setManualPoolEdit(true);
       setSelectedPool(appliedSimPreset.top12PoolNumbers);
-      if (appliedSimPreset.coverageTarget) {
-        setLocalCoverageTarget(appliedSimPreset.coverageTarget);
+
+      const targetCov = appliedSimPreset.coverageTarget || 'terni';
+      setLocalCoverageTarget(targetCov);
+
+      if (appliedSimPreset.enforceTenEuroBudget) {
+        setBudgetMode('preset');
+        setSelectedBudget(10);
+        setPlayMode('pure_coverage');
+        handleRunOptimization(
+          appliedSimPreset.top12PoolNumbers,
+          appliedSimPreset.highProbabilityNumbers ?? null,
+          appliedSimPreset.recommendedSuperstar,
+          10,
+          'terni'
+        );
+      } else {
+        handleRunOptimization(
+          appliedSimPreset.top12PoolNumbers,
+          appliedSimPreset.highProbabilityNumbers ?? null,
+          appliedSimPreset.recommendedSuperstar,
+          undefined,
+          targetCov
+        );
       }
-      handleRunOptimization(
-        appliedSimPreset.top12PoolNumbers,
-        appliedSimPreset.highProbabilityNumbers,
-        appliedSimPreset.recommendedSuperstar
-      );
     }
   }, [appliedSimPreset]);
 
@@ -348,7 +416,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
         handleRunOptimization(
           appliedSimPreset.top12PoolNumbers,
-          appliedSimPreset.highProbabilityNumbers,
+          appliedSimPreset.highProbabilityNumbers ?? null,
           appliedSimPreset.recommendedSuperstar
         );
       } else if (defaultTopVNumbers.length >= 6) {
@@ -412,24 +480,31 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Banner when High-Probability Sestina & Parameters are imported from Monte Carlo Simulation */}
+      {/* Banner when High-Probability Sestina or Walk-Forward Smart Pool is imported */}
       {appliedSimPreset && (
         <div className="bg-gradient-to-r from-emerald-950/80 via-slate-900 to-amber-950/50 border-2 border-emerald-500/50 rounded-2xl p-4 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase tracking-wider bg-emerald-500 text-slate-950 flex items-center gap-1">
                 <Check className="w-3.5 h-3.5" />
-                Parametri & Sestina Importati dalla Simulazione (
-                {appliedSimPreset.simulatedDrawsCount.toLocaleString('it-IT')} Estrazioni)
+                {appliedSimPreset.sourceLabel
+                  ? appliedSimPreset.sourceLabel
+                  : `Parametri & Sestina Importati dalla Simulazione (${appliedSimPreset.simulatedDrawsCount.toLocaleString('it-IT')} Estrazioni)`}
               </span>
-              <span className="text-xs font-mono text-amber-300 font-bold">
-                Colonna #01 Fissata: {appliedSimPreset.highProbabilityNumbers.join(' - ')} (★
-                {appliedSimPreset.recommendedSuperstar})
-              </span>
+              {appliedSimPreset.highProbabilityNumbers ? (
+                <span className="text-xs font-mono text-amber-300 font-bold">
+                  Colonna #01 Fissata: {appliedSimPreset.highProbabilityNumbers.join(' - ')} (★
+                  {appliedSimPreset.recommendedSuperstar})
+                </span>
+              ) : (
+                <span className="text-xs font-mono text-sky-300 font-bold">
+                  Modalità Attiva: Garanzia Terno (t = 3 &bull; 10€ / 10 Colonne)
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-300">
-              Pool Top 12 applicato ({appliedSimPreset.top12PoolNumbers.join(', ')}) e pesi S(x)
-              impostati a{' '}
+              Pool consigliato ({appliedSimPreset.top12PoolNumbers.length} numeri:{' '}
+              {appliedSimPreset.top12PoolNumbers.join(', ')}) e pesi S(x) impostati a{' '}
               <strong className="text-white font-mono">
                 w₁={appliedSimPreset.recommendedWeights.wDelay.toFixed(2)}, w₂=
                 {appliedSimPreset.recommendedWeights.wFrequency.toFixed(2)}, w₃=
@@ -472,8 +547,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               <strong className="text-amber-300">
                 {activeCoverageTarget === 'terni' ? 'terni (t = 3, Punto 3)' : 'ambi (t = 2, Punto 2)'}
               </strong>{' '}
-              da un pool di <strong className="text-slate-200">{poolSizeV} numeri</strong> selezionati
-              tramite scoring pesato sui ritardi storici, frequenze cicliche e affinità spia.
+              da un pool di <strong className="text-slate-200">{poolSizeV} numeri</strong> con
+              matrici bitmask <code className="text-sky-300">Uint8Array</code> e filtri Anti-Massa{' '}
+              <strong className="text-emerald-300">Soft-Penalty</strong>.
             </p>
           </div>
 
@@ -712,7 +788,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Sliders, Filters, Pool Selection (5 cols) */}
         <div className="lg:col-span-5 space-y-5">
-          {/* Section: Scoring Weights Sliders (Requested Feature) */}
+          {/* Section: Scoring Weights Sliders */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
@@ -948,7 +1024,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
             </div>
           </div>
 
-          {/* Section: Statistical Conditioning Filters (Phase B) */}
+          {/* Section: Statistical Conditioning Filters (Soft-Penalty) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
             <button
               type="button"
@@ -963,7 +1039,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               </div>
               <div className="flex items-center gap-1.5 text-xs text-slate-400">
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium">
-                  4 Attivi (~81% Casi)
+                  Soft-Penalty • 5 Filtri
                 </span>
                 {showAdvancedFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </div>
@@ -975,7 +1051,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                 <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
                   <div>
                     <span className="font-semibold text-slate-200">Bilanciamento Pari/Dispari</span>
-                    <p className="text-[10px] text-slate-400">Accetta solo 3/3, 4/2 o 2/4 (evita 6/0 o 5/1)</p>
+                    <p className="text-[10px] text-slate-400">Accetta solo 3/3, 4/2 o 2/4 (penalità soft -45 pt)</p>
                   </div>
                   <input
                     type="checkbox"
@@ -993,7 +1069,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                 <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
                   <div>
                     <span className="font-semibold text-slate-200">Bilanciamento Alti/Bassi</span>
-                    <p className="text-[10px] text-slate-400">Suddivide 1-45 (Bassi) e 46-90 (Alti): 3/3, 4/2, 2/4</p>
+                    <p className="text-[10px] text-slate-400">Suddivide 1-45 (Bassi) e 46-90 (Alti): 3/3, 4/2, 2/4 (-45 pt)</p>
                   </div>
                   <input
                     type="checkbox"
@@ -1011,7 +1087,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                 <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
                   <div>
                     <span className="font-semibold text-slate-200">Somma Gaussiana Sestina [190 - 350]</span>
-                    <p className="text-[10px] text-slate-400">Esclude sestine estreme (media teorica 273)</p>
+                    <p className="text-[10px] text-slate-400">Penalizza sestine estreme fuori dal range (media 273, -40 pt)</p>
                   </div>
                   <input
                     type="checkbox"
@@ -1029,7 +1105,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                 <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
                   <div>
                     <span className="font-semibold text-slate-200">Consecutività & Decine</span>
-                    <p className="text-[10px] text-slate-400">Max 2 consecutivi e max 2 numeri per decina</p>
+                    <p className="text-[10px] text-slate-400">Max 2 consecutivi (-60 pt) e max 2 numeri per decina (-55 pt)</p>
                   </div>
                   <input
                     type="checkbox"
@@ -1039,6 +1115,27 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                         ...filters,
                         consecutive: e.target.checked,
                         decades: e.target.checked
+                      };
+                      onUpdateFilters(updated);
+                      saveFilters(updated);
+                    }}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+
+                {/* Filter 5: Cadences (num % 10) */}
+                <label className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 cursor-pointer">
+                  <div>
+                    <span className="font-semibold text-slate-200">Dispersione Cadenze (Unità Finali 0-9)</span>
+                    <p className="text-[10px] text-slate-400">Max 2 numeri con la stessa cifra finale num % 10 (-50 pt)</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={filters.cadences !== false}
+                    onChange={(e) => {
+                      const updated = {
+                        ...filters,
+                        cadences: e.target.checked
                       };
                       onUpdateFilters(updated);
                       saveFilters(updated);
@@ -1080,7 +1177,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                       </span>
                     </h3>
                     <p className="text-xs text-slate-400">
-                      Sviluppo da {systemResult.totalCombinations} integrali → {systemResult.filteredCombinationsCount} filtrate → {systemResult.columns.length} colonne ottimali
+                      Sviluppo da {systemResult.totalCombinations} integrali ({systemResult.filteredCombinationsCount} a penalità zero) → {systemResult.columns.length} colonne ottimali (Soft-Penalty Bitmask)
                     </p>
                   </div>
 
@@ -1231,7 +1328,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                           Guadagni e Perdite Presunte (Media Calcolata su Ogni Singola Sestina)
                         </h4>
                         <p className="text-[11px] text-slate-400">
-                          Valore generato come media aritmetica (1/{expectedWeeklyPnL.sestineCount} Σ) delle perdite e dei guadagni su ciascuna sestina (100 estrazioni casuali simulate)
+                          Valore generato come media aritmetica (1/{expectedWeeklyPnL.sestineCount} Σ) delle perdite e dei guadagni su ciascuna sestina (100 estrazioni su Urna Fisica Pura)
                         </p>
                       </div>
                     </div>
@@ -1242,7 +1339,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                         className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
                       >
                         <Dices className="w-3.5 h-3.5" />
-                        <span>Dettaglio 100 Estrazioni &rarr;</span>
+                        <span>Dettaglio Simulazione &rarr;</span>
                       </button>
                     )}
                   </div>
@@ -1364,6 +1461,297 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
           )}
         </div>
       </div>
+
+      {/* PUNTO 4: Verifica Vincite su Storico Reale (Backtest Reale Istantaneo) */}
+      {realHistoricalBacktest && systemResult && (
+        <div className="bg-slate-900 border-2 border-emerald-500/30 rounded-2xl p-6 shadow-2xl space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase tracking-wider bg-emerald-500 text-slate-950 flex items-center gap-1">
+                  <History className="w-3.5 h-3.5" />
+                  Backtest Reale Istantaneo &bull; Archivio Ufficiale
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-slate-950 text-emerald-400 border border-slate-800">
+                  {realHistoricalBacktest.totalContestsEvaluated.toLocaleString('it-IT')} Concorsi Reali
+                  Verificati
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                  Moltiplicatore Anti-Crowd Medio: {realHistoricalBacktest.averageAntiCrowdMultiplier}x
+                </span>
+              </div>
+              <h3 className="text-lg sm:text-xl font-extrabold text-white">
+                Verifica Vincite su Storico Reale ({systemResult.columns.length} Sestine Generate)
+              </h3>
+              <p className="text-xs text-slate-400 max-w-3xl">
+                Verifica istantanea delle <strong className="text-white">{systemResult.columns.length} sestine</strong>{' '}
+                attualmente generate contro tutti i{' '}
+                <strong className="text-emerald-300">
+                  {realHistoricalBacktest.totalContestsEvaluated.toLocaleString('it-IT')} concorsi
+                  storici reali
+                </strong>{' '}
+                presenti in archivio, calcolando per ciascun concorso il moltiplicatore dinamico
+                delle quote <strong className="text-sky-300">Anti-Crowd</strong>.
+              </p>
+            </div>
+
+            {/* Filter tabs for winning contests */}
+            <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setBacktestFilter('all');
+                  setBacktestPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                  backtestFilter === 'all'
+                    ? 'bg-emerald-500 text-slate-950 font-extrabold shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Tutti i Premi ({realHistoricalBacktest.winningContests.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBacktestFilter('terni');
+                  setBacktestPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                  backtestFilter === 'terni'
+                    ? 'bg-sky-500 text-slate-950 font-extrabold shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Concorsi con Terno (
+                {realHistoricalBacktest.winningContests.filter((w) => w.points3Count > 0).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBacktestFilter('quaternePlus');
+                  setBacktestPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                  backtestFilter === 'quaternePlus'
+                    ? 'bg-amber-500 text-slate-950 font-extrabold shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Quaterne / Cinquine (
+                {
+                  realHistoricalBacktest.winningContests.filter(
+                    (w) =>
+                      w.points4Count + w.points5Count + w.points5Plus1Count + w.points6Count > 0
+                  ).length
+                }
+                )
+              </button>
+            </div>
+          </div>
+
+          {/* 4 Summary Metrics Cards for Real Historical Backtest */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                Vincita Storica Reale Stimata (Anti-Crowd)
+              </span>
+              <span className="text-2xl font-black text-emerald-400 font-mono block pt-1">
+                {realHistoricalBacktest.totalEstimatedGrossWinnings.toLocaleString('it-IT', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2
+                })}{' '}
+                €
+              </span>
+              <span className="text-[11px] text-slate-400 block font-mono">
+                Spesa storica: {realHistoricalBacktest.totalHistoricalCost.toLocaleString('it-IT')} €
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-sky-500/30 space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-sky-300 block">
+                Totale Terni (Punto 3) Centrati
+              </span>
+              <span className="text-2xl font-black text-sky-400 font-mono block pt-1">
+                {realHistoricalBacktest.tierCounts.points3.toLocaleString('it-IT')} Terni
+              </span>
+              <span className="text-[11px] text-slate-400 block font-mono">
+                + {realHistoricalBacktest.tierCounts.points2.toLocaleString('it-IT')} Ambi (Punto 2)
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-amber-500/30 space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300 block">
+                Quaterne & Cinquine Storiche
+              </span>
+              <span className="text-2xl font-black text-amber-400 font-mono block pt-1">
+                {(
+                  realHistoricalBacktest.tierCounts.points4 +
+                  realHistoricalBacktest.tierCounts.points5 +
+                  realHistoricalBacktest.tierCounts.points5plus1 +
+                  realHistoricalBacktest.tierCounts.points6
+                ).toLocaleString('it-IT')}{' '}
+                Premi Maggiori
+              </span>
+              <span className="text-[11px] text-slate-400 block font-mono">
+                {realHistoricalBacktest.tierCounts.points4} Quaterne &bull;{' '}
+                {realHistoricalBacktest.tierCounts.points5 +
+                  realHistoricalBacktest.tierCounts.points5plus1 +
+                  realHistoricalBacktest.tierCounts.points6}{' '}
+                Cinquine+
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                ROI Storico & Concorsi a Premio
+              </span>
+              <div className="flex items-center gap-2 pt-1">
+                {realHistoricalBacktest.historicalRoiPct >= 0 ? (
+                  <TrendingUp className="w-5 h-5 text-emerald-400" />
+                ) : (
+                  <Award className="w-5 h-5 text-amber-400" />
+                )}
+                <span className="text-2xl font-black text-white font-mono">
+                  {(
+                    (realHistoricalBacktest.totalEstimatedGrossWinnings /
+                      Math.max(1, realHistoricalBacktest.totalHistoricalCost)) *
+                    100
+                  ).toFixed(1)}
+                  % Recupero
+                </span>
+              </div>
+              <span className="text-[11px] text-emerald-400 block font-mono">
+                {realHistoricalBacktest.totalWinningContests} concorsi reali andati a premio
+              </span>
+            </div>
+          </div>
+
+          {/* Table of Real Historical Winning Contests */}
+          <div className="overflow-x-auto rounded-xl border border-slate-800">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold">
+                  <th className="py-3 px-4">Concorso Reale</th>
+                  <th className="py-3 px-4">Data Estrazione</th>
+                  <th className="py-3 px-4">Sestina Ufficiale Estratta (Oro = Indovinato)</th>
+                  <th className="py-3 px-4 text-center">Molt. Anti-Crowd</th>
+                  <th className="py-3 px-4 text-center">Dettaglio Vincite Sistema</th>
+                  <th className="py-3 px-4 text-right">Vincita Concorso</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/80">
+                {currentBacktestContests.length > 0 ? (
+                  currentBacktestContests.map((contest) => {
+                    const highCount =
+                      contest.points4Count +
+                      contest.points5Count +
+                      contest.points5Plus1Count +
+                      contest.points6Count;
+                    return (
+                      <tr key={contest.drawId} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-3 px-4 font-mono font-bold text-white">
+                          Conc. #{contest.contestNumber}/{contest.year}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-400">{contest.date}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1.5">
+                            {contest.drawnNumbers.map((n) => {
+                              const isMatched = systemNumbersSet.has(n);
+                              return (
+                                <span
+                                  key={n}
+                                  className={`w-6 h-6 rounded-full font-mono font-bold text-[11px] flex items-center justify-center ${
+                                    isMatched
+                                      ? 'bg-amber-500 text-slate-950 font-black ring-2 ring-amber-300'
+                                      : 'bg-slate-800 text-slate-300 border border-slate-700'
+                                  }`}
+                                >
+                                  {n}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-center font-mono">
+                          <span
+                            className={`px-2 py-0.5 rounded font-bold ${
+                              contest.antiCrowdMultiplier >= 1.15
+                                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                : contest.antiCrowdMultiplier <= 0.9
+                                ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                                : 'bg-slate-950 text-sky-300 border border-slate-800'
+                            }`}
+                          >
+                            {contest.antiCrowdMultiplier.toFixed(2)}x
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center font-mono">
+                          <div className="flex flex-wrap items-center justify-center gap-1.5">
+                            {highCount > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-extrabold">
+                                {highCount}x (4+ pt)
+                              </span>
+                            )}
+                            {contest.points3Count > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40 font-bold">
+                                {contest.points3Count}x Terno (3 pt)
+                              </span>
+                            )}
+                            {contest.points2Count > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-slate-950 text-slate-300 border border-slate-800">
+                                {contest.points2Count}x Ambo (2 pt)
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-extrabold text-emerald-400">
+                          +{contest.contestGrossPrize.toFixed(2)} €
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-slate-400 font-mono">
+                      Nessun concorso storico trovato per il filtro selezionato.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination for Real Historical Backtest */}
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-[11px] text-slate-400 font-mono">
+              Pagina {backtestPage} di {totalBacktestPages} &bull; Evidenziati in{' '}
+              <strong className="text-amber-400">oro</strong> i numeri estratti presenti nelle{' '}
+              {systemResult.columns.length} sestine generate
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setBacktestPage((p) => Math.max(1, p - 1))}
+                disabled={backtestPage === 1}
+                className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 hover:border-emerald-500/40 text-xs flex items-center gap-1 cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Prec.</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBacktestPage((p) => Math.min(totalBacktestPages, p + 1))}
+                disabled={backtestPage === totalBacktestPages}
+                className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 hover:border-emerald-500/40 text-xs flex items-center gap-1 cursor-pointer"
+              >
+                <span>Succ.</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Evolutionary Slider Trainer (n1 triplets, n2 draws, n3 generations, pairwise mean crossover) */}
       <EvolutionarySliderTrainer

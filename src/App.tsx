@@ -73,7 +73,7 @@ export default function App() {
   const [isSmartPasteOpen, setIsSmartPasteOpen] = useState(false);
 
   // Compute initial weekly columns so Simulation tab always has the current weekly system even if opened directly
-  const [coverageTarget, setCoverageTarget] = useState<CoverageTarget>('ambi');
+  const [coverageTarget, setCoverageTarget] = useState<CoverageTarget>('terni');
 
   const defaultWeeklyColumns = useMemo<GeneratedColumn[]>(() => {
     const stats = calculateNumberStatistics(draws, 36);

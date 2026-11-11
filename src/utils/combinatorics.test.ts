@@ -5,7 +5,9 @@ import {
   checkEvenOdd,
   checkHighLow,
   checkSumRange,
+  checkCadences,
   checkConsecutiveAndDecades,
+  computeFilterPenalty,
   applyStatisticalFilters,
   greedyCoveringReduction,
   generateOptimizedSystem,
@@ -49,13 +51,38 @@ test('checkSumRange validates sum bounds', () => {
   assert.equal(checkSumRange([85, 86, 87, 88, 89, 90], 190, 350), false); // sum = 525
 });
 
-test('checkConsecutiveAndDecades rejects 3+ consecutive numbers or 3+ numbers in same decade', () => {
+test('checkConsecutiveAndDecades and checkCadences reject 3+ consecutive, 3+ same decade, or 3+ same cadence', () => {
   assert.equal(checkConsecutiveAndDecades([10, 11, 25, 42, 60, 81]), true); // 2 consecutive, distributed decades
   assert.equal(checkConsecutiveAndDecades([10, 11, 12, 42, 60, 81]), false); // 3 consecutive
   assert.equal(checkConsecutiveAndDecades([11, 14, 18, 42, 60, 81]), false); // 3 numbers in 10-19 decade
+  assert.equal(checkCadences([12, 42, 25, 37, 68, 81], 2), true); // max 2 ending in 2
+  assert.equal(checkCadences([12, 42, 72, 37, 68, 81], 2), false); // 3 numbers ending in 2
+  assert.equal(checkConsecutiveAndDecades([12, 42, 72, 37, 68, 81], 2, 2, 2), false);
 });
 
-test('greedyCoveringReduction produces exactly 10 columns for v=12', () => {
+test('computeFilterPenalty calculates 0 for clean sestine and proportional penalties for violations', () => {
+  const filters: FilterOptions = {
+    evenOdd: true,
+    highLow: true,
+    sumRange: true,
+    minSum: 190,
+    maxSum: 350,
+    consecutive: true,
+    decades: true,
+    cadences: true
+  };
+
+  // Clean sestina: [10, 23, 35, 48, 61, 84] -> sum=261, evens=3, lows=3, no 3-consec, max 1 per decade, cadences: 0,3,5,8,1,4
+  assert.equal(computeFilterPenalty([10, 23, 35, 48, 61, 84], filters), 0);
+
+  // Violates only cadences (3 numbers ending in 1: 11, 41, 71): [11, 24, 36, 41, 68, 71] -> sum=251, evens=3, lows=4
+  assert.equal(computeFilterPenalty([11, 24, 36, 41, 68, 71], filters), 50);
+
+  // Violates only decades (3 numbers in 20s: 21, 24, 28): [21, 24, 28, 53, 65, 82] -> sum=273, evens=3, lows=3
+  assert.equal(computeFilterPenalty([21, 24, 28, 53, 65, 82], filters), 55);
+});
+
+test('greedyCoveringReduction produces exactly 10 columns for v=12 with Uint8Array bitmask and Soft-Penalty', () => {
   const pool12 = [3, 7, 14, 25, 33, 48, 52, 61, 74, 80, 85, 89];
   const allCombos = generateCombinations(pool12, 6);
   assert.equal(allCombos.length, 924); // C(12, 6) = 924
@@ -67,14 +94,53 @@ test('greedyCoveringReduction produces exactly 10 columns for v=12', () => {
     minSum: 190,
     maxSum: 350,
     consecutive: true,
-    decades: true
+    decades: true,
+    cadences: true
   };
 
   const filtered = applyStatisticalFilters(allCombos, filters);
   assert.ok(filtered.length > 10, 'Filtered combinations should leave ample candidates');
 
-  const reduced = greedyCoveringReduction(filtered, pool12, 10);
+  const reduced = greedyCoveringReduction(allCombos, pool12, 10, 'terni', filters);
   assert.equal(reduced.length, 10, 'Should extract exactly 10 columns');
+});
+
+test('Soft-Penalty preserves covering matrix when pool contains 3 consecutive or 3 same-decade numbers, and runs v=15 in <150ms', () => {
+  // Pool of 10 numbers containing 3 consecutive in same decade (11, 12, 13):
+  // With 20 columns in 'terni' mode, a hard pre-filter would NEVER cover triplet (11, 12, 13),
+  // whereas Soft-Penalty allows selecting a column with (11, 12, 13) once clean triplets are saturated!
+  const pool10 = [11, 12, 13, 25, 38, 47, 56, 64, 79, 88];
+  const filters: FilterOptions = {
+    evenOdd: true,
+    highLow: true,
+    sumRange: true,
+    minSum: 190,
+    maxSum: 350,
+    consecutive: true,
+    decades: true,
+    cadences: true
+  };
+
+  const sys10 = generateOptimizedSystem(pool10, filters, 25, undefined, 'terni');
+  const coversConsecutiveTriplet = sys10.columns.some(
+    (col) => col.numbers.includes(11) && col.numbers.includes(12) && col.numbers.includes(13)
+  );
+  assert.equal(
+    coversConsecutiveTriplet,
+    true,
+    'Soft-penalty must allow covering triplet (11, 12, 13) instead of permanently deleting it'
+  );
+
+  // Benchmark v=15 (C(15, 6) = 5,005 combinations) with Uint8Array bitmask indexing
+  const pool15 = [3, 9, 14, 21, 27, 34, 40, 45, 52, 58, 63, 71, 77, 84, 90];
+  const sys15 = generateOptimizedSystem(pool15, filters, 10);
+  assert.equal(sys15.totalCombinations, 5005);
+  assert.equal(sys15.columns.length, 10);
+  assert.equal(sys15.coverageTarget, 'terni'); // Default coverageTarget is 'terni'
+  assert.ok(
+    sys15.executionTimeMs < 200,
+    `v=15 execution time was ${sys15.executionTimeMs}ms, should be <200ms`
+  );
 });
 
 test('generateOptimizedSystem runs and outputs coverage metrics in <500ms', () => {
@@ -86,7 +152,8 @@ test('generateOptimizedSystem runs and outputs coverage metrics in <500ms', () =
     minSum: 190,
     maxSum: 350,
     consecutive: true,
-    decades: true
+    decades: true,
+    cadences: true
   };
 
   const result = generateOptimizedSystem(pool12, filters, 10);
@@ -230,14 +297,15 @@ test('generateFullHistoricalDataset provides complete official archive from 2009
 
 test('generateOptimizedSystem supports both Massimizza Ambi (t=2) and Massimizza Terni (t=3) coverage targets', () => {
   const pool = [4, 11, 18, 25, 32, 39, 46, 53, 60, 67, 74, 81];
-  const filters = {
+  const filters: FilterOptions = {
     evenOdd: true,
     highLow: true,
     sumRange: true,
     minSum: 190,
     maxSum: 350,
     consecutive: true,
-    decades: true
+    decades: true,
+    cadences: true
   };
 
   const resAmbi = generateOptimizedSystem(pool, filters, 10, undefined, 'ambi');
@@ -252,4 +320,5 @@ test('generateOptimizedSystem supports both Massimizza Ambi (t=2) and Massimizza
     `Terni mode should cover at least as many triplets (${resTerni.coverageMetrics.tripletsCoveredCount}) as Ambi mode (${resAmbi.coverageMetrics.tripletsCoveredCount})`
   );
 });
+
 

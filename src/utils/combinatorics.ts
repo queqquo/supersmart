@@ -77,132 +77,198 @@ export function checkSumRange(combo: number[], minSum = 190, maxSum = 350): bool
 }
 
 /**
- * Filter 4: Consecutivity and Decades
+ * Filter 4a: Cadences (Final digit 0-9, i.e. num % 10)
+ * Max 2 numbers with the same final digit (e.g. 12, 42 ok; 12, 42, 72 not allowed)
+ */
+export function checkCadences(combo: number[], maxPerCadence = 2): boolean {
+  const cadenceCounts = new Uint8Array(10);
+  for (let i = 0; i < combo.length; i++) {
+    const cad = combo[i] % 10;
+    cadenceCounts[cad]++;
+    if (cadenceCounts[cad] > maxPerCadence) return false;
+  }
+  return true;
+}
+
+/**
+ * Filter 4: Consecutivity, Decades, and optional Cadences
  * Max 2 consecutive numbers (e.g. 10,11 ok; 10,11,12 not allowed)
  * Max 2 numbers in the same decade (e.g. 1-9, 10-19, ..., 80-90)
+ * Optional maxPerCadence: Max 2 numbers with the same final digit (0-9)
  */
 export function checkConsecutiveAndDecades(
   sortedCombo: number[],
   maxConsecutive = 2,
-  maxPerDecade = 2
+  maxPerDecade = 2,
+  maxPerCadence?: number
 ): boolean {
-  // Check consecutive
   let consecutiveRun = 1;
   let maxRunFound = 1;
-  for (let i = 1; i < sortedCombo.length; i++) {
-    if (sortedCombo[i] === sortedCombo[i - 1] + 1) {
-      consecutiveRun++;
-      if (consecutiveRun > maxRunFound) maxRunFound = consecutiveRun;
-    } else {
-      consecutiveRun = 1;
-    }
-  }
-  if (maxRunFound > maxConsecutive) return false;
+  const decadeCounts = new Uint8Array(10);
+  const cadenceCounts = new Uint8Array(10);
 
-  // Check decades
-  const decadeCounts = new Array(10).fill(0);
   for (let i = 0; i < sortedCombo.length; i++) {
     const num = sortedCombo[i];
+    if (i > 0 && num === sortedCombo[i - 1] + 1) {
+      consecutiveRun++;
+      if (consecutiveRun > maxRunFound) maxRunFound = consecutiveRun;
+    } else if (i > 0) {
+      consecutiveRun = 1;
+    }
+
     // Decade 0: 1-9; Decade 1: 10-19; ... Decade 8: 80-89; Decade 9: 90
     const decade = Math.min(Math.floor(num / 10), 9);
     decadeCounts[decade]++;
     if (decadeCounts[decade] > maxPerDecade) return false;
+
+    if (maxPerCadence !== undefined) {
+      const cadence = num % 10;
+      cadenceCounts[cadence]++;
+      if (cadenceCounts[cadence] > maxPerCadence) return false;
+    }
   }
+
+  if (maxRunFound > maxConsecutive) return false;
 
   return true;
 }
 
 /**
- * Apply all statistical conditioning filters to combinations
+ * Compute soft-penalty score for a candidate combination against active statistical & anti-crowd filters.
+ * Returns 0 if the combination satisfies all enabled filters, or a positive penalty proportional to violations.
+ */
+export function computeFilterPenalty(combo: number[], filters: FilterOptions): number {
+  let penalty = 0;
+  if (filters.evenOdd && !checkEvenOdd(combo)) penalty += 45;
+  if (filters.highLow && !checkHighLow(combo)) penalty += 45;
+  if (filters.sumRange && !checkSumRange(combo, filters.minSum, filters.maxSum)) penalty += 40;
+
+  // Consecutive, Decades & Cadences check
+  let consecutiveRun = 1;
+  let maxRun = 1;
+  const decadeCounts = new Uint8Array(10);
+  const cadenceCounts = new Uint8Array(10);
+
+  for (let i = 0; i < combo.length; i++) {
+    const num = combo[i];
+    if (i > 0 && num === combo[i - 1] + 1) {
+      consecutiveRun++;
+      if (consecutiveRun > maxRun) maxRun = consecutiveRun;
+    } else if (i > 0) {
+      consecutiveRun = 1;
+    }
+    const dec = Math.min(Math.floor(num / 10), 9);
+    const cad = num % 10;
+    decadeCounts[dec]++;
+    cadenceCounts[cad]++;
+  }
+
+  if (filters.consecutive && maxRun > 2) penalty += (maxRun - 2) * 60;
+  if (filters.decades) {
+    for (let d = 0; d < 10; d++) {
+      if (decadeCounts[d] > 2) penalty += (decadeCounts[d] - 2) * 55;
+    }
+  }
+  if (filters.cadences !== false) {
+    for (let c = 0; c < 10; c++) {
+      if (cadenceCounts[c] > 2) penalty += (cadenceCounts[c] - 2) * 50;
+    }
+  }
+  return penalty;
+}
+
+/**
+ * Apply all statistical conditioning filters to combinations (returns strictly zero-penalty combinations)
  */
 export function applyStatisticalFilters(
   combinations: number[][],
   filters: FilterOptions
 ): number[][] {
-  return combinations.filter((combo) => {
-    // Note: combo numbers are sorted ascending
-    if (filters.evenOdd && !checkEvenOdd(combo)) return false;
-    if (filters.highLow && !checkHighLow(combo)) return false;
-    if (filters.sumRange && !checkSumRange(combo, filters.minSum, filters.maxSum)) return false;
-    if (
-      (filters.consecutive || filters.decades) &&
-      !checkConsecutiveAndDecades(
-        combo,
-        filters.consecutive ? 2 : 6,
-        filters.decades ? 2 : 6
-      )
-    ) {
-      return false;
-    }
-    return true;
-  });
+  return combinations.filter((combo) => computeFilterPenalty(combo, filters) === 0);
 }
 
 /**
- * Greedy Set Cover / Covering Design Reduction
- * Selects exactly targetCount columns (10 for pure coverage, 6 for superstar)
- * maximizing coverage of pairs and triplets, while balancing frequency of each number.
+ * Greedy Set Cover / Covering Design Reduction with Flat Uint8Array Indexing & Soft-Filter Penalty
+ * Selects exactly targetCount columns maximizing coverage of triplets (t=3) or pairs (t=2),
+ * while balancing number frequency and applying soft-penalties for statistical filters so the
+ * mathematical covering matrix is never broken by hard pre-filtering.
  */
 export function greedyCoveringReduction(
   candidates: number[][],
   poolNumbers: number[],
   targetCount: number,
-  coverageTarget: CoverageTarget = 'ambi'
+  coverageTarget: CoverageTarget = 'terni',
+  filters?: FilterOptions
 ): number[][] {
-  if (candidates.length <= targetCount) {
+  const numCandidates = candidates.length;
+  if (numCandidates <= targetCount) {
     return candidates;
   }
 
-  const poolSet = new Set(poolNumbers);
-  const targetNumberPresence = (targetCount * 6) / poolNumbers.length; // e.g. 60 / 12 = 5
-  const numberUsage: Record<number, number> = {};
-  for (const n of poolNumbers) {
-    numberUsage[n] = 0;
+  const poolMask = new Uint8Array(91);
+  const numberUsage = new Int32Array(91);
+  for (let i = 0; i < poolNumbers.length; i++) {
+    const n = poolNumbers[i];
+    if (n >= 1 && n <= 90) {
+      poolMask[n] = 1;
+    }
   }
 
-  // Set of covered pairs: encode as "num1,num2"
-  const coveredPairs = new Set<string>();
-  const coveredTriplets = new Set<string>();
+  const targetNumberPresence = (targetCount * 6) / Math.max(poolNumbers.length, 1);
 
+  // Flat O(1) lookup arrays replacing Set<string>:
+  // coveredPairs: index = a * 91 + b (max 90 * 91 + 90 = 8280 < 8281)
+  // coveredTriplets: index = a * 8281 + b * 91 + c (max 90 * 8281 + 90 * 91 + 90 = 753570 < 753571)
+  const coveredPairs = new Uint8Array(8281);
+  const coveredTriplets = new Uint8Array(753571);
+
+  // Pre-calculate static soft-filter penalties for all candidates once
+  const filterPenalties = new Float64Array(numCandidates);
+  if (filters) {
+    for (let i = 0; i < numCandidates; i++) {
+      filterPenalties[i] = computeFilterPenalty(candidates[i], filters);
+    }
+  }
+
+  const usedCandidate = new Uint8Array(numCandidates);
   const selected: number[][] = [];
-  const remainingCandidates = [...candidates];
+  const overUseMultiplier = coverageTarget === 'terni' ? 6 : 15;
+  const underUseBonus = coverageTarget === 'terni' ? 4 : 10;
 
-  // Helper to calculate score of a candidate
-  function evaluateCandidate(combo: number[]): number {
+  function evaluateCandidate(combo: number[], filterPenalty: number): number {
     let score = 0;
-
-    // Number presence balance reward/penalty
     let balancePenalty = 0;
-    const overUseMultiplier = coverageTarget === 'terni' ? 6 : 15;
-    const underUseBonus = coverageTarget === 'terni' ? 4 : 10;
-    for (const num of combo) {
-      const currentCount = numberUsage[num] || 0;
+
+    for (let i = 0; i < 6; i++) {
+      const num = combo[i];
+      const currentCount = numberUsage[num];
       if (currentCount >= targetNumberPresence) {
-        balancePenalty += Math.pow(currentCount - targetNumberPresence + 1, 2) * overUseMultiplier;
+        const diff = currentCount - targetNumberPresence + 1;
+        balancePenalty += diff * diff * overUseMultiplier;
       } else {
         score += underUseBonus;
       }
     }
 
-    // New pair coverage
     let newPairs = 0;
-    for (let i = 0; i < combo.length; i++) {
-      for (let j = i + 1; j < combo.length; j++) {
-        const pairKey = `${combo[i]},${combo[j]}`;
-        if (!coveredPairs.has(pairKey)) {
-          newPairs++;
-        }
-      }
-    }
-
-    // New triplet coverage & triplet collision count
     let newTriplets = 0;
     let repeatedTriplets = 0;
-    for (let i = 0; i < combo.length; i++) {
-      for (let j = i + 1; j < combo.length; j++) {
-        for (let m = j + 1; m < combo.length; m++) {
-          const tripKey = `${combo[i]},${combo[j]},${combo[m]}`;
-          if (!coveredTriplets.has(tripKey)) {
+
+    for (let i = 0; i < 6; i++) {
+      const a = combo[i];
+      const aPairOffset = a * 91;
+      const aTripOffset = a * 8281;
+      for (let j = i + 1; j < 6; j++) {
+        const b = combo[j];
+        const pairIdx = aPairOffset + b;
+        if (coveredPairs[pairIdx] === 0) {
+          newPairs++;
+        }
+        const abTripOffset = aTripOffset + b * 91;
+        for (let m = j + 1; m < 6; m++) {
+          const c = combo[m];
+          const tripIdx = abTripOffset + c;
+          if (coveredTriplets[tripIdx] === 0) {
             newTriplets++;
           } else {
             repeatedTriplets++;
@@ -212,22 +278,37 @@ export function greedyCoveringReduction(
     }
 
     if (coverageTarget === 'terni') {
-      // Orthogonal C(v, 6, 3) mode: prioritize new triplets (t=3) and penalize triplet collisions
-      score += newTriplets * 14 + newPairs * 1.5 - repeatedTriplets * 6 - balancePenalty;
+      // Orthogonal C(v, 6, 3) mode: prioritize new triplets (t=3), penalize triplet collisions,
+      // and subtract soft filterPenalty while ensuring candidates with newTriplets > 0 always beat 0-triplet candidates.
+      const coverageProgressBonus = newTriplets > 0 ? 120 : 0;
+      score +=
+        coverageProgressBonus +
+        newTriplets * 14 +
+        newPairs * 1.5 -
+        repeatedTriplets * 6 -
+        balancePenalty -
+        filterPenalty;
     } else {
-      // Orthogonal C(v, 6, 2) mode: prioritize new pairs (t=2)
-      score += newPairs * 8 + newTriplets * 2 - balancePenalty;
+      // Orthogonal C(v, 6, 2) mode: prioritize new pairs (t=2) and subtract soft filterPenalty
+      const coverageProgressBonus = newPairs > 0 ? 120 : 0;
+      score +=
+        coverageProgressBonus +
+        newPairs * 8 +
+        newTriplets * 2 -
+        balancePenalty -
+        filterPenalty;
     }
+
     return score;
   }
 
-  while (selected.length < targetCount && remainingCandidates.length > 0) {
+  while (selected.length < targetCount) {
     let bestIdx = -1;
     let bestScore = -Infinity;
 
-    for (let i = 0; i < remainingCandidates.length; i++) {
-      const candidate = remainingCandidates[i];
-      const score = evaluateCandidate(candidate);
+    for (let i = 0; i < numCandidates; i++) {
+      if (usedCandidate[i] === 1) continue;
+      const score = evaluateCandidate(candidates[i], filterPenalties[i]);
       if (score > bestScore) {
         bestScore = score;
         bestIdx = i;
@@ -235,24 +316,28 @@ export function greedyCoveringReduction(
     }
 
     if (bestIdx === -1) {
-      bestIdx = 0;
+      break;
     }
 
-    const chosen = remainingCandidates.splice(bestIdx, 1)[0];
+    usedCandidate[bestIdx] = 1;
+    const chosen = candidates[bestIdx];
     selected.push(chosen);
 
-    // Update usage and covered pairs/triplets
-    for (const num of chosen) {
-      if (poolSet.has(num)) {
-        numberUsage[num] = (numberUsage[num] || 0) + 1;
-      }
-    }
-
+    // Update usage and covered pairs/triplets in flat Uint8Arrays
     for (let i = 0; i < chosen.length; i++) {
+      const a = chosen[i];
+      if (poolMask[a] === 1) {
+        numberUsage[a]++;
+      }
+      const aPairOffset = a * 91;
+      const aTripOffset = a * 8281;
       for (let j = i + 1; j < chosen.length; j++) {
-        coveredPairs.add(`${chosen[i]},${chosen[j]}`);
+        const b = chosen[j];
+        coveredPairs[aPairOffset + b] = 1;
+        const abTripOffset = aTripOffset + b * 91;
         for (let m = j + 1; m < chosen.length; m++) {
-          coveredTriplets.add(`${chosen[i]},${chosen[j]},${chosen[m]}`);
+          const c = chosen[m];
+          coveredTriplets[abTripOffset + c] = 1;
         }
       }
     }
@@ -262,43 +347,57 @@ export function greedyCoveringReduction(
 }
 
 /**
- * Calculate coverage metrics for the chosen columns
+ * Calculate coverage metrics for the chosen columns using flat Uint8Array indexing
  */
 export function computeCoverageMetrics(
   columns: number[][],
   poolNumbers: number[]
 ) {
-  const allPairs = new Set<string>();
-  const allTriplets = new Set<string>();
+  const sortedPool = [...poolNumbers].sort((a, b) => a - b);
+  const v = sortedPool.length;
+  const pairsTotalInPool = v >= 2 ? (v * (v - 1)) / 2 : 0;
+  const tripletsTotalInPool = v >= 3 ? (v * (v - 1) * (v - 2)) / 6 : 0;
 
-  // Total possible pairs & triplets in the pool
-  for (let i = 0; i < poolNumbers.length; i++) {
-    for (let j = i + 1; j < poolNumbers.length; j++) {
-      allPairs.add(`${poolNumbers[i]},${poolNumbers[j]}`);
-      for (let m = j + 1; m < poolNumbers.length; m++) {
-        allTriplets.add(`${poolNumbers[i]},${poolNumbers[j]},${poolNumbers[m]}`);
-      }
-    }
+  const poolMask = new Uint8Array(91);
+  const presence: Record<number, number> = {};
+  for (let i = 0; i < sortedPool.length; i++) {
+    const n = sortedPool[i];
+    poolMask[n] = 1;
+    presence[n] = 0;
   }
 
-  const coveredPairs = new Set<string>();
-  const coveredTriplets = new Set<string>();
-  const presence: Record<number, number> = {};
-  for (const n of poolNumbers) presence[n] = 0;
+  const coveredPairs = new Uint8Array(8281);
+  const coveredTriplets = new Uint8Array(753571);
+  let pairsCoveredCount = 0;
+  let tripletsCoveredCount = 0;
 
   for (const col of columns) {
-    for (const num of col) {
-      if (presence[num] !== undefined) {
-        presence[num]++;
-      }
-    }
     for (let i = 0; i < col.length; i++) {
+      const a = col[i];
+      if (poolMask[a] === 1) {
+        presence[a]++;
+      }
+      const aPairOffset = a * 91;
+      const aTripOffset = a * 8281;
       for (let j = i + 1; j < col.length; j++) {
-        const pKey = `${col[i]},${col[j]}`;
-        if (allPairs.has(pKey)) coveredPairs.add(pKey);
+        const b = col[j];
+        if (poolMask[a] === 1 && poolMask[b] === 1) {
+          const pairIdx = aPairOffset + b;
+          if (coveredPairs[pairIdx] === 0) {
+            coveredPairs[pairIdx] = 1;
+            pairsCoveredCount++;
+          }
+        }
+        const abTripOffset = aTripOffset + b * 91;
         for (let m = j + 1; m < col.length; m++) {
-          const tKey = `${col[i]},${col[j]},${col[m]}`;
-          if (allTriplets.has(tKey)) coveredTriplets.add(tKey);
+          const c = col[m];
+          if (poolMask[a] === 1 && poolMask[b] === 1 && poolMask[c] === 1) {
+            const tripIdx = abTripOffset + c;
+            if (coveredTriplets[tripIdx] === 0) {
+              coveredTriplets[tripIdx] = 1;
+              tripletsCoveredCount++;
+            }
+          }
         }
       }
     }
@@ -311,11 +410,11 @@ export function computeCoverageMetrics(
       : 0;
 
   return {
-    poolSize: poolNumbers.length,
-    pairsCoveredCount: coveredPairs.size,
-    pairsTotalInPool: allPairs.size,
-    tripletsCoveredCount: coveredTriplets.size,
-    tripletsTotalInPool: allTriplets.size,
+    poolSize: sortedPool.length,
+    pairsCoveredCount,
+    pairsTotalInPool,
+    tripletsCoveredCount,
+    tripletsTotalInPool,
     averagePresence: Number(avgPresence.toFixed(2)),
     presenceHistogram: presence
   };
@@ -480,43 +579,37 @@ export function scoreAllNumbers(
 }
 
 /**
- * Full Pipeline: Generates the optimized SuperEnalotto system
+ * Full Pipeline: Generates the optimized SuperEnalotto system using Soft-Penalty Orthogonal Reduction
  */
 export function generateOptimizedSystem(
   poolNumbers: number[],
   filters: FilterOptions,
   targetColumnsCount: number,
   superstarPool?: number[],
-  coverageTarget: CoverageTarget = 'ambi'
+  coverageTarget: CoverageTarget = 'terni'
 ): SystemGenerationResult {
   const startTime = performance.now();
   const sortedPool = [...poolNumbers].sort((a, b) => a - b);
 
-  // 1. Generate all C(v, 6)
+  // 1. Generate all C(v, 6) integral combinations
   const allCombos = generateCombinations(sortedPool, 6);
 
-  // 2. Filter combinations
-  let filtered = applyStatisticalFilters(allCombos, filters);
-
-  // Fallback: If filters were so restrictive that fewer than targetColumnsCount survived,
-  // gracefully relax filters so user always gets the required columns
-  if (filtered.length < targetColumnsCount) {
-    filtered = applyStatisticalFilters(allCombos, {
-      ...filters,
-      consecutive: false,
-      decades: false
-    });
-    if (filtered.length < targetColumnsCount) {
-      filtered = allCombos;
+  // 2. Count zero-penalty combinations for diagnostic reporting, while passing ALL combinations
+  // to greedyCoveringReduction with soft-penalty scoring so the mathematical covering matrix is never broken
+  let zeroPenaltyCount = 0;
+  for (let i = 0; i < allCombos.length; i++) {
+    if (computeFilterPenalty(allCombos[i], filters) === 0) {
+      zeroPenaltyCount++;
     }
   }
 
-  // 3. Greedy Covering Design (t=2 for ambi or t=3 for terni)
+  // 3. Greedy Covering Design (t=3 for terni or t=2 for ambi) with integrated Soft-Filter Penalty
   const selectedCombos = greedyCoveringReduction(
-    filtered,
+    allCombos,
     sortedPool,
     targetColumnsCount,
-    coverageTarget
+    coverageTarget,
+    filters
   );
 
   // 4. Form columns with metrics and SuperStar if requested
@@ -559,7 +652,7 @@ export function generateOptimizedSystem(
     poolNumbers: sortedPool,
     columns: generatedColumns,
     totalCombinations: allCombos.length,
-    filteredCombinationsCount: filtered.length,
+    filteredCombinationsCount: zeroPenaltyCount,
     executionTimeMs: Math.round(endTime - startTime),
     coverageTarget,
     coverageMetrics

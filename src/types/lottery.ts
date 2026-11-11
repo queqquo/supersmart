@@ -38,6 +38,7 @@ export interface FilterOptions {
   maxSum: number;
   consecutive: boolean;   // max consecutive count <= 2
   decades: boolean;       // max numbers in same decade <= 2
+  cadences?: boolean;     // max numbers with same final digit (num % 10) <= 2
 }
 
 export interface GeneratedColumn {
@@ -202,13 +203,15 @@ export interface SimulationGeneratorPreset {
   simulatedDrawsCount: number;
   methodology: SimulationMethodology;
   coverageTarget: CoverageTarget;
-  highProbabilityNumbers: [number, number, number, number, number, number];
-  recommendedJolly: number;
-  recommendedSuperstar: number;
-  top12PoolNumbers: number[];
+  highProbabilityNumbers?: [number, number, number, number, number, number];
+  recommendedJolly?: number;
+  recommendedSuperstar?: number;
+  top12PoolNumbers: number[]; // Pool of 10-15 recommended numbers
   recommendedWeights: ScoringWeights;
   recommendedFilters: FilterOptions;
   confidenceIndex: number;
+  enforceTenEuroBudget?: boolean;
+  sourceLabel?: string;
 }
 
 export type HistoricalSelectionMode = 'strict_net_profit' | 'historical_benchmark_surplus';
@@ -286,4 +289,81 @@ export interface EvolutionarySliderTrainingResult {
   };
   ruleConstraintWarnings?: string[];
 }
+
+export interface WalkForwardWeightVector {
+  id: string;
+  label: string;
+  wFreqHot: number;
+  wFreqCold: number;
+  wDelay: number;
+  wCoOccurrence: number;
+  wDecadeBalance: number;
+  walkForwardDrawsEvaluated: number;
+  ambiHitCount: number;
+  terniHitCount: number;
+  quaterneHitCount: number;
+  cinquineHitCount: number;
+  compositeYieldScore: number;
+}
+
+export interface SmartPoolRecommendationResult {
+  poolSize: number; // 10..15
+  recommendedPool: number[];
+  bestStrategy: WalkForwardWeightVector;
+  evaluatedStrategies: WalkForwardWeightVector[];
+  walkForwardWindowSize: number;
+  mappedScoringWeights: ScoringWeights;
+  decadeDistribution: Record<number, number>;
+  cadenceDistribution: Record<number, number>;
+  executionTimeMs: number;
+}
+
+export interface HistoricalContestWinEntry {
+  drawId: string;
+  contestNumber: number;
+  year: number;
+  date: string;
+  drawnNumbers: [number, number, number, number, number, number];
+  jolly: number;
+  superstar?: number;
+  antiCrowdMultiplier: number;
+  bestColumnId: number;
+  bestMatchCount: number;
+  bestMatchedNumbers: number[];
+  winningColumnsCount: number;
+  points2Count: number;
+  points3Count: number;
+  points4Count: number;
+  points5Count: number;
+  points5Plus1Count: number;
+  points6Count: number;
+  superstarHitsCount: number;
+  contestGrossPrize: number;
+  contestCost: number;
+  contestNetReturn: number;
+}
+
+export interface HistoricalRealBacktestResult {
+  totalContestsEvaluated: number;
+  sestineCount: number;
+  costPerContest: number;
+  totalHistoricalCost: number;
+  totalEstimatedGrossWinnings: number;
+  netHistoricalPnL: number;
+  historicalRoiPct: number;
+  averageAntiCrowdMultiplier: number;
+  totalWinningContests: number;
+  tierCounts: {
+    points2: number;
+    points3: number;
+    points4: number;
+    points5: number;
+    points5plus1: number;
+    points6: number;
+    superstarHits: number;
+  };
+  winningContests: HistoricalContestWinEntry[];
+  executionTimeMs: number;
+}
+
 
