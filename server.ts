@@ -248,10 +248,16 @@ function removeUserRecordByAdmin(
   return ensureAdminInACL(acl).filter((r) => normalizeEmail(r.email) !== normTarget);
 }
 
-// Persistent server ACL and Plays state (with in-memory fallback if filesystem is read-only)
+// Persistent server ACL, Plays, Deleted Play Tombstones, Per-User Systems, and Per-User Simulations state
 const PLAYS_FILE_PATH = path.join(DATA_DIR, 'plays.json');
+const DELETED_PLAYS_FILE_PATH = path.join(DATA_DIR, 'deleted_plays.json');
+const USER_SYSTEMS_FILE_PATH = path.join(DATA_DIR, 'user_systems.json');
+const USER_SIMULATIONS_FILE_PATH = path.join(DATA_DIR, 'user_simulations.json');
 let memoryACL: UserAccessRecord[] = createInitialACL();
 let memoryPlays: Record<string, unknown>[] = [];
+let memoryDeletedPlayIds: Set<string> = new Set(['play-manual-1793562659204']);
+let memoryUserSystems: Record<string, Record<string, unknown>> = {};
+let memoryUserSimulations: Record<string, Record<string, unknown>> = {};
 
 function ensureDataDir(): void {
   try {
@@ -261,6 +267,36 @@ function ensureDataDir(): void {
   } catch {
     // Ignore if read-only container filesystem
   }
+}
+
+function readServerDeletedPlayIds(): Set<string> {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(DELETED_PLAYS_FILE_PATH)) {
+      const raw = fs.readFileSync(DELETED_PLAYS_FILE_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const id of parsed) {
+          if (typeof id === 'string') memoryDeletedPlayIds.add(id);
+        }
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  return memoryDeletedPlayIds;
+}
+
+function writeServerDeletedPlayIds(ids: Set<string>): string[] {
+  memoryDeletedPlayIds = ids;
+  const arr = Array.from(memoryDeletedPlayIds);
+  ensureDataDir();
+  try {
+    fs.writeFileSync(DELETED_PLAYS_FILE_PATH, JSON.stringify(arr, null, 2), 'utf8');
+  } catch {
+    // Ignore if read-only
+  }
+  return arr;
 }
 
 function readServerACL(): UserAccessRecord[] {
@@ -296,23 +332,32 @@ function writeServerACL(acl: UserAccessRecord[]): UserAccessRecord[] {
 
 function readServerPlays(): Record<string, unknown>[] {
   ensureDataDir();
+  const deletedSet = readServerDeletedPlayIds();
   try {
     if (fs.existsSync(PLAYS_FILE_PATH)) {
       const raw = fs.readFileSync(PLAYS_FILE_PATH, 'utf8');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        memoryPlays = parsed;
+        memoryPlays = parsed.filter(
+          (p) => p && typeof p.id === 'string' && !deletedSet.has(p.id)
+        );
         return memoryPlays;
       }
     }
   } catch (err) {
     console.warn('Using in-memory Plays fallback:', err);
   }
+  memoryPlays = memoryPlays.filter(
+    (p) => p && typeof p.id === 'string' && !deletedSet.has(p.id)
+  );
   return memoryPlays;
 }
 
 function writeServerPlays(plays: Record<string, unknown>[]): Record<string, unknown>[] {
-  memoryPlays = Array.isArray(plays) ? plays : [];
+  const deletedSet = readServerDeletedPlayIds();
+  memoryPlays = (Array.isArray(plays) ? plays : []).filter(
+    (p) => p && typeof p.id === 'string' && !deletedSet.has(p.id as string)
+  );
   ensureDataDir();
   try {
     fs.writeFileSync(PLAYS_FILE_PATH, JSON.stringify(memoryPlays, null, 2), 'utf8');
@@ -322,22 +367,131 @@ function writeServerPlays(plays: Record<string, unknown>[]): Record<string, unkn
   return memoryPlays;
 }
 
+function readServerUserSystems(): Record<string, Record<string, unknown>> {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(USER_SYSTEMS_FILE_PATH)) {
+      const raw = fs.readFileSync(USER_SYSTEMS_FILE_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        memoryUserSystems = parsed;
+        return memoryUserSystems;
+      }
+    }
+  } catch (err) {
+    console.warn('Using in-memory UserSystems fallback:', err);
+  }
+  return memoryUserSystems;
+}
+
+function writeServerUserSystems(
+  systems: Record<string, Record<string, unknown>>
+): Record<string, Record<string, unknown>> {
+  memoryUserSystems = systems && typeof systems === 'object' ? systems : {};
+  ensureDataDir();
+  try {
+    fs.writeFileSync(USER_SYSTEMS_FILE_PATH, JSON.stringify(memoryUserSystems, null, 2), 'utf8');
+  } catch {
+    // Keep in memoryUserSystems if filesystem is read-only
+  }
+  return memoryUserSystems;
+}
+
+function readServerUserSimulations(): Record<string, Record<string, unknown>> {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(USER_SIMULATIONS_FILE_PATH)) {
+      const raw = fs.readFileSync(USER_SIMULATIONS_FILE_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        memoryUserSimulations = parsed;
+        return memoryUserSimulations;
+      }
+    }
+  } catch (err) {
+    console.warn('Using in-memory UserSimulations fallback:', err);
+  }
+  return memoryUserSimulations;
+}
+
+function writeServerUserSimulations(
+  sims: Record<string, Record<string, unknown>>
+): Record<string, Record<string, unknown>> {
+  memoryUserSimulations = sims && typeof sims === 'object' ? sims : {};
+  ensureDataDir();
+  try {
+    fs.writeFileSync(
+      USER_SIMULATIONS_FILE_PATH,
+      JSON.stringify(memoryUserSimulations, null, 2),
+      'utf8'
+    );
+  } catch {
+    // Keep in memoryUserSimulations if filesystem is read-only
+  }
+  return memoryUserSimulations;
+}
+
 async function startServer() {
   const app = express();
   const httpServer = http.createServer(app);
   app.use(express.json({ limit: '5mb' }));
 
+  writeServerDeletedPlayIds(readServerDeletedPlayIds());
   readServerACL();
-  readServerPlays();
+  writeServerPlays(readServerPlays());
+  readServerUserSystems();
+  readServerUserSimulations();
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
 
+  // --- Per-User Generated System Endpoints ---
+  app.get('/api/user-systems/:email', (req, res) => {
+    const emailKey = normalizeEmail(req.params.email);
+    const systems = readServerUserSystems();
+    res.json({ record: systems[emailKey] || null });
+  });
+
+  app.put('/api/user-systems/:email', (req, res) => {
+    const emailKey = normalizeEmail(req.params.email);
+    const record = req.body?.record;
+    if (!emailKey || !record || typeof record !== 'object') {
+      res.status(400).json({ error: 'Sistema utente non valido.' });
+      return;
+    }
+    const systems = { ...readServerUserSystems(), [emailKey]: { ...record, userEmail: emailKey } };
+    writeServerUserSystems(systems);
+    res.json({ record: systems[emailKey] });
+  });
+
+  // --- Per-User Simulation State Endpoints ---
+  app.get('/api/user-simulations/:email', (req, res) => {
+    const emailKey = normalizeEmail(req.params.email);
+    const sims = readServerUserSimulations();
+    res.json({ record: sims[emailKey] || null });
+  });
+
+  app.put('/api/user-simulations/:email', (req, res) => {
+    const emailKey = normalizeEmail(req.params.email);
+    const record = req.body?.record;
+    if (!emailKey || !record || typeof record !== 'object') {
+      res.status(400).json({ error: 'Simulazione utente non valida.' });
+      return;
+    }
+    const sims = {
+      ...readServerUserSimulations(),
+      [emailKey]: { ...record, userEmail: emailKey }
+    };
+    writeServerUserSimulations(sims);
+    res.json({ record: sims[emailKey] });
+  });
+
   // --- Shared Zero-Cost Plays History Endpoints ---
   app.get('/api/plays', (_req, res) => {
+    const deletedIds = Array.from(readServerDeletedPlayIds());
     const plays = readServerPlays();
-    res.json({ plays });
+    res.json({ plays, deletedIds });
   });
 
   app.post('/api/plays', (req, res) => {
@@ -346,6 +500,10 @@ async function startServer() {
       res.status(400).json({ error: 'Giocata non valida.' });
       return;
     }
+    const deletedSet = readServerDeletedPlayIds();
+    deletedSet.delete(play.id);
+    writeServerDeletedPlayIds(deletedSet);
+
     const current = [...readServerPlays()];
     const idx = current.findIndex((p) => p.id === play.id);
     if (idx >= 0) {
@@ -354,7 +512,7 @@ async function startServer() {
       current.unshift(play);
     }
     const saved = writeServerPlays(current);
-    res.json({ plays: saved });
+    res.json({ plays: saved, deletedIds: Array.from(deletedSet) });
   });
 
   app.put('/api/plays', (req, res) => {
@@ -363,27 +521,33 @@ async function startServer() {
       res.status(400).json({ error: 'Lista giocate non valida.' });
       return;
     }
+    const deletedSet = readServerDeletedPlayIds();
     const current = readServerPlays();
     const mergedMap = new Map<string, Record<string, unknown>>();
     for (const p of current) {
-      if (p && typeof p.id === 'string') mergedMap.set(p.id, p);
+      if (p && typeof p.id === 'string' && !deletedSet.has(p.id)) mergedMap.set(p.id, p);
     }
     for (const p of incoming) {
-      if (p && typeof p.id === 'string') mergedMap.set(p.id, p);
+      if (p && typeof p.id === 'string' && !deletedSet.has(p.id)) mergedMap.set(p.id, p);
     }
     const merged = Array.from(mergedMap.values()).sort((a, b) =>
       String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
     );
     const saved = writeServerPlays(merged);
-    res.json({ plays: saved });
+    res.json({ plays: saved, deletedIds: Array.from(deletedSet) });
   });
 
   app.delete('/api/plays/:id', (req, res) => {
     const targetId = req.params.id;
+    const deletedSet = readServerDeletedPlayIds();
+    if (targetId) {
+      deletedSet.add(targetId);
+      writeServerDeletedPlayIds(deletedSet);
+    }
     const current = readServerPlays();
     const filtered = current.filter((p) => p.id !== targetId);
     const saved = writeServerPlays(filtered);
-    res.json({ plays: saved });
+    res.json({ plays: saved, deletedIds: Array.from(deletedSet) });
   });
 
   app.get('/api/acl', (_req, res) => {

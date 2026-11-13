@@ -3,15 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Draw, SavedPlay, ScoringWeights, FilterOptions } from '../types/lottery';
+import {
+  Draw,
+  SavedPlay,
+  ScoringWeights,
+  FilterOptions,
+  UserGeneratedSystemRecord,
+  UserSimulationStateRecord
+} from '../types/lottery';
 import { generateFullHistoricalDataset } from '../data/seedDraws';
 import {
   fetchCloudPlays,
   upsertCloudPlay,
   upsertManyCloudPlays,
   removeCloudPlay,
+  fetchCloudDeletedPlayIds,
   fetchCloudCustomDraws,
-  upsertCloudCustomDraw
+  upsertCloudCustomDraw,
+  fetchCloudUserSystem,
+  upsertCloudUserSystem,
+  fetchCloudUserSimulation,
+  upsertCloudUserSimulation
 } from './firebase';
 
 const STORAGE_KEYS = {
@@ -20,30 +32,288 @@ const STORAGE_KEYS = {
   DELETED_PLAY_IDS: 'superenalotto_deleted_play_ids_v1',
   WEIGHTS: 'superenalotto_scoring_weights',
   FILTERS: 'superenalotto_filter_options',
-  PIGGYBANK: 'superenalotto_piggybank_balance'
+  PIGGYBANK: 'superenalotto_piggybank_balance',
+  USER_SYSTEM_PREFIX: 'superenalotto_user_system_v1_',
+  USER_SIMULATION_PREFIX: 'superenalotto_user_simulation_v1_'
 };
 
-function loadDeletedPlayIds(): Set<string> {
+function normalizeUserEmailKey(email: string): string {
+  return String(email || '').trim().toLowerCase();
+}
+
+export function getUserSystemStorageKey(userEmail: string): string {
+  return `${STORAGE_KEYS.USER_SYSTEM_PREFIX}${normalizeUserEmailKey(userEmail)}`;
+}
+
+/**
+ * Load the persisted optimized system (sestine & parameters) for a specific user from localStorage
+ */
+export function loadUserGeneratedSystem(userEmail: string): UserGeneratedSystemRecord | null {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  if (!emailKey) return null;
+  try {
+    const raw = localStorage.getItem(getUserSystemStorageKey(emailKey));
+    if (raw) {
+      const parsed = JSON.parse(raw) as UserGeneratedSystemRecord;
+      if (
+        parsed &&
+        normalizeUserEmailKey(parsed.userEmail) === emailKey &&
+        parsed.systemResult &&
+        Array.isArray(parsed.systemResult.columns) &&
+        parsed.systemResult.columns.length > 0
+      ) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Error loading user generated system from localStorage:', e);
+  }
+  return null;
+}
+
+/**
+ * Cache a user's generated system locally without triggering remote writes
+ */
+export function cacheUserGeneratedSystemLocally(record: UserGeneratedSystemRecord): void {
+  const emailKey = normalizeUserEmailKey(record?.userEmail);
+  if (!emailKey || !record?.systemResult) return;
+  try {
+    localStorage.setItem(
+      getUserSystemStorageKey(emailKey),
+      JSON.stringify({ ...record, userEmail: emailKey })
+    );
+  } catch (e) {
+    console.error('Error caching user generated system locally:', e);
+  }
+}
+
+/**
+ * Save a user's generated system when they click "Calcola Sistema Ottimizzato"
+ * Persists to localStorage (per-user), Server (/api/user-systems/:email), and Cloud Firestore (/user_systems/{emailKey})
+ */
+export function saveUserGeneratedSystem(record: UserGeneratedSystemRecord): void {
+  const emailKey = normalizeUserEmailKey(record?.userEmail);
+  if (!emailKey || !record?.systemResult) return;
+  const normalizedRecord: UserGeneratedSystemRecord = {
+    ...record,
+    userEmail: emailKey,
+    updatedAt: record.updatedAt || new Date().toISOString()
+  };
+  cacheUserGeneratedSystemLocally(normalizedRecord);
+  upsertCloudUserSystem(normalizedRecord).catch(() => {});
+  fetch(`/api/user-systems/${encodeURIComponent(emailKey)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ record: normalizedRecord })
+  }).catch(() => {
+    // Ignore if offline
+  });
+}
+
+/**
+ * Synchronize a specific user's generated system across Cloud Firestore, Server, and LocalStorage
+ */
+export async function syncUserGeneratedSystem(
+  userEmail: string
+): Promise<UserGeneratedSystemRecord | null> {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  if (!emailKey) return null;
+
+  const localRecord = loadUserGeneratedSystem(emailKey);
+
+  const [cloudRecord, serverRecord] = await Promise.all([
+    fetchCloudUserSystem(emailKey),
+    fetch(`/api/user-systems/${encodeURIComponent(emailKey)}`)
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const data = await res.json();
+        return (data?.record as UserGeneratedSystemRecord) || null;
+      })
+      .catch(() => null)
+  ]);
+
+  const candidates = [localRecord, serverRecord, cloudRecord].filter(
+    (r): r is UserGeneratedSystemRecord =>
+      Boolean(
+        r &&
+          normalizeUserEmailKey(r.userEmail) === emailKey &&
+          r.systemResult &&
+          Array.isArray(r.systemResult.columns) &&
+          r.systemResult.columns.length > 0
+      )
+  );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // Pick the most recently saved record for this specific user
+  candidates.sort(
+    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+  );
+  const best = candidates[0];
+
+  cacheUserGeneratedSystemLocally(best);
+
+  if (!cloudRecord || new Date(best.updatedAt || 0).getTime() > new Date(cloudRecord.updatedAt || 0).getTime()) {
+    await upsertCloudUserSystem(best);
+  }
+
+  if (!serverRecord || new Date(best.updatedAt || 0).getTime() > new Date(serverRecord.updatedAt || 0).getTime()) {
+    fetch(`/api/user-systems/${encodeURIComponent(emailKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record: best })
+    }).catch(() => {});
+  }
+
+  return best;
+}
+
+export function getUserSimulationStorageKey(userEmail: string): string {
+  return `${STORAGE_KEYS.USER_SIMULATION_PREFIX}${normalizeUserEmailKey(userEmail)}`;
+}
+
+export function loadUserSimulationState(userEmail: string): UserSimulationStateRecord | null {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  if (!emailKey) return null;
+  try {
+    const raw = localStorage.getItem(getUserSimulationStorageKey(emailKey));
+    if (raw) {
+      const parsed = JSON.parse(raw) as UserSimulationStateRecord;
+      if (
+        parsed &&
+        normalizeUserEmailKey(parsed.userEmail) === emailKey &&
+        typeof parsed.simSeed === 'number' &&
+        typeof parsed.numDrawsToSimulate === 'number'
+      ) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Error loading user simulation state from localStorage:', e);
+  }
+  return null;
+}
+
+export function cacheUserSimulationStateLocally(record: UserSimulationStateRecord): void {
+  const emailKey = normalizeUserEmailKey(record?.userEmail);
+  if (!emailKey || typeof record?.simSeed !== 'number') return;
+  try {
+    localStorage.setItem(
+      getUserSimulationStorageKey(emailKey),
+      JSON.stringify({ ...record, userEmail: emailKey })
+    );
+  } catch (e) {
+    console.error('Error caching user simulation state locally:', e);
+  }
+}
+
+export function saveUserSimulationState(record: UserSimulationStateRecord): void {
+  const emailKey = normalizeUserEmailKey(record?.userEmail);
+  if (!emailKey || typeof record?.simSeed !== 'number') return;
+  const normalizedRecord: UserSimulationStateRecord = {
+    ...record,
+    userEmail: emailKey,
+    updatedAt: record.updatedAt || new Date().toISOString()
+  };
+  cacheUserSimulationStateLocally(normalizedRecord);
+  upsertCloudUserSimulation(normalizedRecord).catch(() => {});
+  fetch(`/api/user-simulations/${encodeURIComponent(emailKey)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ record: normalizedRecord })
+  }).catch(() => {});
+}
+
+export async function syncUserSimulationState(
+  userEmail: string
+): Promise<UserSimulationStateRecord | null> {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  if (!emailKey) return null;
+
+  const localRecord = loadUserSimulationState(emailKey);
+
+  const [cloudRecord, serverRecord] = await Promise.all([
+    fetchCloudUserSimulation(emailKey),
+    fetch(`/api/user-simulations/${encodeURIComponent(emailKey)}`)
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const data = await res.json();
+        return (data?.record as UserSimulationStateRecord) || null;
+      })
+      .catch(() => null)
+  ]);
+
+  const candidates = [localRecord, serverRecord, cloudRecord].filter(
+    (r): r is UserSimulationStateRecord =>
+      Boolean(
+        r &&
+          normalizeUserEmailKey(r.userEmail) === emailKey &&
+          typeof r.simSeed === 'number' &&
+          typeof r.numDrawsToSimulate === 'number'
+      )
+  );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort(
+    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+  );
+  const best = candidates[0];
+
+  cacheUserSimulationStateLocally(best);
+
+  if (!cloudRecord || new Date(best.updatedAt || 0).getTime() > new Date(cloudRecord.updatedAt || 0).getTime()) {
+    await upsertCloudUserSimulation(best);
+  }
+
+  if (!serverRecord || new Date(best.updatedAt || 0).getTime() > new Date(serverRecord.updatedAt || 0).getTime()) {
+    fetch(`/api/user-simulations/${encodeURIComponent(emailKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record: best })
+    }).catch(() => {});
+  }
+
+  return best;
+}
+
+export function loadDeletedPlayIds(): Set<string> {
+  const baseSet = new Set<string>(['play-manual-1793562659204']);
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.DELETED_PLAY_IDS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return new Set(parsed);
+      if (Array.isArray(parsed)) {
+        for (const id of parsed) {
+          if (typeof id === 'string') baseSet.add(id);
+        }
+      }
     }
   } catch {
     // Ignore
   }
-  return new Set();
+  return baseSet;
 }
 
-function markPlayIdDeleted(id: string): void {
+export function saveDeletedPlayIds(ids: Iterable<string>): Set<string> {
+  const merged = loadDeletedPlayIds();
+  for (const id of ids) {
+    if (typeof id === 'string' && id) merged.add(id);
+  }
   try {
-    const set = loadDeletedPlayIds();
-    set.add(id);
-    localStorage.setItem(STORAGE_KEYS.DELETED_PLAY_IDS, JSON.stringify(Array.from(set)));
+    localStorage.setItem(STORAGE_KEYS.DELETED_PLAY_IDS, JSON.stringify(Array.from(merged)));
   } catch {
     // Ignore
   }
+  return merged;
+}
+
+function markPlayIdDeleted(id: string): void {
+  saveDeletedPlayIds([id]);
 }
 
 function unmarkPlayIdDeleted(id: string): void {
@@ -56,6 +326,21 @@ function unmarkPlayIdDeleted(id: string): void {
   } catch {
     // Ignore
   }
+}
+
+/**
+ * Filter plays so each user only sees their own plays in Verifica & Bilancio.
+ * Legacy plays without `userEmail` belong to the primary administrator (giuseppe.vitiello@gmail.com).
+ */
+export function filterPlaysForUser(plays: SavedPlay[], userEmail: string): SavedPlay[] {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  const deletedIds = loadDeletedPlayIds();
+  if (!emailKey) return [];
+  return plays.filter((p) => {
+    if (!p || deletedIds.has(p.id)) return false;
+    const owner = normalizeUserEmailKey(p.userEmail || 'giuseppe.vitiello@gmail.com');
+    return owner === emailKey;
+  });
 }
 
 export const DEFAULT_WEIGHTS: ScoringWeights = {
@@ -285,14 +570,17 @@ export function insertDraw(newDraw: Draw): Draw[] {
 }
 
 /**
- * Load saved weekly plays from localStorage
+ * Load saved weekly plays from localStorage (automatically excluding deleted play IDs)
  */
 export function loadSavedPlays(): SavedPlay[] {
+  const deletedIds = loadDeletedPlayIds();
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PLAYS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id));
+      }
     }
   } catch (e) {
     console.warn('Error loading saved plays:', e);
@@ -304,28 +592,32 @@ export function loadSavedPlays(): SavedPlay[] {
  * Cache plays locally in localStorage and IndexedDB without triggering remote writes
  */
 export function cachePlaysLocally(plays: SavedPlay[]): void {
+  const deletedIds = loadDeletedPlayIds();
+  const cleanPlays = plays.filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id));
   try {
-    localStorage.setItem(STORAGE_KEYS.PLAYS, JSON.stringify(plays));
+    localStorage.setItem(STORAGE_KEYS.PLAYS, JSON.stringify(cleanPlays));
   } catch (e) {
     console.error('Error caching plays to localStorage:', e);
   }
-  savePlaysToIDB(plays);
+  savePlaysToIDB(cleanPlays);
 }
 
 /**
  * Save weekly plays to localStorage + IndexedDB + Server + Cloud Firestore
  */
 export function savePlays(plays: SavedPlay[]): void {
-  cachePlaysLocally(plays);
+  const deletedIds = loadDeletedPlayIds();
+  const cleanPlays = plays.filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id));
+  cachePlaysLocally(cleanPlays);
   fetch('/api/plays', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ plays })
+    body: JSON.stringify({ plays: cleanPlays })
   }).catch(() => {
     // Ignore if offline
   });
-  if (plays.length > 0) {
-    upsertManyCloudPlays(plays).catch(() => {});
+  if (cleanPlays.length > 0) {
+    upsertManyCloudPlays(cleanPlays).catch(() => {});
   }
 }
 
@@ -342,33 +634,55 @@ function pickPreferredPlay(existing: SavedPlay, incoming: SavedPlay): SavedPlay 
 }
 
 /**
- * Synchronize saved plays across Cloud Firestore (/plays), Server (/api/plays), IndexedDB, and LocalStorage
- * so plays are permanently available across any browser, device, and after stateless container restarts
+ * Synchronize saved plays across Cloud Firestore (/plays + /deleted_plays), Server (/api/plays), IndexedDB, and LocalStorage
+ * Ensures deleted plays NEVER resurrect across browsers or during in-flight async syncs.
  */
 export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
-  const deletedIds = loadDeletedPlayIds();
-  const localPlays = loadSavedPlays().filter((p) => p && !deletedIds.has(p.id));
-  const idbPlays = (await loadPlaysFromIDB()).filter((p) => p && !deletedIds.has(p.id));
+  // Also ensure the legacy test play is removed from Cloud Firestore
+  removeCloudPlay('play-manual-1793562659204').catch(() => {});
 
-  const [cloudPlaysResult, serverPlaysResult] = await Promise.all([
+  const [idbPlaysRaw, cloudPlaysResult, cloudDeletedIds, serverResponse] = await Promise.all([
+    loadPlaysFromIDB(),
     fetchCloudPlays(),
+    fetchCloudDeletedPlayIds(),
     fetch('/api/plays')
       .then(async (res) => {
-        if (!res.ok) return [] as SavedPlay[];
+        if (!res.ok) return { plays: [] as SavedPlay[], deletedIds: [] as string[] };
         const data = await res.json();
-        return Array.isArray(data?.plays) ? (data.plays as SavedPlay[]) : [];
+        return {
+          plays: Array.isArray(data?.plays) ? (data.plays as SavedPlay[]) : [],
+          deletedIds: Array.isArray(data?.deletedIds) ? (data.deletedIds as string[]) : []
+        };
       })
-      .catch(() => [] as SavedPlay[])
+      .catch(() => ({ plays: [] as SavedPlay[], deletedIds: [] as string[] }))
   ]);
 
-  const cloudPlays = (cloudPlaysResult || []).filter((p) => p && !deletedIds.has(p.id));
-  const serverPlays = serverPlaysResult.filter((p) => p && !deletedIds.has(p.id));
+  // Re-read localDeletedPlayIds AFTER all awaits so any deletion clicked while sync was in-flight is honored!
+  const allDeletedIds = saveDeletedPlayIds([
+    ...loadDeletedPlayIds(),
+    ...cloudDeletedIds,
+    ...serverResponse.deletedIds
+  ]);
+
+  const localPlays = loadSavedPlays().filter((p) => p && !allDeletedIds.has(p.id));
+  const idbPlays = idbPlaysRaw.filter((p) => p && !allDeletedIds.has(p.id));
+  const cloudPlays = (cloudPlaysResult || []).filter((p) => p && !allDeletedIds.has(p.id));
+  const serverPlays = serverResponse.plays.filter((p) => p && !allDeletedIds.has(p.id));
+
+  // If any play present in Cloud Firestore is actually in allDeletedIds, remove it from Cloud Firestore
+  if (cloudPlaysResult) {
+    for (const cp of cloudPlaysResult) {
+      if (cp && allDeletedIds.has(cp.id)) {
+        removeCloudPlay(cp.id).catch(() => {});
+      }
+    }
+  }
 
   const mergedMap = new Map<string, SavedPlay>();
 
   for (const list of [serverPlays, idbPlays, localPlays, cloudPlays]) {
     for (const p of list) {
-      if (!p || typeof p.id !== 'string') continue;
+      if (!p || typeof p.id !== 'string' || allDeletedIds.has(p.id)) continue;
       const existing = mergedMap.get(p.id);
       if (!existing) {
         mergedMap.set(p.id, p);
@@ -378,20 +692,24 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
     }
   }
 
-  const merged = Array.from(mergedMap.values()).sort((a, b) =>
-    String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
-  );
+  // Final check against latest loadDeletedPlayIds() in case user clicked Delete right now
+  const finalDeletedIds = loadDeletedPlayIds();
+  const merged = Array.from(mergedMap.values())
+    .filter((p) => !finalDeletedIds.has(p.id))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
   cachePlaysLocally(merged);
 
-  // Push any local/server plays that are missing or outdated in Cloud Firestore
+  // Push any non-deleted local/server plays that are missing or outdated in Cloud Firestore
   const cloudMap = new Map(cloudPlays.map((p) => [p.id, p]));
   const toUploadToCloud = merged.filter((p) => {
+    if (finalDeletedIds.has(p.id)) return false;
     const inCloud = cloudMap.get(p.id);
     if (!inCloud) return true;
     if (p.status === 'VERIFICATA' && inCloud.status !== 'VERIFICATA') return true;
     if ((p.result?.totalWinning ?? 0) !== (inCloud.result?.totalWinning ?? 0)) return true;
     if (p.cost !== inCloud.cost) return true;
+    if (p.userEmail && !inCloud.userEmail) return true;
     return false;
   });
 

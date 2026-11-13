@@ -22,7 +22,8 @@ import {
   Sliders,
   ArrowRightCircle,
   Cpu,
-  ShieldCheck
+  ShieldCheck,
+  Lock
 } from 'lucide-react';
 import {
   Draw,
@@ -43,9 +44,26 @@ import {
   clampSimulationDrawsCount
 } from '../utils/monteCarloSimulation';
 import { runSimulationInWorker } from '../utils/simulationWorkerClient';
-import { DEFAULT_FILTERS } from '../utils/storage';
+import {
+  DEFAULT_FILTERS,
+  loadUserSimulationState,
+  cacheUserSimulationStateLocally,
+  saveUserSimulationState,
+  syncUserSimulationState
+} from '../utils/storage';
+import { subscribeCloudUserSimulation } from '../utils/firebase';
+
+function computeDefaultUserSeed(email: string): number {
+  let hash = 202605;
+  const norm = String(email || '').trim().toLowerCase();
+  for (let i = 0; i < norm.length; i++) {
+    hash = (hash * 31 + norm.charCodeAt(i)) % 100000000;
+  }
+  return Math.max(1000, hash);
+}
 
 interface SimulationEngineProps {
+  userEmail: string;
   draws: Draw[];
   weeklyColumns: GeneratedColumn[];
   onSavePlay: (play: SavedPlay) => void;
@@ -55,6 +73,7 @@ interface SimulationEngineProps {
 }
 
 export const SimulationEngine: React.FC<SimulationEngineProps> = ({
+  userEmail,
   draws,
   weeklyColumns,
   onSavePlay,
@@ -62,23 +81,31 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
   coverageTarget = 'terni',
   onUpdateCoverageTarget
 }) => {
+  const initialSavedSim = useMemo(() => loadUserSimulationState(userEmail), [userEmail]);
+
   // Punto 3: Urna ipergeometrica pura ('hypergeometric_pure_urn') come default per evitare data leakage
-  const [methodology, setMethodology] = useState<SimulationMethodology>('hypergeometric_pure_urn');
-  const [localCoverageTarget, setLocalCoverageTarget] = useState<CoverageTarget>(coverageTarget);
-  const activeCoverageTarget = onUpdateCoverageTarget ? coverageTarget : localCoverageTarget;
+  const [methodology, setMethodology] = useState<SimulationMethodology>(
+    () => initialSavedSim?.methodology ?? 'hypergeometric_pure_urn'
+  );
+  const [localCoverageTarget, setLocalCoverageTarget] = useState<CoverageTarget>(
+    () => initialSavedSim?.coverageTarget ?? coverageTarget
+  );
+  const activeCoverageTarget = localCoverageTarget;
 
-  const handleSelectCoverageTarget = (target: CoverageTarget) => {
-    setLocalCoverageTarget(target);
-    onUpdateCoverageTarget?.(target);
-    setAppliedToGen(false);
-    setAppliedSmartPoolToGen(false);
-    setSavedHighProb(false);
-  };
-
-  const [numDrawsToSimulate, setNumDrawsToSimulate] = useState<number>(100);
-  const [customDrawsInput, setCustomDrawsInput] = useState<string>('100');
+  const [numDrawsToSimulate, setNumDrawsToSimulate] = useState<number>(
+    () => initialSavedSim?.numDrawsToSimulate ?? 100
+  );
+  const [customDrawsInput, setCustomDrawsInput] = useState<string>(
+    () => String(initialSavedSim?.numDrawsToSimulate ?? 100)
+  );
   const [drawsRangeWarning, setDrawsRangeWarning] = useState<string | null>(null);
-  const [simSeed, setSimSeed] = useState<number>(() => Date.now());
+  const [simSeed, setSimSeed] = useState<number>(
+    () => initialSavedSim?.simSeed ?? computeDefaultUserSeed(userEmail)
+  );
+  const [lastSimUpdatedAt, setLastSimUpdatedAt] = useState<string | null>(
+    () => initialSavedSim?.updatedAt ?? null
+  );
+  const [hasPendingSimChanges, setHasPendingSimChanges] = useState<boolean>(false);
   const [copiedSestina, setCopiedSestina] = useState(false);
   const [savedHighProb, setSavedHighProb] = useState(false);
   const [appliedToGen, setAppliedToGen] = useState(false);
@@ -86,8 +113,19 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
   const pageSize = 10;
 
   // Punto 3: Walk-Forward Smart Pool (10-15 numeri consigliati per il prossimo concorso)
-  const [smartPoolSize, setSmartPoolSize] = useState<number>(12);
+  const [smartPoolSize, setSmartPoolSize] = useState<number>(
+    () => initialSavedSim?.smartPoolSize ?? 12
+  );
   const [appliedSmartPoolToGen, setAppliedSmartPoolToGen] = useState<boolean>(false);
+
+  const handleSelectCoverageTarget = (target: CoverageTarget) => {
+    setLocalCoverageTarget(target);
+    onUpdateCoverageTarget?.(target);
+    setHasPendingSimChanges(true);
+    setAppliedToGen(false);
+    setAppliedSmartPoolToGen(false);
+    setSavedHighProb(false);
+  };
 
   const smartPoolRec: SmartPoolRecommendationResult = useMemo(() => {
     return generateSmartPoolRecommendation(draws, smartPoolSize);
@@ -105,68 +143,142 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
     [smartPoolRec]
   );
 
-  // Punto 5: Web Worker simulation state + initial synchronous baseline
+  // Punto 5: Web Worker simulation state + initial synchronous baseline locked to user's saved state
   const [simResult, setSimResult] = useState<HundredDrawsSimulationResult>(() =>
     runNext100DrawsSimulation(
       draws,
       weeklyColumns,
-      'hypergeometric_pure_urn',
-      simSeed,
-      100,
-      activeCoverageTarget
+      initialSavedSim?.methodology ?? 'hypergeometric_pure_urn',
+      initialSavedSim?.simSeed ?? computeDefaultUserSeed(userEmail),
+      initialSavedSim?.numDrawsToSimulate ?? 100,
+      initialSavedSim?.coverageTarget ?? coverageTarget
     )
   );
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [simProgress, setSimProgress] = useState<{ completed: number; total: number } | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
+  const executeSimulationWithParams = (params: {
+    seed: number;
+    method: SimulationMethodology;
+    drawsCount: number;
+    covTarget: CoverageTarget;
+    poolSz: number;
+    persistForUser: boolean;
+    updatedAtIso?: string;
+  }) => {
     setIsSimulating(true);
-    setSimProgress({ completed: 0, total: numDrawsToSimulate });
+    setSimProgress({ completed: 0, total: params.drawsCount });
 
     runSimulationInWorker(
       {
         historicalDraws: draws,
         weeklyColumns,
-        methodology,
-        seed: simSeed,
-        numDrawsToSimulate,
-        coverageTarget: activeCoverageTarget
+        methodology: params.method,
+        seed: params.seed,
+        numDrawsToSimulate: params.drawsCount,
+        coverageTarget: params.covTarget
       },
       (completedDraws, totalDraws) => {
-        if (!cancelled) {
-          setSimProgress({ completed: completedDraws, total: totalDraws });
-        }
+        setSimProgress({ completed: completedDraws, total: totalDraws });
       }
     )
       .then((res) => {
-        if (!cancelled) {
-          setSimResult(res);
-          setIsSimulating(false);
-          setSimProgress(null);
-        }
+        setSimResult(res);
+        setIsSimulating(false);
+        setSimProgress(null);
       })
       .catch(() => {
-        if (!cancelled) {
-          const fallback = runNext100DrawsSimulation(
-            draws,
-            weeklyColumns,
-            methodology,
-            simSeed,
-            numDrawsToSimulate,
-            activeCoverageTarget
-          );
-          setSimResult(fallback);
-          setIsSimulating(false);
-          setSimProgress(null);
-        }
+        const fallback = runNext100DrawsSimulation(
+          draws,
+          weeklyColumns,
+          params.method,
+          params.seed,
+          params.drawsCount,
+          params.covTarget
+        );
+        setSimResult(fallback);
+        setIsSimulating(false);
+        setSimProgress(null);
       });
 
-    return () => {
-      cancelled = true;
+    if (params.persistForUser) {
+      const nowIso = params.updatedAtIso || new Date().toISOString();
+      setLastSimUpdatedAt(nowIso);
+      setHasPendingSimChanges(false);
+      saveUserSimulationState({
+        userEmail,
+        updatedAt: nowIso,
+        simSeed: params.seed,
+        methodology: params.method,
+        numDrawsToSimulate: params.drawsCount,
+        coverageTarget: params.covTarget,
+        smartPoolSize: params.poolSz
+      });
+    }
+  };
+
+  // Synchronize this specific user's locked simulation state on mount / userEmail change
+  useEffect(() => {
+    let active = true;
+    const localRec = loadUserSimulationState(userEmail);
+
+    const applySavedSimRecord = (rec: NonNullable<typeof localRec>, persist: boolean) => {
+      setSimSeed(rec.simSeed);
+      setMethodology(rec.methodology);
+      setNumDrawsToSimulate(rec.numDrawsToSimulate);
+      setCustomDrawsInput(String(rec.numDrawsToSimulate));
+      setLocalCoverageTarget(rec.coverageTarget || 'terni');
+      setSmartPoolSize(rec.smartPoolSize || 12);
+      setLastSimUpdatedAt(rec.updatedAt);
+      setHasPendingSimChanges(false);
+      executeSimulationWithParams({
+        seed: rec.simSeed,
+        method: rec.methodology,
+        drawsCount: rec.numDrawsToSimulate,
+        covTarget: rec.coverageTarget || 'terni',
+        poolSz: rec.smartPoolSize || 12,
+        persistForUser: persist,
+        updatedAtIso: rec.updatedAt
+      });
     };
-  }, [draws, weeklyColumns, methodology, simSeed, numDrawsToSimulate, activeCoverageTarget]);
+
+    if (localRec && localRec.numDrawsToSimulate > 100) {
+      applySavedSimRecord(localRec, false);
+    }
+
+    syncUserSimulationState(userEmail).then((syncedRec) => {
+      if (!active) return;
+      if (syncedRec) {
+        if (!localRec || syncedRec.updatedAt > localRec.updatedAt) {
+          applySavedSimRecord(syncedRec, false);
+        }
+      } else if (!localRec) {
+        const defaultSeed = computeDefaultUserSeed(userEmail);
+        executeSimulationWithParams({
+          seed: defaultSeed,
+          method: 'hypergeometric_pure_urn',
+          drawsCount: 100,
+          covTarget: activeCoverageTarget,
+          poolSz: 12,
+          persistForUser: true
+        });
+      }
+    });
+
+    const unsubSim = subscribeCloudUserSimulation(userEmail, (cloudRec) => {
+      if (!active || !cloudRec) return;
+      const currentLocal = loadUserSimulationState(userEmail);
+      if (!currentLocal || cloudRec.updatedAt > currentLocal.updatedAt) {
+        cacheUserSimulationStateLocally(cloudRec);
+        applySavedSimRecord(cloudRec, false);
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubSim();
+    };
+  }, [userEmail]);
 
   const totalDrawsCount = simResult.totalSimulatedDrawsCount;
   const formattedDrawsCount = totalDrawsCount.toLocaleString('it-IT');
@@ -190,6 +302,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
     setDrawsRangeWarning(null);
     setNumDrawsToSimulate(count);
     setCustomDrawsInput(String(count));
+    setHasPendingSimChanges(true);
     setSimPage(1);
     setSavedHighProb(false);
     setAppliedToGen(false);
@@ -207,10 +320,12 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
         `Limite massimo consentito: ${MAX_SIMULATION_DRAWS.toLocaleString('it-IT')} estrazioni`
       );
       setNumDrawsToSimulate(MAX_SIMULATION_DRAWS);
+      setHasPendingSimChanges(true);
       setSimPage(1);
     } else if (parsed >= MIN_SIMULATION_DRAWS) {
       setDrawsRangeWarning(null);
       setNumDrawsToSimulate(parsed);
+      setHasPendingSimChanges(true);
       setSimPage(1);
     } else {
       setDrawsRangeWarning(
@@ -234,14 +349,24 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
     }
     setNumDrawsToSimulate(clamped);
     setCustomDrawsInput(String(clamped));
+    setHasPendingSimChanges(true);
     setSimPage(1);
   };
 
   const handleRerunSimulation = () => {
-    setSimSeed(Date.now() + Math.floor(Math.random() * 100000));
+    const nextSeed = Date.now() + Math.floor(Math.random() * 100000);
+    setSimSeed(nextSeed);
     setSimPage(1);
     setSavedHighProb(false);
     setAppliedToGen(false);
+    executeSimulationWithParams({
+      seed: nextSeed,
+      method: methodology,
+      drawsCount: numDrawsToSimulate,
+      covTarget: activeCoverageTarget,
+      poolSz: smartPoolSize,
+      persistForUser: true
+    });
   };
 
   const handleCopyHighProbSestina = () => {
@@ -370,6 +495,10 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-sky-500/10 text-sky-300 border border-sky-500/20">
                 Payout Dinamico Anti-Crowd [0.75x &ndash; 1.65x]
               </span>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                <Lock className="w-3 h-3" />
+                <span>Simulazione Bloccata per {userEmail}</span>
+              </span>
             </div>
             <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">
               Simulatore Ufficiale ({formattedDrawsCount} Estrazioni) & Analisi Guadagni/Perdite
@@ -381,6 +510,17 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               SuperStar) su un orizzonte da{' '}
               <strong className="text-amber-300">100 fino a 250.000 estrazioni consecutive</strong>{' '}
               con quote dinamiche <strong className="text-sky-300">Anti-Crowd</strong>.
+              {lastSimUpdatedAt && (
+                <span className="ml-2 text-slate-500 font-mono">
+                  &bull; Calcolata il{' '}
+                  {new Date(lastSimUpdatedAt).toLocaleString('it-IT', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </span>
+              )}
             </p>
           </div>
 
@@ -389,7 +529,10 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             <div className="flex items-center p-1 bg-slate-950 rounded-xl border border-slate-800">
               <button
                 type="button"
-                onClick={() => setMethodology('hypergeometric_pure_urn')}
+                onClick={() => {
+                  setMethodology('hypergeometric_pure_urn');
+                  setHasPendingSimChanges(true);
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   methodology === 'hypergeometric_pure_urn'
                     ? 'bg-sky-500 text-slate-950 shadow'
@@ -401,7 +544,10 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setMethodology('bayesian_hybrid_urn')}
+                onClick={() => {
+                  setMethodology('bayesian_hybrid_urn');
+                  setHasPendingSimChanges(true);
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   methodology === 'bayesian_hybrid_urn'
                     ? 'bg-amber-500 text-slate-950 shadow'
@@ -423,11 +569,25 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               <span>
                 {isSimulating
                   ? `Calcolo Worker (${progressPct}%)...`
-                  : `Risimula ${formattedDrawsCount} Estrazioni`}
+                  : `Risimula ${numDrawsToSimulate.toLocaleString('it-IT')} Estrazioni`}
               </span>
             </button>
           </div>
         </div>
+
+        {hasPendingSimChanges && (
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-200 flex items-center gap-2">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              Parametri di simulazione modificati: i risultati e la Super-Sestina restano bloccati per{' '}
+              <strong className="font-mono text-white">{userEmail}</strong> finché non premi{' '}
+              <strong className="text-amber-300">
+                "Risimula {numDrawsToSimulate.toLocaleString('it-IT')} Estrazioni"
+              </strong>
+              .
+            </span>
+          </div>
+        )}
 
         {/* Web Worker Progress Bar when running large simulations */}
         {isSimulating && simProgress && (

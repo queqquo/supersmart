@@ -16,7 +16,8 @@
         "status": { "type": "string", "enum": ["IN_ATTESA", "VERIFICATA"] },
         "result": { "type": "object", "description": "Verification result and winning details" },
         "manualNote": { "type": "string", "description": "Optional user note" },
-        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" },
+        "userEmail": { "type": "string", "description": "Normalized email of the user who owns this play" }
       },
       "required": ["id", "createdAt", "targetContestId", "mode", "cost", "poolNumbers", "columns", "status"]
     },
@@ -51,12 +52,61 @@
         "superstar": { "type": "number" }
       },
       "required": ["id", "contestNumber", "year", "date", "numbers", "jolly"]
+    },
+    "UserGeneratedSystemRecord": {
+      "title": "UserGeneratedSystemRecord",
+      "description": "Per-user persisted optimized system (sestine) and generator configuration.",
+      "type": "object",
+      "properties": {
+        "userEmail": { "type": "string", "description": "Normalized email of the user" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp when system was explicitly calculated" },
+        "poolSizeV": { "type": "number" },
+        "playMode": { "type": "string", "enum": ["pure_coverage", "superstar", "manual"] },
+        "coverageTarget": { "type": "string", "enum": ["ambi", "terni"] },
+        "selectedBudget": { "type": "number" },
+        "budgetMode": { "type": "string", "enum": ["preset", "custom"] },
+        "selectedPool": { "type": "array", "items": { "type": "number" } },
+        "manualPoolEdit": { "type": "boolean" },
+        "weights": { "type": "object" },
+        "filters": { "type": "object" },
+        "systemResult": { "type": "object", "description": "Generated columns and coverage metrics" }
+      },
+      "required": ["userEmail", "updatedAt", "systemResult"]
+    },
+    "UserSimulationStateRecord": {
+      "title": "UserSimulationStateRecord",
+      "description": "Per-user persisted Monte Carlo simulation seed and parameters.",
+      "type": "object",
+      "properties": {
+        "userEmail": { "type": "string", "description": "Normalized email of the user" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp when simulation was explicitly executed" },
+        "simSeed": { "type": "number", "description": "Deterministic PRNG seed for the user's locked simulation" },
+        "methodology": { "type": "string", "enum": ["hypergeometric_pure_urn", "bayesian_hybrid_urn"] },
+        "numDrawsToSimulate": { "type": "number" },
+        "coverageTarget": { "type": "string", "enum": ["ambi", "terni"] },
+        "smartPoolSize": { "type": "number" }
+      },
+      "required": ["userEmail", "updatedAt", "simSeed", "methodology", "numDrawsToSimulate"]
+    },
+    "DeletedPlayTombstone": {
+      "title": "DeletedPlayTombstone",
+      "description": "Tombstone record for a deleted SavedPlay to prevent resurrection across browsers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Deleted play ID" },
+        "deletedAt": { "type": "string", "description": "ISO timestamp of deletion" }
+      },
+      "required": ["id", "deletedAt"]
     }
   },
   "firestore": {
     "/plays/{playId}": {
       "schema": { "$ref": "#/entities/SavedPlay" },
-      "description": "Cloud-persisted registered plays shared across browsers and sessions."
+      "description": "Cloud-persisted registered plays isolated per user across browsers and sessions."
+    },
+    "/deleted_plays/{playId}": {
+      "schema": { "$ref": "#/entities/DeletedPlayTombstone" },
+      "description": "Cloud-persisted tombstones of deleted plays so no browser re-uploads a deleted play."
     },
     "/acl/{emailKey}": {
       "schema": { "$ref": "#/entities/UserAccessRecord" },
@@ -65,6 +115,14 @@
     "/custom_draws/{drawId}": {
       "schema": { "$ref": "#/entities/CustomDraw" },
       "description": "Cloud-persisted custom or newly added SuperEnalotto draws."
+    },
+    "/user_systems/{emailKey}": {
+      "schema": { "$ref": "#/entities/UserGeneratedSystemRecord" },
+      "description": "Per-user persisted optimized sestine in the System Generator."
+    },
+    "/user_simulations/{emailKey}": {
+      "schema": { "$ref": "#/entities/UserSimulationStateRecord" },
+      "description": "Per-user persisted Monte Carlo simulation state and deterministic seed."
     }
   }
 }

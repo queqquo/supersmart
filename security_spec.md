@@ -6,6 +6,7 @@
   1. `/plays/{playId}`: Stores registered plays (`SavedPlay`), both system-generated and manually entered, so the play history and economic ledger are preserved across browsers and sessions.
   2. `/acl/{emailKey}`: Stores user authorization records (`UserAccessRecord`) keyed by normalized email address.
   3. `/custom_draws/{drawId}`: Stores custom/delta draws added via Smart Paste or CSV import.
+  4. `/user_systems/{emailKey}`: Stores each individual user's last calculated optimized system (`UserGeneratedSystemRecord`) keyed by normalized email address (`emailKey`), so User A's generated sestine are isolated from User B's and only change when that user clicks "Calcola Sistema Ottimizzato".
 
 ## 2. Invariants & Validation Rules
 - **`/plays/{playId}`**:
@@ -21,3 +22,7 @@
   - **Primary Admin Protection**: The primary administrator record (`emailKey == 'giuseppe.vitiello@gmail.com'`) can NEVER be deleted (`allow delete: if emailKey != 'giuseppe.vitiello@gmail.com'`) and can NEVER have its role changed from `'ADMIN'` or status changed from `'AUTHORIZED'`.
 - **`/custom_draws/{drawId}`**:
   - `id` must match `drawId`, `numbers` must be a list of 6 numbers, and `jolly` must be between 1 and 90.
+- **`/user_systems/{emailKey}`**:
+  - `userEmail` must be a valid lowercase email string matching `emailKey` (`<= 254` chars).
+  - `updatedAt` must be a string (`<= 64` chars).
+  - `systemResult` must be a map containing `columns` (list of 1..200 generated sestine) and `poolNumbers` (list of 6..90 numbers).

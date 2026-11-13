@@ -1,0 +1,191 @@
+[
+  {
+    "id": "play-archive-1794598583444",
+    "createdAt": "2026-11-13T19:36:23.444Z",
+    "targetContestId": "2026-182",
+    "mode": "pure_coverage",
+    "cost": 10,
+    "savedAmount": 0,
+    "poolNumbers": [
+      6,
+      8,
+      9,
+      16,
+      18,
+      28,
+      40,
+      41,
+      55,
+      58,
+      75,
+      77,
+      87,
+      88
+    ],
+    "columns": [
+      {
+        "id": 1,
+        "numbers": [
+          6,
+          8,
+          16,
+          18,
+          55,
+          87
+        ],
+        "sum": 190,
+        "evens": 4,
+        "odds": 2,
+        "lows": 4,
+        "highs": 2
+      },
+      {
+        "id": 2,
+        "numbers": [
+          6,
+          9,
+          28,
+          40,
+          58,
+          75
+        ],
+        "sum": 216,
+        "evens": 4,
+        "odds": 2,
+        "lows": 4,
+        "highs": 2
+      },
+      {
+        "id": 3,
+        "numbers": [
+          8,
+          9,
+          16,
+          41,
+          77,
+          88
+        ],
+        "sum": 239,
+        "evens": 3,
+        "odds": 3,
+        "lows": 4,
+        "highs": 2
+      },
+      {
+        "id": 4,
+        "numbers": [
+          18,
+          28,
+          40,
+          41,
+          55,
+          77
+        ],
+        "sum": 259,
+        "evens": 3,
+        "odds": 3,
+        "lows": 4,
+        "highs": 2
+      },
+      {
+        "id": 5,
+        "numbers": [
+          6,
+          41,
+          58,
+          75,
+          77,
+          87
+        ],
+        "sum": 344,
+        "evens": 2,
+        "odds": 4,
+        "lows": 2,
+        "highs": 4
+      },
+      {
+        "id": 6,
+        "numbers": [
+          9,
+          18,
+          55,
+          75,
+          87,
+          88
+        ],
+        "sum": 332,
+        "evens": 2,
+        "odds": 4,
+        "lows": 2,
+        "highs": 4
+      },
+      {
+        "id": 7,
+        "numbers": [
+          8,
+          16,
+          28,
+          40,
+          75,
+          87
+        ],
+        "sum": 254,
+        "evens": 4,
+        "odds": 2,
+        "lows": 4,
+        "highs": 2
+      },
+      {
+        "id": 8,
+        "numbers": [
+          16,
+          40,
+          41,
+          55,
+          58,
+          88
+        ],
+        "sum": 298,
+        "evens": 4,
+        "odds": 2,
+        "lows": 3,
+        "highs": 3
+      },
+      {
+        "id": 9,
+        "numbers": [
+          6,
+          9,
+          28,
+          41,
+          87,
+          88
+        ],
+        "sum": 259,
+        "evens": 3,
+        "odds": 3,
+        "lows": 4,
+        "highs": 2
+      },
+      {
+        "id": 10,
+        "numbers": [
+          8,
+          9,
+          40,
+          55,
+          58,
+          77
+        ],
+        "sum": 247,
+        "evens": 3,
+        "odds": 3,
+        "lows": 3,
+        "highs": 3
+      }
+    ],
+    "status": "IN_ATTESA",
+    "manualNote": "Sistema Ottimizzato (10 sestine)",
+    "userEmail": "giuseppe.vitiello@gmail.com"
+  }
+]

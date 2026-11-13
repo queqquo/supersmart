@@ -43,9 +43,45 @@ service cloud.firestore {
         && data.jolly is number && data.jolly >= 1 && data.jolly <= 90;
     }
 
+    function isValidUserSystem(data, emailKey) {
+      return data.keys().hasAll(['userEmail', 'updatedAt', 'systemResult'])
+        && data.userEmail is string
+        && data.userEmail == emailKey
+        && data.userEmail.size() >= 3 && data.userEmail.size() <= 254
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && data.systemResult is map
+        && data.systemResult.columns is list
+        && data.systemResult.columns.size() >= 1 && data.systemResult.columns.size() <= 200;
+    }
+
+    function isValidUserSimulation(data, emailKey) {
+      return data.keys().hasAll(['userEmail', 'updatedAt', 'simSeed', 'methodology', 'numDrawsToSimulate'])
+        && data.userEmail is string
+        && data.userEmail == emailKey
+        && data.userEmail.size() >= 3 && data.userEmail.size() <= 254
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && data.simSeed is number
+        && data.methodology in ['hypergeometric_pure_urn', 'bayesian_hybrid_urn']
+        && data.numDrawsToSimulate is number && data.numDrawsToSimulate >= 100 && data.numDrawsToSimulate <= 250000;
+    }
+
+    function isValidDeletedPlayTombstone(data, playId) {
+      return data.keys().hasAll(['id', 'deletedAt'])
+        && data.id is string
+        && data.id == playId
+        && data.id.size() > 0 && data.id.size() <= 128
+        && data.deletedAt is string && data.deletedAt.size() <= 64;
+    }
+
     match /plays/{playId} {
       allow read: if true;
       allow create, update: if isValidPlay(request.resource.data, playId);
+      allow delete: if true;
+    }
+
+    match /deleted_plays/{playId} {
+      allow read: if true;
+      allow create, update: if isValidDeletedPlayTombstone(request.resource.data, playId);
       allow delete: if true;
     }
 
@@ -58,6 +94,18 @@ service cloud.firestore {
     match /custom_draws/{drawId} {
       allow read: if true;
       allow create, update: if isValidCustomDraw(request.resource.data, drawId);
+      allow delete: if true;
+    }
+
+    match /user_systems/{emailKey} {
+      allow read: if true;
+      allow create, update: if isValidUserSystem(request.resource.data, emailKey);
+      allow delete: if true;
+    }
+
+    match /user_simulations/{emailKey} {
+      allow read: if true;
+      allow create, update: if isValidUserSimulation(request.resource.data, emailKey);
       allow delete: if true;
     }
 

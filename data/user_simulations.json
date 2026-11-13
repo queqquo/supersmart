@@ -1,0 +1,11 @@
+{
+  "giuseppe.vitiello@gmail.com": {
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "updatedAt": "2026-11-13T19:12:52.709Z",
+    "simSeed": 5238660,
+    "methodology": "hypergeometric_pure_urn",
+    "numDrawsToSimulate": 100,
+    "coverageTarget": "terni",
+    "smartPoolSize": 12
+  }
+}

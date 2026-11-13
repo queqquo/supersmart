@@ -9,6 +9,7 @@ import {
   getFirestore,
   collection,
   doc,
+  getDoc,
   getDocs,
   getDocFromServer,
   setDoc,
@@ -18,7 +19,12 @@ import {
   Firestore
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Draw, SavedPlay } from '../types/lottery';
+import {
+  Draw,
+  SavedPlay,
+  UserGeneratedSystemRecord,
+  UserSimulationStateRecord
+} from '../types/lottery';
 import { UserAccessRecord, normalizeEmail, isPrimaryAdmin } from './auth';
 
 export enum OperationType {
@@ -176,12 +182,64 @@ export async function removeCloudPlay(playId: string): Promise<boolean> {
   const db = getCloudDb();
   if (!db || !playId) return false;
   try {
-    await deleteDoc(doc(db, 'plays', playId));
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'plays', playId));
+    batch.set(doc(db, 'deleted_plays', playId), {
+      id: playId,
+      deletedAt: new Date().toISOString()
+    });
+    await batch.commit();
     return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `plays/${playId}`);
     return false;
   }
+}
+
+export async function fetchCloudDeletedPlayIds(): Promise<string[]> {
+  const db = getCloudDb();
+  if (!db) return [];
+  try {
+    const snap = await getDocs(collection(db, 'deleted_plays'));
+    const ids: string[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as { id?: string };
+      if (data && typeof data.id === 'string') {
+        ids.push(data.id);
+      } else if (docSnap.id) {
+        ids.push(docSnap.id);
+      }
+    });
+    return ids;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'deleted_plays');
+    return [];
+  }
+}
+
+export function subscribeCloudDeletedPlayIds(
+  onUpdate: (deletedIds: string[]) => void
+): () => void {
+  const db = getCloudDb();
+  if (!db) return () => {};
+  return onSnapshot(
+    collection(db, 'deleted_plays'),
+    (snap) => {
+      const ids: string[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as { id?: string };
+        if (data && typeof data.id === 'string') {
+          ids.push(data.id);
+        } else if (docSnap.id) {
+          ids.push(docSnap.id);
+        }
+      });
+      onUpdate(ids);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'deleted_plays');
+    }
+  );
 }
 
 export function subscribeCloudPlays(onUpdate: (plays: SavedPlay[]) => void): () => void {
@@ -350,3 +408,164 @@ export async function upsertCloudCustomDraw(draw: Draw): Promise<boolean> {
     return false;
   }
 }
+
+// ============================================================================
+// 4. PER-USER GENERATED SYSTEM CLOUD PERSISTENCE (/user_systems/{emailKey})
+// ============================================================================
+
+export async function fetchCloudUserSystem(
+  userEmail: string
+): Promise<UserGeneratedSystemRecord | null> {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(userEmail);
+  if (!db || !emailKey) return null;
+  try {
+    const snap = await getDoc(doc(db, 'user_systems', emailKey));
+    if (!snap.exists()) return null;
+    const data = snap.data() as UserGeneratedSystemRecord;
+    if (
+      data &&
+      typeof data.userEmail === 'string' &&
+      data.systemResult &&
+      Array.isArray(data.systemResult.columns) &&
+      data.systemResult.columns.length > 0
+    ) {
+      return data;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `user_systems/${emailKey}`);
+    return null;
+  }
+}
+
+export async function upsertCloudUserSystem(
+  record: UserGeneratedSystemRecord
+): Promise<boolean> {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(record?.userEmail || '');
+  if (!db || !emailKey || !record?.systemResult) return false;
+  try {
+    const clean = stripUndefined({
+      ...record,
+      userEmail: emailKey,
+      updatedAt: record.updatedAt || new Date().toISOString()
+    });
+    await setDoc(doc(db, 'user_systems', emailKey), clean);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `user_systems/${emailKey}`);
+    return false;
+  }
+}
+
+export function subscribeCloudUserSystem(
+  userEmail: string,
+  onUpdate: (record: UserGeneratedSystemRecord | null) => void
+): () => void {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(userEmail);
+  if (!db || !emailKey) return () => {};
+  return onSnapshot(
+    doc(db, 'user_systems', emailKey),
+    (snap) => {
+      if (!snap.exists()) {
+        onUpdate(null);
+        return;
+      }
+      const data = snap.data() as UserGeneratedSystemRecord;
+      if (
+        data &&
+        typeof data.userEmail === 'string' &&
+        data.systemResult &&
+        Array.isArray(data.systemResult.columns) &&
+        data.systemResult.columns.length > 0
+      ) {
+        onUpdate(data);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, `user_systems/${emailKey}`);
+    }
+  );
+}
+
+// ============================================================================
+// 5. PER-USER SIMULATION STATE CLOUD PERSISTENCE (/user_simulations/{emailKey})
+// ============================================================================
+
+export async function fetchCloudUserSimulation(
+  userEmail: string
+): Promise<UserSimulationStateRecord | null> {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(userEmail);
+  if (!db || !emailKey) return null;
+  try {
+    const snap = await getDoc(doc(db, 'user_simulations', emailKey));
+    if (!snap.exists()) return null;
+    const data = snap.data() as UserSimulationStateRecord;
+    if (
+      data &&
+      typeof data.userEmail === 'string' &&
+      typeof data.simSeed === 'number' &&
+      typeof data.numDrawsToSimulate === 'number'
+    ) {
+      return data;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `user_simulations/${emailKey}`);
+    return null;
+  }
+}
+
+export async function upsertCloudUserSimulation(
+  record: UserSimulationStateRecord
+): Promise<boolean> {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(record?.userEmail || '');
+  if (!db || !emailKey || typeof record?.simSeed !== 'number') return false;
+  try {
+    const clean = stripUndefined({
+      ...record,
+      userEmail: emailKey,
+      updatedAt: record.updatedAt || new Date().toISOString()
+    });
+    await setDoc(doc(db, 'user_simulations', emailKey), clean);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `user_simulations/${emailKey}`);
+    return false;
+  }
+}
+
+export function subscribeCloudUserSimulation(
+  userEmail: string,
+  onUpdate: (record: UserSimulationStateRecord | null) => void
+): () => void {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(userEmail);
+  if (!db || !emailKey) return () => {};
+  return onSnapshot(
+    doc(db, 'user_simulations', emailKey),
+    (snap) => {
+      if (!snap.exists()) {
+        onUpdate(null);
+        return;
+      }
+      const data = snap.data() as UserSimulationStateRecord;
+      if (
+        data &&
+        typeof data.userEmail === 'string' &&
+        typeof data.simSeed === 'number' &&
+        typeof data.numDrawsToSimulate === 'number'
+      ) {
+        onUpdate(data);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, `user_simulations/${emailKey}`);
+    }
+  );
+}
+

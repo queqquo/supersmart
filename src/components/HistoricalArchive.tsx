@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   History,
   Upload,
@@ -22,9 +22,20 @@ import {
   Activity,
   GitBranch,
   Dices,
-  Dna
+  Dna,
+  Trophy,
+  TrendingUp,
+  TrendingDown,
+  Euro,
+  Calculator,
+  Check,
+  BookmarkPlus,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Layers
 } from 'lucide-react';
-import { Draw } from '../types/lottery';
+import { Draw, SavedPlay, GeneratedColumn } from '../types/lottery';
 import {
   exportBackupJSON,
   exportDrawsCSV,
@@ -33,25 +44,179 @@ import {
   syncOfficialDrawsFromLiveFeed
 } from '../utils/storage';
 import { generateFullHistoricalDataset } from '../data/seedDraws';
+import {
+  compareSavedPlayAgainstRecentDraws,
+  clampArchiveComparisonDrawsCount,
+  MIN_ARCHIVE_COMPARISON_DRAWS,
+  MAX_ARCHIVE_COMPARISON_DRAWS,
+  PRESET_ARCHIVE_COMPARISON_COUNTS,
+  SavedPlayArchiveComparisonSummary
+} from '../utils/combinatorics';
 
 interface HistoricalArchiveProps {
   draws: Draw[];
   onUpdateDraws: (draws: Draw[]) => void;
   onOpenSmartPaste: () => void;
+  savedPlays?: SavedPlay[];
+  weeklyColumns?: GeneratedColumn[];
+  onSavePlay?: (play: SavedPlay) => void;
+  onOpenLedgerTab?: () => void;
 }
 
 export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
   draws,
   onUpdateDraws,
-  onOpenSmartPaste
+  onOpenSmartPaste,
+  savedPlays = [],
+  weeklyColumns = [],
+  onSavePlay,
+  onOpenLedgerTab
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState<number | 'ALL'>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [isSyncingFeed, setIsSyncingFeed] = useState(false);
-  const [showHowUsedGuide, setShowHowUsedGuide] = useState(true);
+  const [showHowUsedGuide, setShowHowUsedGuide] = useState(false);
   const pageSize = 15;
+
+  // --- State for Play vs Last 10-200 Draws Comparison ---
+  const [selectedPlayId, setSelectedPlayId] = useState<string>(() =>
+    savedPlays.length > 0 ? savedPlays[0].id : 'ALL_SAVED_PLAYS'
+  );
+  const [comparisonDrawsCount, setComparisonDrawsCount] = useState<number>(50);
+  const [customDrawsInput, setCustomDrawsInput] = useState<string>('50');
+  const [comparisonFilter, setComparisonFilter] = useState<'all' | 'winning' | 'matched'>('all');
+  const [comparisonPage, setComparisonPage] = useState<number>(1);
+  const [expandedContestId, setExpandedContestId] = useState<string | null>(null);
+  const [showPlayColumnsPreview, setShowPlayColumnsPreview] = useState<boolean>(false);
+  const comparisonPageSize = 10;
+
+  // Keep selectedPlayId valid when savedPlays list updates
+  useEffect(() => {
+    if (savedPlays.length === 0) return;
+    if (
+      selectedPlayId !== 'ALL_SAVED_PLAYS' &&
+      !savedPlays.some((p) => p.id === selectedPlayId)
+    ) {
+      setSelectedPlayId(savedPlays[0].id);
+    }
+  }, [savedPlays, selectedPlayId]);
+
+  // Build the active SavedPlay object to evaluate (either single selected play or combined plays from Verifica & Bilancio)
+  const activePlayForComparison = useMemo<SavedPlay | null>(() => {
+    if (savedPlays.length === 0) return null;
+    if (selectedPlayId === 'ALL_SAVED_PLAYS') {
+      const allCols: GeneratedColumn[] = [];
+      const poolSet = new Set<number>();
+      let totalCost = 0;
+      let totalSaved = 0;
+      let colIdx = 1;
+      for (const p of savedPlays) {
+        totalCost += p.cost;
+        totalSaved += p.savedAmount || 0;
+        for (const n of p.poolNumbers || []) poolSet.add(n);
+        for (const c of p.columns) {
+          for (const n of c.numbers) poolSet.add(n);
+          allCols.push({
+            ...c,
+            id: colIdx++
+          });
+        }
+      }
+      return {
+        id: 'ALL_SAVED_PLAYS',
+        createdAt: savedPlays[0].createdAt,
+        targetContestId: 'Tutte le Giocate',
+        mode: 'manual',
+        cost: Number(totalCost.toFixed(2)),
+        savedAmount: Number(totalSaved.toFixed(2)),
+        poolNumbers: Array.from(poolSet).sort((a, b) => a - b),
+        columns: allCols,
+        status: 'VERIFICATA',
+        manualNote: `Unione di tutte le ${savedPlays.length} giocate registrate in Verifica & Bilancio`
+      };
+    }
+    return savedPlays.find((p) => p.id === selectedPlayId) || savedPlays[0];
+  }, [savedPlays, selectedPlayId]);
+
+  // Execute the comparison against the latest N (10..200) official draws
+  const comparisonSummary = useMemo<SavedPlayArchiveComparisonSummary | null>(() => {
+    if (!activePlayForComparison || draws.length === 0) return null;
+    return compareSavedPlayAgainstRecentDraws(
+      activePlayForComparison,
+      draws,
+      comparisonDrawsCount
+    );
+  }, [activePlayForComparison, draws, comparisonDrawsCount]);
+
+  const activePlayNumbersSet = useMemo(() => {
+    return new Set<number>(comparisonSummary?.playNumbersSet || []);
+  }, [comparisonSummary]);
+
+  const activePlaySuperstarsSet = useMemo(() => {
+    return new Set<number>(comparisonSummary?.playSuperstarsSet || []);
+  }, [comparisonSummary]);
+
+  const filteredComparisonRows = useMemo(() => {
+    if (!comparisonSummary) return [];
+    if (comparisonFilter === 'winning') {
+      return comparisonSummary.rows.filter((r) => r.grossWinForDraw > 0);
+    }
+    if (comparisonFilter === 'matched') {
+      return comparisonSummary.rows.filter(
+        (r) => r.matchedNumbersInPlay.length > 0 || r.superstarMatchedInPlay
+      );
+    }
+    return comparisonSummary.rows;
+  }, [comparisonSummary, comparisonFilter]);
+
+  const totalComparisonPages = Math.max(
+    1,
+    Math.ceil(filteredComparisonRows.length / comparisonPageSize)
+  );
+
+  const paginatedComparisonRows = useMemo(() => {
+    const start = (comparisonPage - 1) * comparisonPageSize;
+    return filteredComparisonRows.slice(start, start + comparisonPageSize);
+  }, [filteredComparisonRows, comparisonPage]);
+
+  const handleSelectComparisonDrawsCount = (val: number) => {
+    const clamped = clampArchiveComparisonDrawsCount(val);
+    setComparisonDrawsCount(clamped);
+    setCustomDrawsInput(String(clamped));
+    setComparisonPage(1);
+  };
+
+  const handleQuickRegisterCurrentSystem = () => {
+    if (!onSavePlay || weeklyColumns.length === 0) return;
+    const latest = draws[0];
+    const targetContestNumber = latest ? latest.contestNumber + 1 : 46;
+    const targetYear = latest ? latest.year : 2026;
+    const targetId = `${targetYear}-${String(targetContestNumber).padStart(3, '0')}`;
+    const poolSet = new Set<number>();
+    for (const c of weeklyColumns) {
+      for (const n of c.numbers) poolSet.add(n);
+    }
+    const hasStar = weeklyColumns.some((c) => c.superstar !== undefined);
+    const cost = Number((weeklyColumns.length * (hasStar ? 1.5 : 1.0)).toFixed(2));
+
+    const newPlay: SavedPlay = {
+      id: `play-archive-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      targetContestId: targetId,
+      mode: hasStar ? 'superstar' : 'pure_coverage',
+      cost,
+      savedAmount: 0,
+      poolNumbers: Array.from(poolSet).sort((a, b) => a - b),
+      columns: weeklyColumns,
+      status: 'IN_ATTESA',
+      manualNote: `Sistema Ottimizzato (${weeklyColumns.length} sestine)`
+    };
+    onSavePlay(newPlay);
+    setSelectedPlayId(newPlay.id);
+    showNotice('Sistema attuale registrato in Verifica & Bilancio e selezionato per il confronto!');
+  };
 
   // Extract distinct years sorted descending (2026 down to 2009)
   const availableYears = useMemo(() => {
@@ -167,7 +332,7 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
         `Archivio ufficiale sincronizzato: ${res.draws.length} concorsi reali fino al ${res.latestDate}`
       );
     } catch {
-      showNotice('Archivio locale già aggiornato all\'ultima estrazione disponibile');
+      showNotice("Archivio locale già aggiornato all'ultima estrazione disponibile");
     } finally {
       setIsSyncingFeed(false);
     }
@@ -189,7 +354,749 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Top action header */}
+      {/* ===================================================================== */}
+      {/* NEW FEATURE: CONFRONTO GIOCATE (VERIFICA & BILANCIO) SU 10-200 ESTRAZIONI */}
+      {/* ===================================================================== */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border-2 border-amber-500/40 rounded-2xl p-5 shadow-xl space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase tracking-wider bg-amber-500 text-slate-950 flex items-center gap-1">
+                <Trophy className="w-3.5 h-3.5" />
+                <span>Simulatore Storico Giocate Registrate</span>
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                Finestra Mobile: da {MIN_ARCHIVE_COMPARISON_DRAWS} a {MAX_ARCHIVE_COMPARISON_DRAWS}{' '}
+                Estrazioni Reali
+              </span>
+            </div>
+            <h2 className="text-lg md:text-xl font-extrabold text-white">
+              Confronta Giocate di &ldquo;Verifica &amp; Bilancio&rdquo; sulle Ultime Estrazioni (10 &ndash; 200)
+            </h2>
+            <p className="text-xs text-slate-400">
+              Seleziona una giocata salvata in <strong className="text-slate-200">Verifica &amp; Bilancio</strong>,
+              scegli quante delle ultime estrazioni ufficiali analizzare (tra{' '}
+              <strong className="text-amber-300">10 e 200 concorsi</strong>) e visualizza i numeri
+              estratti evidenziati insieme a <strong className="text-white">Spesa Totale</strong>,{' '}
+              <strong className="text-emerald-300">Utile Lordo</strong> e{' '}
+              <strong className="text-amber-300">Utile Netto</strong>.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {weeklyColumns.length > 0 && onSavePlay && (
+              <button
+                type="button"
+                onClick={handleQuickRegisterCurrentSystem}
+                className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Salva il sistema ottimizzato attuale in Verifica & Bilancio e confrontalo subito"
+              >
+                <BookmarkPlus className="w-4 h-4" />
+                <span>Importa Sistema Attuale ({weeklyColumns.length} col.)</span>
+              </button>
+            )}
+            {onOpenLedgerTab && (
+              <button
+                type="button"
+                onClick={onOpenLedgerTab}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <ExternalLink className="w-4 h-4 text-amber-400" />
+                <span>Gestisci in Verifica &amp; Bilancio</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Controls Row: 1) Choose Play from Verifica & Bilancio  2) Choose 10..200 Draws */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {/* Left: Play Selector (6 cols) */}
+          <div className="lg:col-span-6 bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-2.5">
+            <label
+              htmlFor="archive-play-select"
+              className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between"
+            >
+              <span className="flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-amber-400" />
+                <span>1. Scegli Giocata da Verifica &amp; Bilancio:</span>
+              </span>
+              <span className="font-mono text-amber-400">
+                {savedPlays.length}{' '}
+                {savedPlays.length === 1 ? 'giocata disponibile' : 'giocate disponibili'}
+              </span>
+            </label>
+
+            {savedPlays.length > 0 ? (
+              <div className="space-y-2">
+                <select
+                  id="archive-play-select"
+                  value={selectedPlayId}
+                  onChange={(e) => {
+                    setSelectedPlayId(e.target.value);
+                    setComparisonPage(1);
+                    setExpandedContestId(null);
+                  }}
+                  className="w-full rounded-xl bg-slate-900 border border-amber-500/40 px-3.5 py-2.5 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  {savedPlays.map((p, idx) => {
+                    const dateFormatted = new Date(p.createdAt).toLocaleDateString('it-IT');
+                    const modeLabel =
+                      p.mode === 'manual'
+                        ? 'Manuale'
+                        : p.mode === 'superstar'
+                        ? 'SuperStar'
+                        : 'Copertura Pura';
+                    return (
+                      <option key={p.id} value={p.id}>
+                        #{idx + 1} • Concorso {p.targetContestId} ({dateFormatted}) —{' '}
+                        {p.columns.length} {p.columns.length === 1 ? 'sestina' : 'sestine'} • Costo{' '}
+                        {p.cost.toFixed(2).replace('.', ',')} € [{modeLabel}]
+                        {p.manualNote ? ` — ${p.manualNote}` : ''}
+                      </option>
+                    );
+                  })}
+                  {savedPlays.length > 1 && (
+                    <option value="ALL_SAVED_PLAYS">
+                      ★ Tutte le {savedPlays.length} giocate registrate in Verifica &amp; Bilancio
+                    </option>
+                  )}
+                </select>
+
+                {activePlayForComparison && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 pt-1">
+                    <span>
+                      Sestine nella giocata:{' '}
+                      <strong className="text-white font-mono">
+                        {activePlayForComparison.columns.length}
+                      </strong>{' '}
+                      &bull; Costo per singolo concorso:{' '}
+                      <strong className="text-amber-300 font-mono">
+                        {activePlayForComparison.cost.toFixed(2).replace('.', ',')} €
+                      </strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlayColumnsPreview((prev) => !prev)}
+                      className="text-amber-300 hover:text-amber-200 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>
+                        {showPlayColumnsPreview ? 'Nascondi Sestine Giocata' : 'Mostra Sestine Giocata'}
+                      </span>
+                      {showPlayColumnsPreview ? (
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl bg-slate-900/90 border border-amber-500/30 text-xs text-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="font-bold text-amber-300">
+                    Nessuna giocata ancora presente in &ldquo;Verifica &amp; Bilancio&rdquo;
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Clicca su &ldquo;Importa Sistema Attuale&rdquo; qui sopra oppure registra una
+                    schedina nella scheda Verifica &amp; Bilancio per avviare il confronto storico.
+                  </p>
+                </div>
+                {weeklyColumns.length > 0 && onSavePlay && (
+                  <button
+                    type="button"
+                    onClick={handleQuickRegisterCurrentSystem}
+                    className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shrink-0 cursor-pointer"
+                  >
+                    Registra e Confronta Ora
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right: Draw Count Selector 10..200 (6 cols) */}
+          <div className="lg:col-span-6 bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor="archive-draws-count-slider"
+                className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5"
+              >
+                <Calculator className="w-4 h-4 text-emerald-400" />
+                <span>2. Numero Ultime Estrazioni da Confrontare (10 &ndash; 200):</span>
+              </label>
+              <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono text-xs font-extrabold">
+                Ultime {comparisonDrawsCount} Estrazioni
+              </span>
+            </div>
+
+            {/* Preset pills: 10, 25, 50, 100, 150, 200 */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {PRESET_ARCHIVE_COMPARISON_COUNTS.map((cnt) => (
+                <button
+                  key={cnt}
+                  type="button"
+                  onClick={() => handleSelectComparisonDrawsCount(cnt)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer border ${
+                    comparisonDrawsCount === cnt
+                      ? 'bg-amber-500 text-slate-950 border-amber-300 shadow font-extrabold'
+                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-500/40 hover:text-amber-300'
+                  }`}
+                >
+                  {cnt} estr.
+                </button>
+              ))}
+
+              <div className="flex items-center gap-1.5 ml-auto">
+                <span className="text-[11px] text-slate-400">Valore esatto:</span>
+                <input
+                  type="number"
+                  min={MIN_ARCHIVE_COMPARISON_DRAWS}
+                  max={MAX_ARCHIVE_COMPARISON_DRAWS}
+                  value={customDrawsInput}
+                  onChange={(e) => {
+                    setCustomDrawsInput(e.target.value);
+                    const parsed = parseInt(e.target.value, 10);
+                    if (
+                      !Number.isNaN(parsed) &&
+                      parsed >= MIN_ARCHIVE_COMPARISON_DRAWS &&
+                      parsed <= MAX_ARCHIVE_COMPARISON_DRAWS
+                    ) {
+                      setComparisonDrawsCount(parsed);
+                      setComparisonPage(1);
+                    }
+                  }}
+                  onBlur={() => {
+                    const parsed = parseInt(customDrawsInput, 10);
+                    handleSelectComparisonDrawsCount(parsed);
+                  }}
+                  aria-label="Numero ultime estrazioni da confrontare (10-200)"
+                  className="w-16 rounded-lg bg-slate-900 border border-amber-500/40 px-2 py-1 text-center font-mono font-bold text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+
+            {/* Range Slider 10..200 */}
+            <div className="space-y-1 pt-0.5">
+              <input
+                id="archive-draws-count-slider"
+                type="range"
+                min={MIN_ARCHIVE_COMPARISON_DRAWS}
+                max={MAX_ARCHIVE_COMPARISON_DRAWS}
+                step={1}
+                value={comparisonDrawsCount}
+                onChange={(e) => handleSelectComparisonDrawsCount(parseInt(e.target.value, 10))}
+                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              />
+              <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                <span>Min: 10 estrazioni</span>
+                <span>50</span>
+                <span>100</span>
+                <span>150</span>
+                <span>Max: 200 estrazioni</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Results Dashboard when a play is selected */}
+        {comparisonSummary && activePlayForComparison && (
+          <div className="space-y-4">
+            {/* Collapsible preview of the selected play's sestine and pool hit frequencies */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                  <span>
+                    Numeri Giocati ({comparisonSummary.playNumbersSet.length} numeri distinti) &amp;
+                    Frequenza Uscite nelle Ultime {comparisonSummary.drawsEvaluatedCount} Estrazioni:
+                  </span>
+                </div>
+                <span className="text-[11px] font-mono text-emerald-400">
+                  Totale numeri estratti indovinati: {comparisonSummary.totalMatchedNumbersCount}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {comparisonSummary.playNumbersSet.map((num) => {
+                  const hits = comparisonSummary.numberHitCounts[num] || 0;
+                  return (
+                    <div
+                      key={num}
+                      className={`px-2.5 py-1 rounded-xl border flex items-center gap-1.5 font-mono text-xs ${
+                        hits > 0
+                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                          : 'bg-slate-900 border-slate-800 text-slate-400'
+                      }`}
+                      title={`Numero ${num}: estratto ${hits} volte nelle ultime ${comparisonSummary.drawsEvaluatedCount} estrazioni`}
+                    >
+                      <span className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 font-extrabold text-[11px] flex items-center justify-center">
+                        {num}
+                      </span>
+                      <span className="text-[11px]">
+                        {hits} {hits === 1 ? 'uscita' : 'uscite'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {showPlayColumnsPreview && (
+                <div className="pt-3 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {activePlayForComparison.columns.map((col) => (
+                    <div
+                      key={col.id}
+                      className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between text-xs font-mono"
+                    >
+                      <span className="text-slate-400 font-bold">
+                        Col. #{String(col.id).padStart(2, '0')}:
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {col.numbers.map((n) => (
+                          <span
+                            key={n}
+                            className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold flex items-center justify-center text-[11px]"
+                          >
+                            {n}
+                          </span>
+                        ))}
+                        {col.superstar !== undefined && (
+                          <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-bold">
+                            ★{col.superstar}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 4 Primary Economic Balance Cards: Speso, Utile Lordo, Utile Netto, Concorsi Vincenti */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {/* Card 1: Quanto Ho Speso */}
+              <div className="bg-slate-950 border border-rose-500/30 rounded-xl p-4 space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 uppercase font-bold">
+                  <span>Quanto Ho Speso (Spesa Totale)</span>
+                  <Euro className="w-4 h-4 text-rose-400" />
+                </div>
+                <div className="text-2xl font-extrabold font-mono text-rose-400">
+                  -{comparisonSummary.totalSpent.toFixed(2).replace('.', ',')} €
+                </div>
+                <p className="text-[11px] font-mono text-slate-400">
+                  {comparisonSummary.drawsEvaluatedCount} estrazioni &times;{' '}
+                  {comparisonSummary.costPerDraw.toFixed(2).replace('.', ',')} € / concorso
+                </p>
+              </div>
+
+              {/* Card 2: Utile Lordo (Quanto Ho Guadagnato) */}
+              <div className="bg-slate-950 border border-emerald-500/30 rounded-xl p-4 space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 uppercase font-bold">
+                  <span>Utile Lordo (Quanto Ho Guadagnato)</span>
+                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="text-2xl font-extrabold font-mono text-emerald-400">
+                  +{comparisonSummary.grossWinnings.toFixed(2).replace('.', ',')} €
+                </div>
+                <p className="text-[11px] font-mono text-slate-400">
+                  Somma vincite lorde su {comparisonSummary.winningDrawsCount} concorsi a premio
+                </p>
+              </div>
+
+              {/* Card 3: Utile Netto (Utile Lordo - Spesa) */}
+              <div
+                className={`bg-slate-950 rounded-xl p-4 space-y-1 border-2 ${
+                  comparisonSummary.netProfitLoss >= 0
+                    ? 'border-emerald-500/60 bg-emerald-950/15'
+                    : 'border-amber-500/50'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-amber-300 uppercase font-extrabold">
+                  <span>Utile Netto (Guadagno &minus; Spesa)</span>
+                  {comparisonSummary.netProfitLoss >= 0 ? (
+                    <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <TrendingDown className="w-4 h-4 text-amber-400" />
+                  )}
+                </div>
+                <div
+                  className={`text-2xl font-extrabold font-mono ${
+                    comparisonSummary.netProfitLoss >= 0 ? 'text-emerald-400' : 'text-amber-300'
+                  }`}
+                >
+                  {comparisonSummary.netProfitLoss >= 0 ? '+' : ''}
+                  {comparisonSummary.netProfitLoss.toFixed(2).replace('.', ',')} €
+                </div>
+                <p className="text-[11px] font-mono text-slate-300 flex items-center justify-between">
+                  <span>ROI: {comparisonSummary.roiPercentage.toFixed(1)}%</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                      comparisonSummary.netProfitLoss >= 0
+                        ? 'bg-emerald-500/20 text-emerald-300'
+                        : 'bg-rose-500/20 text-rose-300'
+                    }`}
+                  >
+                    {comparisonSummary.netProfitLoss >= 0 ? 'IN ATTIVO' : 'IN PASSIVO'}
+                  </span>
+                </p>
+              </div>
+
+              {/* Card 4: Dettaglio Categorie Vincenti */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 uppercase font-bold">
+                  <span>Punti Realizzati ({comparisonSummary.drawsEvaluatedCount} Estr.)</span>
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 text-xs font-mono pt-0.5">
+                  <div className="px-2 py-1 rounded bg-slate-900 border border-slate-800 flex justify-between">
+                    <span className="text-slate-400">Punti 2:</span>
+                    <strong className="text-amber-300">
+                      {comparisonSummary.tierBreakdown.points2}
+                    </strong>
+                  </div>
+                  <div className="px-2 py-1 rounded bg-slate-900 border border-slate-800 flex justify-between">
+                    <span className="text-slate-400">Punti 3:</span>
+                    <strong className="text-sky-300">
+                      {comparisonSummary.tierBreakdown.points3}
+                    </strong>
+                  </div>
+                  <div className="px-2 py-1 rounded bg-slate-900 border border-slate-800 flex justify-between">
+                    <span className="text-slate-400">Punti 4+:</span>
+                    <strong className="text-emerald-300">
+                      {comparisonSummary.tierBreakdown.points4 +
+                        comparisonSummary.tierBreakdown.points5 +
+                        comparisonSummary.tierBreakdown.points5plus1 +
+                        comparisonSummary.tierBreakdown.points6}
+                    </strong>
+                  </div>
+                  <div className="px-2 py-1 rounded bg-slate-900 border border-slate-800 flex justify-between">
+                    <span className="text-slate-400">SuperStar:</span>
+                    <strong className="text-purple-300">
+                      {comparisonSummary.tierBreakdown.superstarHits}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Table of the Compared 10-200 Draws with Highlighted Drawn Numbers */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+              <div className="p-3.5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-white">
+                    Dettaglio Confronto sulle Ultime {comparisonSummary.drawsEvaluatedCount}{' '}
+                    Estrazioni (Numeri Estratti Indovinati Evidenziati in Verde/Oro)
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComparisonFilter('all');
+                      setComparisonPage(1);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                      comparisonFilter === 'all'
+                        ? 'bg-amber-500 text-slate-950'
+                        : 'bg-slate-900 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Tutte ({comparisonSummary.drawsEvaluatedCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComparisonFilter('matched');
+                      setComparisonPage(1);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                      comparisonFilter === 'matched'
+                        ? 'bg-sky-500 text-slate-950'
+                        : 'bg-slate-900 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Con Numeri Estratti (
+                    {
+                      comparisonSummary.rows.filter(
+                        (r) => r.matchedNumbersInPlay.length > 0 || r.superstarMatchedInPlay
+                      ).length
+                    }
+                    )
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComparisonFilter('winning');
+                      setComparisonPage(1);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                      comparisonFilter === 'winning'
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-slate-900 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Solo Vincenti ({comparisonSummary.winningDrawsCount})
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900/90 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold">
+                      <th className="py-2.5 px-3">Concorso &amp; Data</th>
+                      <th className="py-2.5 px-3">Sestina Estratta (Evidenziati i Numeri Giocati)</th>
+                      <th className="py-2.5 px-3 text-center">Jolly / ★</th>
+                      <th className="py-2.5 px-3">Numeri Indovinati &amp; Miglior Punto</th>
+                      <th className="py-2.5 px-3 text-right">Spesa</th>
+                      <th className="py-2.5 px-3 text-right">Utile Lordo</th>
+                      <th className="py-2.5 px-3 text-right">Utile Netto</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {paginatedComparisonRows.map((row) => {
+                      const isExpanded = expandedContestId === row.draw.id;
+                      const isWin = row.grossWinForDraw > 0;
+                      return (
+                        <React.Fragment key={row.draw.id}>
+                          <tr
+                            onClick={() =>
+                              setExpandedContestId(isExpanded ? null : row.draw.id)
+                            }
+                            className={`transition-colors cursor-pointer ${
+                              isWin
+                                ? 'bg-emerald-950/20 hover:bg-emerald-950/30'
+                                : 'hover:bg-slate-900/60'
+                            }`}
+                            title="Clicca per espandere la verifica di ogni singola sestina della giocata"
+                          >
+                            <td className="py-2.5 px-3 font-mono whitespace-nowrap">
+                              <div className="font-bold text-white flex items-center gap-1.5">
+                                <span>{row.draw.id}</span>
+                                {isWin && (
+                                  <span className="px-1.5 py-0.2 rounded bg-emerald-500 text-slate-950 text-[10px] font-extrabold">
+                                    VINTA
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400">{row.draw.date}</div>
+                            </td>
+
+                            <td className="py-2.5 px-3">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {row.draw.numbers.map((n) => {
+                                  const isMatched = activePlayNumbersSet.has(n);
+                                  return (
+                                    <span
+                                      key={n}
+                                      className={`w-7 h-7 rounded-full font-mono text-xs flex items-center justify-center transition-all ${
+                                        isMatched
+                                          ? 'bg-gradient-to-br from-emerald-400 to-amber-400 text-slate-950 font-extrabold ring-2 ring-emerald-300 shadow-md shadow-emerald-500/30 scale-105'
+                                          : 'bg-slate-900 text-slate-400 border border-slate-800'
+                                      }`}
+                                    >
+                                      {n}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </td>
+
+                            <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                              <div className="inline-flex items-center gap-1.5">
+                                <span
+                                  className={`w-6 h-6 rounded-full font-mono text-[11px] flex items-center justify-center ${
+                                    row.jollyMatchedInPlay
+                                      ? 'bg-rose-500 text-white font-extrabold ring-2 ring-rose-300'
+                                      : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                                  }`}
+                                  title="Numero Jolly"
+                                >
+                                  {row.draw.jolly}
+                                </span>
+                                {row.draw.superstar !== undefined && (
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full font-mono text-[11px] ${
+                                      row.superstarMatchedInPlay
+                                        ? 'bg-purple-500 text-white font-extrabold ring-2 ring-purple-300'
+                                        : 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                                    }`}
+                                    title="Numero SuperStar"
+                                  >
+                                    ★{row.draw.superstar}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="py-2.5 px-3">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {row.matchedNumbersInPlay.length > 0 ? (
+                                  <span className="text-emerald-300 font-mono font-bold">
+                                    {row.matchedNumbersInPlay.length} num. ({row.matchedNumbersInPlay.join(', ')})
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500">0 numeri</span>
+                                )}
+                                {row.bestPrizeTier !== 'Nessun Punto' && (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono text-[10px] font-bold">
+                                    {row.bestPrizeTier} (Col. #{String(row.bestColumnId).padStart(2, '0')})
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="py-2.5 px-3 text-right font-mono text-rose-300 whitespace-nowrap">
+                              -{row.costForDraw.toFixed(2).replace('.', ',')} €
+                            </td>
+
+                            <td className="py-2.5 px-3 text-right font-mono font-bold whitespace-nowrap">
+                              <span
+                                className={
+                                  row.grossWinForDraw > 0 ? 'text-emerald-400' : 'text-slate-500'
+                                }
+                              >
+                                +{row.grossWinForDraw.toFixed(2).replace('.', ',')} €
+                              </span>
+                            </td>
+
+                            <td className="py-2.5 px-3 text-right font-mono font-extrabold whitespace-nowrap">
+                              <span
+                                className={
+                                  row.netReturnForDraw >= 0 ? 'text-emerald-400' : 'text-amber-300'
+                                }
+                              >
+                                {row.netReturnForDraw >= 0 ? '+' : ''}
+                                {row.netReturnForDraw.toFixed(2).replace('.', ',')} €
+                              </span>
+                            </td>
+                          </tr>
+
+                          {/* Expanded Per-Column Breakdown for this Draw */}
+                          {isExpanded && (
+                            <tr className="bg-slate-950">
+                              <td colSpan={7} className="p-3.5 border-b border-slate-800">
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between text-[11px] text-slate-300 font-bold">
+                                    <span>
+                                      Dettaglio Sestine Giocate nel Concorso {row.draw.id} (
+                                      {row.draw.date}) &mdash; Sestina Estratta:{' '}
+                                      {row.draw.numbers.join(' - ')}
+                                    </span>
+                                    <span className="text-amber-300 font-mono">
+                                      Utile Lordo Concorso: +{row.grossWinForDraw.toFixed(2)} € | Utile
+                                      Netto: {row.netReturnForDraw >= 0 ? '+' : ''}
+                                      {row.netReturnForDraw.toFixed(2)} €
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {row.playResult.matchesPerColumn.map((colMatch) => {
+                                      const matchedSet = new Set(colMatch.matchedNumbers);
+                                      return (
+                                        <div
+                                          key={colMatch.columnId}
+                                          className={`p-2 rounded-lg border flex items-center justify-between text-xs font-mono ${
+                                            colMatch.estimatedPrize > 0
+                                              ? 'bg-emerald-950/30 border-emerald-500/40'
+                                              : 'bg-slate-900 border-slate-800'
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-slate-400 font-bold">
+                                              #{String(colMatch.columnId).padStart(2, '0')}
+                                            </span>
+                                            <div className="flex items-center gap-1">
+                                              {colMatch.numbers.map((num) => {
+                                                const hit = matchedSet.has(num);
+                                                return (
+                                                  <span
+                                                    key={num}
+                                                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] ${
+                                                      hit
+                                                        ? 'bg-emerald-400 text-slate-950 font-extrabold ring-2 ring-amber-300'
+                                                        : 'bg-slate-950 text-slate-400 border border-slate-800'
+                                                    }`}
+                                                  >
+                                                    {num}
+                                                  </span>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span
+                                              className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                                colMatch.estimatedPrize > 0
+                                                  ? 'bg-emerald-500/20 text-emerald-300 font-bold'
+                                                  : 'text-slate-500'
+                                              }`}
+                                            >
+                                              {colMatch.prizeTier}
+                                            </span>
+                                            {colMatch.estimatedPrize > 0 && (
+                                              <span className="text-emerald-400 font-extrabold">
+                                                +{colMatch.estimatedPrize.toFixed(2)} €
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                    {paginatedComparisonRows.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-500">
+                          Nessun concorso corrispondente al filtro selezionato.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Comparison Pagination */}
+              <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-800 bg-slate-900/60 text-xs text-slate-400">
+                <span>
+                  Concorsi confrontati: {filteredComparisonRows.length} (clicca una riga per
+                  vedere i numeri indovinati su ogni sestina)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={comparisonPage === 1}
+                    onClick={() => setComparisonPage((p) => Math.max(1, p - 1))}
+                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="font-mono text-slate-200">
+                    {comparisonPage} / {totalComparisonPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={comparisonPage === totalComparisonPages}
+                    onClick={() =>
+                      setComparisonPage((p) => Math.min(totalComparisonPages, p + 1))
+                    }
+                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Top action header for Full Historical Archive */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -202,11 +1109,13 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                 {draws.length.toLocaleString('it-IT')} concorsi ufficiali
               </span>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono border border-emerald-500/30">
-                Copertura: {oldestDraw?.id || '2009-001'} &rarr; {latestDraw?.id || '2026-174'} ({latestDraw?.date || '2026-10-30'})
+                Copertura: {oldestDraw?.id || '2009-001'} &rarr; {latestDraw?.id || '2026-174'} (
+                {latestDraw?.date || '2026-10-30'})
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Serie storica reale delle estrazioni ufficiali del SuperEnalotto dal 02/01/2009 ad oggi, con sincronizzazione live gratuita da feed Open-Data.
+              Serie storica reale delle estrazioni ufficiali del SuperEnalotto dal 02/01/2009 ad
+              oggi, con sincronizzazione live gratuita da feed Open-Data.
             </p>
           </div>
 
@@ -432,7 +1341,7 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
         </div>
       )}
 
-      {/* Table of Draws */}
+      {/* Full Table of Draws */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -449,35 +1358,48 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
             <tbody className="divide-y divide-slate-800/80">
               {currentDraws.map((d) => (
                 <tr key={d.id} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="py-3 px-4 font-mono font-bold text-white">
-                    {d.id}
-                  </td>
-                  <td className="py-3 px-4 font-mono text-amber-300 font-semibold">
-                    {d.year}
-                  </td>
-                  <td className="py-3 px-4 font-mono text-slate-400 whitespace-nowrap">
-                    {d.date}
-                  </td>
+                  <td className="py-3 px-4 font-mono font-bold text-white">{d.id}</td>
+                  <td className="py-3 px-4 font-mono text-amber-300 font-semibold">{d.year}</td>
+                  <td className="py-3 px-4 font-mono text-slate-400 whitespace-nowrap">{d.date}</td>
                   <td className="py-3 px-4">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      {d.numbers.map((n) => (
-                        <span
-                          key={n}
-                          className="w-7 h-7 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-bold text-xs flex items-center justify-center shadow-sm"
-                        >
-                          {n}
-                        </span>
-                      ))}
+                      {d.numbers.map((n) => {
+                        const inSelectedPlay = activePlayNumbersSet.has(n);
+                        return (
+                          <span
+                            key={n}
+                            className={`w-7 h-7 rounded-full font-mono font-bold text-xs flex items-center justify-center shadow-sm ${
+                              inSelectedPlay
+                                ? 'bg-gradient-to-br from-emerald-400 to-amber-400 text-slate-950 ring-2 ring-emerald-300 font-extrabold'
+                                : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            }`}
+                          >
+                            {n}
+                          </span>
+                        );
+                      })}
                     </div>
                   </td>
                   <td className="py-3 px-4 text-center">
-                    <span className="inline-flex w-7 h-7 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono font-bold text-xs items-center justify-center">
+                    <span
+                      className={`inline-flex w-7 h-7 rounded-full font-mono font-bold text-xs items-center justify-center ${
+                        activePlayNumbersSet.has(d.jolly)
+                          ? 'bg-rose-500 text-white ring-2 ring-rose-300'
+                          : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                      }`}
+                    >
                       {d.jolly}
                     </span>
                   </td>
                   <td className="py-3 px-4 text-center">
                     {d.superstar !== undefined ? (
-                      <span className="inline-flex px-2.5 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono font-bold text-xs items-center justify-center whitespace-nowrap">
+                      <span
+                        className={`inline-flex px-2.5 py-1 rounded-full font-mono font-bold text-xs items-center justify-center whitespace-nowrap ${
+                          activePlaySuperstarsSet.has(d.superstar)
+                            ? 'bg-purple-500 text-white ring-2 ring-purple-300'
+                            : 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                        }`}
+                      >
                         ★ {d.superstar}
                       </span>
                     ) : (

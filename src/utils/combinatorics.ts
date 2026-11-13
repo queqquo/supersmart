@@ -1153,3 +1153,204 @@ export function parseExtractionText(rawText: string): Partial<Draw> | null {
     superstar: superstar
   };
 }
+
+export const MIN_ARCHIVE_COMPARISON_DRAWS = 10;
+export const MAX_ARCHIVE_COMPARISON_DRAWS = 200;
+export const PRESET_ARCHIVE_COMPARISON_COUNTS = [10, 25, 50, 100, 150, 200] as const;
+
+export function clampArchiveComparisonDrawsCount(count: number): number {
+  if (!Number.isFinite(count) || Number.isNaN(count)) return 50;
+  return Math.max(
+    MIN_ARCHIVE_COMPARISON_DRAWS,
+    Math.min(MAX_ARCHIVE_COMPARISON_DRAWS, Math.round(count))
+  );
+}
+
+export interface ArchiveDrawPlayComparisonRow {
+  draw: Draw;
+  matchedNumbersInPlay: number[];
+  jollyMatchedInPlay: boolean;
+  superstarMatchedInPlay: boolean;
+  playResult: PlayResult;
+  winningColumnsCount: number;
+  bestColumnId: number | null;
+  bestPrizeTier: string;
+  costForDraw: number;
+  grossWinForDraw: number;
+  netReturnForDraw: number;
+}
+
+export interface SavedPlayArchiveComparisonSummary {
+  playId: string;
+  drawsRequested: number;
+  drawsEvaluatedCount: number;
+  costPerDraw: number;
+  totalSpent: number; // Quanto ho speso
+  grossWinnings: number; // Utile Lordo (Quanto ho guadagnato al lordo)
+  netProfitLoss: number; // Utile Netto (Utile Lordo - Spesa Totale)
+  roiPercentage: number;
+  winningDrawsCount: number;
+  totalMatchedNumbersCount: number;
+  tierBreakdown: {
+    points2: number;
+    points3: number;
+    points4: number;
+    points5: number;
+    points5plus1: number;
+    points6: number;
+    superstarHits: number;
+  };
+  numberHitCounts: Record<number, number>;
+  playNumbersSet: number[];
+  playSuperstarsSet: number[];
+  rows: ArchiveDrawPlayComparisonRow[];
+}
+
+/**
+ * Confronta una giocata registrata in Verifica & Bilancio con le ultime N estrazioni (10..200).
+ * Evidenzia i numeri estratti presenti nella giocata e calcola Spesa Totale, Utile Lordo e Utile Netto.
+ */
+export function compareSavedPlayAgainstRecentDraws(
+  play: SavedPlay,
+  allDraws: Draw[],
+  requestedDrawsCount: number
+): SavedPlayArchiveComparisonSummary {
+  const clampedCount = clampArchiveComparisonDrawsCount(requestedDrawsCount);
+  const sortedDraws = [...allDraws].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+  const recentDraws = sortedDraws.slice(0, clampedCount);
+
+  const playNumsSet = new Set<number>();
+  const playStarsSet = new Set<number>();
+  const numberHitCounts: Record<number, number> = {};
+
+  for (const col of play.columns) {
+    for (const n of col.numbers) {
+      playNumsSet.add(n);
+      numberHitCounts[n] = 0;
+    }
+    if (col.superstar !== undefined) {
+      playStarsSet.add(col.superstar);
+    }
+  }
+  for (const n of play.poolNumbers || []) {
+    playNumsSet.add(n);
+    if (numberHitCounts[n] === undefined) numberHitCounts[n] = 0;
+  }
+
+  const costPerDraw =
+    typeof play.cost === 'number' && play.cost > 0
+      ? Number(play.cost.toFixed(2))
+      : Number(
+          (
+            play.columns.length *
+            (play.columns.some((c) => c.superstar !== undefined) ? 1.5 : 1.0)
+          ).toFixed(2)
+        );
+
+  let totalSpent = 0;
+  let grossWinnings = 0;
+  let winningDrawsCount = 0;
+  let totalMatchedNumbersCount = 0;
+
+  const tierBreakdown = {
+    points2: 0,
+    points3: 0,
+    points4: 0,
+    points5: 0,
+    points5plus1: 0,
+    points6: 0,
+    superstarHits: 0
+  };
+
+  const rows: ArchiveDrawPlayComparisonRow[] = [];
+
+  for (const draw of recentDraws) {
+    const evalRes = evaluatePlayedSystem(play.columns, draw, costPerDraw);
+    const matchedNumbersInPlay = draw.numbers.filter((n) => playNumsSet.has(n));
+    for (const m of matchedNumbersInPlay) {
+      numberHitCounts[m] = (numberHitCounts[m] || 0) + 1;
+    }
+    totalMatchedNumbersCount += matchedNumbersInPlay.length;
+
+    const jollyMatchedInPlay = playNumsSet.has(draw.jolly);
+    const superstarMatchedInPlay =
+      draw.superstar !== undefined && playStarsSet.has(draw.superstar);
+
+    let winningColumnsCount = 0;
+    let bestColumnId: number | null = null;
+    let bestPrizeTier = 'Nessun Punto';
+    let highestColPrize = -1;
+
+    for (const colMatch of evalRes.matchesPerColumn) {
+      if (colMatch.estimatedPrize > 0) {
+        winningColumnsCount++;
+      }
+      if (colMatch.estimatedPrize > highestColPrize && colMatch.estimatedPrize > 0) {
+        highestColPrize = colMatch.estimatedPrize;
+        bestColumnId = colMatch.columnId;
+        bestPrizeTier = colMatch.prizeTier;
+      } else if (bestColumnId === null && colMatch.matchCount > 0) {
+        bestColumnId = colMatch.columnId;
+      }
+
+      if (colMatch.matchCount === 6) tierBreakdown.points6++;
+      else if (colMatch.matchCount === 5 && colMatch.hasJolly) tierBreakdown.points5plus1++;
+      else if (colMatch.matchCount === 5) tierBreakdown.points5++;
+      else if (colMatch.matchCount === 4) tierBreakdown.points4++;
+      else if (colMatch.matchCount === 3) tierBreakdown.points3++;
+      else if (colMatch.matchCount === 2) tierBreakdown.points2++;
+
+      if (colMatch.hasSuperstar) {
+        tierBreakdown.superstarHits++;
+      }
+    }
+
+    const grossWinForDraw = Number(evalRes.totalWinning.toFixed(2));
+    const netReturnForDraw = Number((grossWinForDraw - costPerDraw).toFixed(2));
+
+    totalSpent = Number((totalSpent + costPerDraw).toFixed(2));
+    grossWinnings = Number((grossWinnings + grossWinForDraw).toFixed(2));
+    if (grossWinForDraw > 0) {
+      winningDrawsCount++;
+    }
+
+    rows.push({
+      draw,
+      matchedNumbersInPlay,
+      jollyMatchedInPlay,
+      superstarMatchedInPlay,
+      playResult: evalRes,
+      winningColumnsCount,
+      bestColumnId,
+      bestPrizeTier,
+      costForDraw: costPerDraw,
+      grossWinForDraw,
+      netReturnForDraw
+    });
+  }
+
+  const netProfitLoss = Number((grossWinnings - totalSpent).toFixed(2));
+  const roiPercentage =
+    totalSpent > 0 ? Number(((netProfitLoss / totalSpent) * 100).toFixed(2)) : 0;
+
+  return {
+    playId: play.id,
+    drawsRequested: clampedCount,
+    drawsEvaluatedCount: recentDraws.length,
+    costPerDraw,
+    totalSpent,
+    grossWinnings,
+    netProfitLoss,
+    roiPercentage,
+    winningDrawsCount,
+    totalMatchedNumbersCount,
+    tierBreakdown,
+    numberHitCounts,
+    playNumbersSet: Array.from(playNumsSet).sort((a, b) => a - b),
+    playSuperstarsSet: Array.from(playStarsSet).sort((a, b) => a - b),
+    rows
+  };
+}
+

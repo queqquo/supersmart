@@ -108,6 +108,7 @@ export interface SavedPlay {
   status: 'IN_ATTESA' | 'VERIFICATA';
   result?: PlayResult;
   manualNote?: string;
+  userEmail?: string;
 }
 
 export interface LedgerSummary {
@@ -365,5 +366,31 @@ export interface HistoricalRealBacktestResult {
   winningContests: HistoricalContestWinEntry[];
   executionTimeMs: number;
 }
+
+export interface UserGeneratedSystemRecord {
+  userEmail: string;
+  updatedAt: string;
+  poolSizeV: number;
+  playMode: PlayMode;
+  coverageTarget: CoverageTarget;
+  selectedBudget: number;
+  budgetMode: 'preset' | 'custom';
+  selectedPool: number[];
+  manualPoolEdit: boolean;
+  weights: ScoringWeights;
+  filters: FilterOptions;
+  systemResult: SystemGenerationResult;
+}
+
+export interface UserSimulationStateRecord {
+  userEmail: string;
+  updatedAt: string;
+  simSeed: number;
+  methodology: SimulationMethodology;
+  numDrawsToSimulate: number;
+  coverageTarget: CoverageTarget;
+  smartPoolSize: number;
+}
+
 
 

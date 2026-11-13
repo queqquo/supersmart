@@ -24,7 +24,8 @@ import {
   History,
   Award,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Lock
 } from 'lucide-react';
 import {
   Draw,
@@ -52,10 +53,20 @@ import {
   runNext100DrawsSimulation,
   runHistoricalRealBacktest
 } from '../utils/monteCarloSimulation';
-import { DEFAULT_WEIGHTS, saveWeights, saveFilters } from '../utils/storage';
+import {
+  DEFAULT_WEIGHTS,
+  saveWeights,
+  saveFilters,
+  loadUserGeneratedSystem,
+  saveUserGeneratedSystem,
+  syncUserGeneratedSystem,
+  cacheUserGeneratedSystemLocally
+} from '../utils/storage';
+import { subscribeCloudUserSystem } from '../utils/firebase';
 import { EvolutionarySliderTrainer } from './EvolutionarySliderTrainer';
 
 interface SystemGeneratorProps {
+  userEmail: string;
   draws: Draw[];
   weights: ScoringWeights;
   onUpdateWeights: (weights: ScoringWeights) => void;
@@ -72,6 +83,7 @@ interface SystemGeneratorProps {
 }
 
 export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
+  userEmail,
   draws,
   weights,
   onUpdateWeights,
@@ -85,31 +97,58 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
   coverageTarget = 'terni',
   onUpdateCoverageTarget
 }) => {
-  // Config state
-  const [poolSizeV, setPoolSizeV] = useState<number>(12); // v in [10, 15]
-  const [playMode, setPlayMode] = useState<PlayMode>('pure_coverage');
-  const [localCoverageTarget, setLocalCoverageTarget] = useState<CoverageTarget>(coverageTarget);
+  // Load existing persisted system for this specific user (if any)
+  const initialUserRecord = useMemo(
+    () => loadUserGeneratedSystem(userEmail),
+    [userEmail]
+  );
+
+  // Config state initialized from the user's persisted system
+  const [poolSizeV, setPoolSizeV] = useState<number>(
+    () => initialUserRecord?.poolSizeV ?? 12
+  );
+  const [playMode, setPlayMode] = useState<PlayMode>(
+    () => initialUserRecord?.playMode ?? 'pure_coverage'
+  );
+  const [localCoverageTarget, setLocalCoverageTarget] = useState<CoverageTarget>(
+    () => initialUserRecord?.coverageTarget ?? coverageTarget
+  );
   const activeCoverageTarget = onUpdateCoverageTarget ? coverageTarget : localCoverageTarget;
 
-  const handleSelectCoverageTarget = (target: CoverageTarget) => {
-    setLocalCoverageTarget(target);
-    onUpdateCoverageTarget?.(target);
-  };
-  const [budgetMode, setBudgetMode] = useState<'preset' | 'custom'>('preset');
-  const [selectedBudget, setSelectedBudget] = useState<number>(10);
-  const [customBudgetInput, setCustomBudgetInput] = useState<string>('25');
-  const [budgetCappedWarning, setBudgetCappedWarning] = useState<boolean>(false);
-  const [selectedPool, setSelectedPool] = useState<number[]>(() =>
-    appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6
-      ? appliedSimPreset.top12PoolNumbers
-      : []
+  const [budgetMode, setBudgetMode] = useState<'preset' | 'custom'>(
+    () => initialUserRecord?.budgetMode ?? 'preset'
   );
-  const [systemResult, setSystemResult] = useState<SystemGenerationResult | null>(null);
+  const [selectedBudget, setSelectedBudget] = useState<number>(
+    () => initialUserRecord?.selectedBudget ?? 10
+  );
+  const [customBudgetInput, setCustomBudgetInput] = useState<string>(() =>
+    String(initialUserRecord?.selectedBudget ?? 25)
+  );
+  const [budgetCappedWarning, setBudgetCappedWarning] = useState<boolean>(false);
+  const [selectedPool, setSelectedPool] = useState<number[]>(() => {
+    if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
+      return appliedSimPreset.top12PoolNumbers;
+    }
+    if (initialUserRecord && initialUserRecord.selectedPool.length >= 6) {
+      return initialUserRecord.selectedPool;
+    }
+    return [];
+  });
+  const [systemResult, setSystemResult] = useState<SystemGenerationResult | null>(
+    () => initialUserRecord?.systemResult ?? null
+  );
+  const [lastCalculatedAt, setLastCalculatedAt] = useState<string | null>(
+    () => initialUserRecord?.updatedAt ?? null
+  );
+  const [hasPendingChanges, setHasPendingChanges] = useState<boolean>(false);
   const [copied, setCopied] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [manualPoolEdit, setManualPoolEdit] = useState(
-    () => Boolean(appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6)
+  const [manualPoolEdit, setManualPoolEdit] = useState<boolean>(() =>
+    Boolean(
+      (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) ||
+        initialUserRecord?.manualPoolEdit
+    )
   );
   const [recalcFeedback, setRecalcFeedback] = useState(false);
 
@@ -134,10 +173,17 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     [selectedBudget]
   );
 
+  const handleSelectCoverageTarget = (target: CoverageTarget) => {
+    setLocalCoverageTarget(target);
+    onUpdateCoverageTarget?.(target);
+    setHasPendingChanges(true);
+  };
+
   const handleSelectPresetBudget = (preset: number) => {
     setBudgetMode('preset');
     setBudgetCappedWarning(false);
     setSelectedBudget(preset);
+    setHasPendingChanges(true);
   };
 
   const handleSelectCustomBudgetMode = () => {
@@ -152,6 +198,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     } else {
       setCustomBudgetInput(String(selectedBudget));
     }
+    setHasPendingChanges(true);
   };
 
   const handleCustomBudgetChange = (rawVal: string) => {
@@ -167,6 +214,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       setBudgetCappedWarning(false);
       setSelectedBudget(Math.round(parsed));
     }
+    setHasPendingChanges(true);
   };
 
   const handleCustomBudgetBlur = () => {
@@ -210,34 +258,58 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     return scoredNumbers.slice(0, poolSizeV).map((s) => s.number).sort((a, b) => a - b);
   }, [scoredNumbers, poolSizeV]);
 
-  // Keep selectedPool synced with weights/poolSize unless manually editing
+  // Initialize selectedPool only if it is currently empty
   useEffect(() => {
-    if (!manualPoolEdit) {
+    if (selectedPool.length === 0 && defaultTopVNumbers.length >= 6) {
       setSelectedPool(defaultTopVNumbers);
     }
-  }, [defaultTopVNumbers, manualPoolEdit]);
+  }, [defaultTopVNumbers, selectedPool.length]);
 
-  // Slider handlers
+  // Slider handlers: update weights and Pool Base preview, but DO NOT change sestine until user clicks "Calcola Sistema Ottimizzato"
   const handleWeightChange = (key: keyof ScoringWeights, val: number) => {
     const updated = { ...weights, [key]: Number(val.toFixed(2)) };
     setManualPoolEdit(false);
     onUpdateWeights(updated);
     saveWeights(updated);
+    const freshScored = scoreAllNumbers(numberStatsMap, updated, 36);
+    setSelectedPool(
+      freshScored
+        .slice(0, poolSizeV)
+        .map((s) => s.number)
+        .sort((a, b) => a - b)
+    );
+    setHasPendingChanges(true);
   };
 
   const handleResetWeights = () => {
     setManualPoolEdit(false);
     onUpdateWeights(DEFAULT_WEIGHTS);
     saveWeights(DEFAULT_WEIGHTS);
+    const freshScored = scoreAllNumbers(numberStatsMap, DEFAULT_WEIGHTS, 36);
+    setSelectedPool(
+      freshScored
+        .slice(0, poolSizeV)
+        .map((s) => s.number)
+        .sort((a, b) => a - b)
+    );
+    setHasPendingChanges(true);
   };
 
   const handleApplyTripletWeights = (newWeights: ScoringWeights) => {
     setManualPoolEdit(false);
     onUpdateWeights(newWeights);
     saveWeights(newWeights);
+    const freshScored = scoreAllNumbers(numberStatsMap, newWeights, 36);
+    setSelectedPool(
+      freshScored
+        .slice(0, poolSizeV)
+        .map((s) => s.number)
+        .sort((a, b) => a - b)
+    );
+    setHasPendingChanges(true);
   };
 
-  // Explicit "Ricalcola dai Pesi" action
+  // Explicit "Ricalcola dai Pesi" action: refreshes Pool Base from weights without overwriting sestine until "Calcola Sistema Ottimizzato" is pressed
   const handleRecalculateFromWeights = () => {
     const freshScored = scoreAllNumbers(numberStatsMap, weights, 36);
     const freshTopV = freshScored
@@ -247,12 +319,12 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     setManualPoolEdit(false);
     onClearSimPreset?.();
     setSelectedPool(freshTopV);
-    handleRunOptimization(freshTopV, null);
+    setHasPendingChanges(true);
     setRecalcFeedback(true);
     setTimeout(() => setRecalcFeedback(false), 2500);
   };
 
-  // Generate / Run Optimization
+  // Generate / Run Optimization — ONLY called when user explicitly clicks "Calcola Sistema Ottimizzato" (or once if brand-new user has no system)
   const handleRunOptimization = (
     overridePool?: number[],
     pinnedFirstSestina?: number[] | null,
@@ -265,11 +337,11 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     const poolToUse =
       Array.isArray(overridePool) && overridePool.length >= 6
         ? overridePool
-        : manualPoolEdit && selectedPool.length >= 6
+        : selectedPool.length >= 6
         ? selectedPool
         : defaultTopVNumbers;
 
-    if (!Array.isArray(overridePool) && !manualPoolEdit) {
+    if (selectedPool.length < 6 && defaultTopVNumbers.length >= 6) {
       setSelectedPool(defaultTopVNumbers);
     }
 
@@ -318,10 +390,29 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       }
     }
 
+    const nowIso = new Date().toISOString();
     setSystemResult(result);
+    setLastCalculatedAt(nowIso);
+    setHasPendingChanges(false);
     setBacktestPage(1);
     onColumnsGenerated?.(result.columns);
     setSavedSuccess(false);
+
+    // Persist this user's generated system so it stays locked for this user across sessions and browsers
+    saveUserGeneratedSystem({
+      userEmail,
+      updatedAt: nowIso,
+      poolSizeV: poolToUse.length,
+      playMode,
+      coverageTarget: covTarget,
+      selectedBudget,
+      budgetMode,
+      selectedPool: poolToUse,
+      manualPoolEdit,
+      weights,
+      filters,
+      systemResult: result
+    });
   };
 
   // Compute expected gains/losses mean per individual sestina across 100 simulated draws (Pure Physical Urn)
@@ -333,7 +424,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
       'hypergeometric_pure_urn',
       202604,
       100,
-      activeCoverageTarget
+      systemResult.coverageTarget || activeCoverageTarget
     ).weeklySystemPnL;
   }, [draws, systemResult, activeCoverageTarget]);
 
@@ -377,7 +468,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     return s;
   }, [systemResult]);
 
-  // Apply imported simulation / Walk-Forward preset when provided
+  // Apply imported simulation / Walk-Forward preset into controls (user clicks "Calcola Sistema Ottimizzato" to update sestine)
   useEffect(() => {
     if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
       setPoolSizeV(appliedSimPreset.top12PoolNumbers.length);
@@ -391,39 +482,69 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
         setBudgetMode('preset');
         setSelectedBudget(10);
         setPlayMode('pure_coverage');
-        handleRunOptimization(
-          appliedSimPreset.top12PoolNumbers,
-          appliedSimPreset.highProbabilityNumbers ?? null,
-          appliedSimPreset.recommendedSuperstar,
-          10,
-          'terni'
-        );
-      } else {
-        handleRunOptimization(
-          appliedSimPreset.top12PoolNumbers,
-          appliedSimPreset.highProbabilityNumbers ?? null,
-          appliedSimPreset.recommendedSuperstar,
-          undefined,
-          targetCov
-        );
       }
+      setHasPendingChanges(true);
     }
   }, [appliedSimPreset]);
 
-  // Run on mount or when defaultTopVNumbers, playMode, budget, or coverageTarget changes
+  // Load and synchronize this specific user's saved system on mount or when userEmail changes.
+  // Never auto-recalculate if the user already has a saved system!
   useEffect(() => {
-    if (draws.length > 0) {
-      if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
-        handleRunOptimization(
-          appliedSimPreset.top12PoolNumbers,
-          appliedSimPreset.highProbabilityNumbers ?? null,
-          appliedSimPreset.recommendedSuperstar
-        );
-      } else if (defaultTopVNumbers.length >= 6) {
+    let active = true;
+    const localRec = loadUserGeneratedSystem(userEmail);
+
+    const applySavedRecordToState = (rec: NonNullable<typeof localRec>) => {
+      setSystemResult(rec.systemResult);
+      setLastCalculatedAt(rec.updatedAt);
+      onColumnsGenerated?.(rec.systemResult.columns);
+
+      if (!appliedSimPreset) {
+        setPoolSizeV(rec.poolSizeV);
+        setPlayMode(rec.playMode);
+        setLocalCoverageTarget(rec.coverageTarget);
+        onUpdateCoverageTarget?.(rec.coverageTarget);
+        setBudgetMode(rec.budgetMode);
+        setSelectedBudget(rec.selectedBudget);
+        setCustomBudgetInput(String(rec.selectedBudget));
+        setSelectedPool(rec.selectedPool);
+        setManualPoolEdit(rec.manualPoolEdit);
+        if (rec.weights) onUpdateWeights(rec.weights);
+        if (rec.filters) onUpdateFilters(rec.filters);
+        setHasPendingChanges(false);
+      }
+    };
+
+    if (localRec) {
+      applySavedRecordToState(localRec);
+    }
+
+    syncUserGeneratedSystem(userEmail).then((syncedRec) => {
+      if (!active) return;
+      if (syncedRec) {
+        const currentLocal = loadUserGeneratedSystem(userEmail);
+        if (!currentLocal || !localRec || syncedRec.updatedAt > localRec.updatedAt) {
+          applySavedRecordToState(syncedRec);
+        }
+      } else if (!localRec && defaultTopVNumbers.length >= 6) {
+        // Brand-new user with no saved system anywhere: generate initial system once and lock it for this user
         handleRunOptimization(defaultTopVNumbers);
       }
-    }
-  }, [draws, defaultTopVNumbers, playMode, budgetAllocation.targetColumnsCount, activeCoverageTarget]);
+    });
+
+    const unsubUserSystem = subscribeCloudUserSystem(userEmail, (cloudRec) => {
+      if (!active || !cloudRec) return;
+      const currentLocal = loadUserGeneratedSystem(userEmail);
+      if (!currentLocal || cloudRec.updatedAt > currentLocal.updatedAt) {
+        cacheUserGeneratedSystemLocally(cloudRec);
+        applySavedRecordToState(cloudRec);
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubUserSystem();
+    };
+  }, [userEmail]);
 
   // Save Play to Ledger
   const handleSaveToLedger = () => {
@@ -470,10 +591,12 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     if (selectedPool.includes(num)) {
       if (selectedPool.length > 6) {
         setSelectedPool(selectedPool.filter((n) => n !== num));
+        setHasPendingChanges(true);
       }
     } else {
       if (selectedPool.length < 15) {
         setSelectedPool([...selectedPool, num].sort((a, b) => a - b));
+        setHasPendingChanges(true);
       }
     }
   };
@@ -559,6 +682,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               type="button"
               onClick={() => {
                 setPlayMode('pure_coverage');
+                setHasPendingChanges(true);
               }}
               className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 playMode === 'pure_coverage'
@@ -577,6 +701,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               type="button"
               onClick={() => {
                 setPlayMode('superstar');
+                setHasPendingChanges(true);
               }}
               className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 playMode === 'superstar'
@@ -680,6 +805,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                   setCustomBudgetInput(val);
                   setBudgetCappedWarning(false);
                   setSelectedBudget(parseInt(val, 10) || 10);
+                  setHasPendingChanges(true);
                 }}
                 aria-label="Slider budget libero (1-100€)"
                 className="w-28 sm:w-36 h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
@@ -910,6 +1036,12 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                     onClick={() => {
                       setPoolSizeV(v);
                       setManualPoolEdit(false);
+                      const freshTopV = scoredNumbers
+                        .slice(0, v)
+                        .map((s) => s.number)
+                        .sort((a, b) => a - b);
+                      setSelectedPool(freshTopV);
+                      setHasPendingChanges(true);
                     }}
                     className={`px-2 py-0.5 text-xs font-mono font-bold rounded ${
                       poolSizeV === v
@@ -1060,6 +1192,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                       const updated = { ...filters, evenOdd: e.target.checked };
                       onUpdateFilters(updated);
                       saveFilters(updated);
+                      setHasPendingChanges(true);
                     }}
                     className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                   />
@@ -1078,6 +1211,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                       const updated = { ...filters, highLow: e.target.checked };
                       onUpdateFilters(updated);
                       saveFilters(updated);
+                      setHasPendingChanges(true);
                     }}
                     className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                   />
@@ -1096,6 +1230,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                       const updated = { ...filters, sumRange: e.target.checked };
                       onUpdateFilters(updated);
                       saveFilters(updated);
+                      setHasPendingChanges(true);
                     }}
                     className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                   />
@@ -1118,6 +1253,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                       };
                       onUpdateFilters(updated);
                       saveFilters(updated);
+                      setHasPendingChanges(true);
                     }}
                     className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                   />
@@ -1139,6 +1275,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                       };
                       onUpdateFilters(updated);
                       saveFilters(updated);
+                      setHasPendingChanges(true);
                     }}
                     className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                   />
@@ -1146,6 +1283,20 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               </div>
             )}
           </div>
+
+          {/* Pending changes notice when parameters were modified but sestine are still locked */}
+          {hasPendingChanges && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-200 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Parametri modificati: le sestine attuali restano bloccate per{' '}
+                  <strong className="font-mono text-white">{userEmail}</strong> finché non premi il
+                  pulsante qui sotto.
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Trigger Button: Calcola Sistema */}
           <button
@@ -1170,14 +1321,29 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
                   <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <h3 className="text-base font-bold text-white flex flex-wrap items-center gap-2">
                       <span>Sistema Ortogonale a Riduzione Greedy</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 font-mono border border-amber-500/30">
                         {systemResult.columns.length} Colonne
                       </span>
+                      <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono border border-emerald-500/30 flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        <span>Bloccato per {userEmail}</span>
+                      </span>
                     </h3>
                     <p className="text-xs text-slate-400">
                       Sviluppo da {systemResult.totalCombinations} integrali ({systemResult.filteredCombinationsCount} a penalità zero) → {systemResult.columns.length} colonne ottimali (Soft-Penalty Bitmask)
+                      {lastCalculatedAt && (
+                        <span className="ml-2 text-slate-500 font-mono">
+                          &bull; Calcolato il{' '}
+                          {new Date(lastCalculatedAt).toLocaleString('it-IT', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                      )}
                     </p>
                   </div>
 

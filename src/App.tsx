@@ -38,6 +38,9 @@ import {
   insertPlay,
   updatePlay,
   deletePlay,
+  loadDeletedPlayIds,
+  saveDeletedPlayIds,
+  filterPlaysForUser,
   loadWeights,
   saveWeights,
   loadFilters,
@@ -67,6 +70,7 @@ import {
 import {
   testFirestoreConnection,
   subscribeCloudPlays,
+  subscribeCloudDeletedPlayIds,
   subscribeCloudACL
 } from './utils/firebase';
 
@@ -112,15 +116,32 @@ export default function App() {
   const initialPlaysSyncDoneRef = React.useRef(false);
   const initialAclSyncDoneRef = React.useRef(false);
 
-  // Real-time Cloud Firestore listeners for Saved Plays (/plays) and User ACL (/acl)
+  // Real-time Cloud Firestore listeners for Deleted Play Tombstones (/deleted_plays), Saved Plays (/plays), and User ACL (/acl)
   useEffect(() => {
+    const unsubDeletedPlays = subscribeCloudDeletedPlayIds((cloudDeletedIds) => {
+      if (cloudDeletedIds.length > 0) {
+        const allDeleted = saveDeletedPlayIds(cloudDeletedIds);
+        setSavedPlays((prevPlays) => {
+          const filtered = prevPlays.filter((p) => !allDeleted.has(p.id));
+          cachePlaysLocally(filtered);
+          return filtered;
+        });
+      }
+    });
+
     const unsubPlays = subscribeCloudPlays((cloudPlays) => {
+      const deletedSet = loadDeletedPlayIds();
+      const cleanCloudPlays = cloudPlays.filter((p) => p && !deletedSet.has(p.id));
       setSavedPlays((prevPlays) => {
-        if (!initialPlaysSyncDoneRef.current && cloudPlays.length === 0 && prevPlays.length > 0) {
-          return prevPlays;
+        if (
+          !initialPlaysSyncDoneRef.current &&
+          cleanCloudPlays.length === 0 &&
+          prevPlays.length > 0
+        ) {
+          return prevPlays.filter((p) => !deletedSet.has(p.id));
         }
-        cachePlaysLocally(cloudPlays);
-        return cloudPlays;
+        cachePlaysLocally(cleanCloudPlays);
+        return cleanCloudPlays;
       });
     });
 
@@ -137,6 +158,7 @@ export default function App() {
     });
 
     return () => {
+      unsubDeletedPlays();
       unsubPlays();
       unsubAcl();
     };
@@ -365,15 +387,23 @@ export default function App() {
     saveDraws(newDraws);
   };
 
-  // Add Play to ledger
+  // Add Play to ledger (tagged with the current user's email)
   const handleSavePlay = (newPlay: SavedPlay) => {
-    const updated = insertPlay(newPlay);
+    const playWithOwner: SavedPlay = {
+      ...newPlay,
+      userEmail: newPlay.userEmail || session?.email.trim().toLowerCase()
+    };
+    const updated = insertPlay(playWithOwner);
     setSavedPlays(updated);
   };
 
   // Update Play (e.g. after verification)
   const handleUpdatePlay = (updatedPlay: SavedPlay) => {
-    const updated = updatePlay(updatedPlay);
+    const playWithOwner: SavedPlay = {
+      ...updatedPlay,
+      userEmail: updatedPlay.userEmail || session?.email.trim().toLowerCase()
+    };
+    const updated = updatePlay(playWithOwner);
     setSavedPlays(updated);
   };
 
@@ -396,7 +426,8 @@ export default function App() {
     );
   }
 
-  const pendingPlaysCount = savedPlays.filter((p) => p.status === 'IN_ATTESA').length;
+  const userSavedPlays = filterPlaysForUser(savedPlays, session.email);
+  const pendingPlaysCount = userSavedPlays.filter((p) => p.status === 'IN_ATTESA').length;
   const pendingAccessCount = acl.filter((u) => u.status === 'PENDING').length;
 
   return (
@@ -417,6 +448,8 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'generator' && (
           <SystemGenerator
+            key={session.email.toLowerCase()}
+            userEmail={session.email}
             draws={draws}
             weights={weights}
             onUpdateWeights={handleUpdateWeights}
@@ -435,6 +468,8 @@ export default function App() {
 
         {activeTab === 'simulation' && (
           <SimulationEngine
+            key={session.email.toLowerCase()}
+            userEmail={session.email}
             draws={draws}
             weeklyColumns={weeklyColumns.length > 0 ? weeklyColumns : defaultWeeklyColumns}
             onSavePlay={handleSavePlay}
@@ -449,12 +484,16 @@ export default function App() {
             draws={draws}
             onUpdateDraws={handleUpdateDraws}
             onOpenSmartPaste={() => setIsSmartPasteOpen(true)}
+            savedPlays={userSavedPlays}
+            weeklyColumns={weeklyColumns.length > 0 ? weeklyColumns : defaultWeeklyColumns}
+            onSavePlay={handleSavePlay}
+            onOpenLedgerTab={() => setActiveTab('ledger')}
           />
         )}
 
         {activeTab === 'ledger' && (
           <PlaysVerification
-            plays={savedPlays}
+            plays={userSavedPlays}
             draws={draws}
             onSavePlay={handleSavePlay}
             onUpdatePlay={handleUpdatePlay}

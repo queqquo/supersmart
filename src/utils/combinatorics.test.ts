@@ -17,7 +17,9 @@ import {
   parseManualSestineText,
   createManualSavedPlay,
   applyManualCostAndWinning,
-  calculateBudgetSystemAllocation
+  calculateBudgetSystemAllocation,
+  clampArchiveComparisonDrawsCount,
+  compareSavedPlayAgainstRecentDraws
 } from './combinatorics';
 import { FilterOptions, Draw, GeneratedColumn } from '../types/lottery';
 
@@ -320,5 +322,35 @@ test('generateOptimizedSystem supports both Massimizza Ambi (t=2) and Massimizza
     `Terni mode should cover at least as many triplets (${resTerni.coverageMetrics.tripletsCoveredCount}) as Ambi mode (${resAmbi.coverageMetrics.tripletsCoveredCount})`
   );
 });
+
+test('compareSavedPlayAgainstRecentDraws clamps range [10..200], highlights drawn numbers, and calculates Spesa, Utile Lordo, and Utile Netto', async () => {
+  assert.equal(clampArchiveComparisonDrawsCount(3), 10);
+  assert.equal(clampArchiveComparisonDrawsCount(50), 50);
+  assert.equal(clampArchiveComparisonDrawsCount(350), 200);
+
+  const { generateFullHistoricalDataset } = await import('../data/seedDraws');
+  const full = generateFullHistoricalDataset();
+
+  const col1 = buildGeneratedColumn(1, [19, 24, 49, 62, 64, 85], 10)!;
+  const col2 = buildGeneratedColumn(2, [1, 2, 3, 4, 5, 6], 20)!;
+  const play = createManualSavedPlay({
+    targetContestId: '2026-175',
+    columns: [col1, col2],
+    cost: 3.0,
+    winningAmount: 0,
+    manualNote: 'Test confronto archivio'
+  });
+
+  const summary = compareSavedPlayAgainstRecentDraws(play, full, 15);
+  assert.equal(summary.drawsEvaluatedCount, 15);
+  assert.equal(summary.costPerDraw, 3.0);
+  assert.equal(summary.totalSpent, 45.0); // 15 draws * 3.00 €
+  assert.equal(summary.netProfitLoss, Number((summary.grossWinnings - summary.totalSpent).toFixed(2)));
+  assert.equal(summary.rows.length, 15);
+  // First draw 2026-174 has numbers [19, 24, 49, 62, 64, 85] which match col1 completely
+  assert.deepEqual(summary.rows[0].matchedNumbersInPlay, [19, 24, 49, 62, 64, 85]);
+  assert.ok(summary.grossWinnings > 0);
+});
+
 
 
