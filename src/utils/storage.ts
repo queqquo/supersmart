@@ -5,14 +5,58 @@
 
 import { Draw, SavedPlay, ScoringWeights, FilterOptions } from '../types/lottery';
 import { generateFullHistoricalDataset } from '../data/seedDraws';
+import {
+  fetchCloudPlays,
+  upsertCloudPlay,
+  upsertManyCloudPlays,
+  removeCloudPlay,
+  fetchCloudCustomDraws,
+  upsertCloudCustomDraw
+} from './firebase';
 
 const STORAGE_KEYS = {
   DRAWS: 'superenalotto_custom_draws_delta_v6',
   PLAYS: 'superenalotto_saved_plays',
+  DELETED_PLAY_IDS: 'superenalotto_deleted_play_ids_v1',
   WEIGHTS: 'superenalotto_scoring_weights',
   FILTERS: 'superenalotto_filter_options',
   PIGGYBANK: 'superenalotto_piggybank_balance'
 };
+
+function loadDeletedPlayIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_PLAY_IDS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return new Set(parsed);
+    }
+  } catch {
+    // Ignore
+  }
+  return new Set();
+}
+
+function markPlayIdDeleted(id: string): void {
+  try {
+    const set = loadDeletedPlayIds();
+    set.add(id);
+    localStorage.setItem(STORAGE_KEYS.DELETED_PLAY_IDS, JSON.stringify(Array.from(set)));
+  } catch {
+    // Ignore
+  }
+}
+
+function unmarkPlayIdDeleted(id: string): void {
+  try {
+    const set = loadDeletedPlayIds();
+    if (set.has(id)) {
+      set.delete(id);
+      localStorage.setItem(STORAGE_KEYS.DELETED_PLAY_IDS, JSON.stringify(Array.from(set)));
+    }
+  } catch {
+    // Ignore
+  }
+}
 
 export const DEFAULT_WEIGHTS: ScoringWeights = {
   wDelay: 0.50,
@@ -110,7 +154,7 @@ export function loadDraws(): Draw[] {
 }
 
 /**
- * Synchronize official SuperEnalotto archive from the live Open-Data feed (server proxy or direct GitHub Raw)
+ * Synchronize official SuperEnalotto archive from the live Open-Data feed + Cloud Firestore custom draws
  */
 export async function syncOfficialDrawsFromLiveFeed(): Promise<{
   draws: Draw[];
@@ -135,51 +179,57 @@ export async function syncOfficialDrawsFromLiveFeed(): Promise<{
   }
 
   if (fetchedDraws.length === 0) {
-    const directRes = await fetch(
-      'https://raw.githubusercontent.com/delpinsky/Superenalotto/main/storico-estrazioni-superenalotto.json'
-    );
-    if (directRes.ok) {
-      const data = await directRes.json();
-      const rawDraws = Array.isArray(data?.draws)
-        ? data.draws.filter((d: { date?: string }) => d.date && d.date >= '2009-01-01')
-        : [];
-      rawDraws.sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
-      const byYear: Record<number, number> = {};
-      fetchedDraws = rawDraws.map(
-        (d: {
-          date: string;
-          nums: number[];
-          jolly?: number | null;
-          ss?: number | null;
-          concorso?: number;
-        }) => {
-          const year = parseInt(d.date.slice(0, 4), 10);
-          byYear[year] = (byYear[year] || 0) + 1;
-          const contestNumber =
-            typeof d.concorso === 'number' && d.concorso > 0 ? d.concorso : byYear[year];
-          const sortedNums = [...d.nums].map(Number).sort((a, b) => a - b) as [
-            number,
-            number,
-            number,
-            number,
-            number,
-            number
-          ];
-          return {
-            id: `${year}-${String(contestNumber).padStart(3, '0')}`,
-            contestNumber,
-            year,
-            date: d.date,
-            numbers: sortedNums,
-            jolly: Number(d.jolly) || 1,
-            superstar: Number(d.ss) || Number(d.jolly) || 1
-          };
-        }
+    try {
+      const directRes = await fetch(
+        'https://raw.githubusercontent.com/delpinsky/Superenalotto/main/storico-estrazioni-superenalotto.json'
       );
+      if (directRes.ok) {
+        const data = await directRes.json();
+        const rawDraws = Array.isArray(data?.draws)
+          ? data.draws.filter((d: { date?: string }) => d.date && d.date >= '2009-01-01')
+          : [];
+        rawDraws.sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+        const byYear: Record<number, number> = {};
+        fetchedDraws = rawDraws.map(
+          (d: {
+            date: string;
+            nums: number[];
+            jolly?: number | null;
+            ss?: number | null;
+            concorso?: number;
+          }) => {
+            const year = parseInt(d.date.slice(0, 4), 10);
+            byYear[year] = (byYear[year] || 0) + 1;
+            const contestNumber =
+              typeof d.concorso === 'number' && d.concorso > 0 ? d.concorso : byYear[year];
+            const sortedNums = [...d.nums].map(Number).sort((a, b) => a - b) as [
+              number,
+              number,
+              number,
+              number,
+              number,
+              number
+            ];
+            return {
+              id: `${year}-${String(contestNumber).padStart(3, '0')}`,
+              contestNumber,
+              year,
+              date: d.date,
+              numbers: sortedNums,
+              jolly: Number(d.jolly) || 1,
+              superstar: Number(d.ss) || Number(d.jolly) || 1
+            };
+          }
+        );
+      }
+    } catch {
+      // Ignore if offline
     }
   }
 
-  if (fetchedDraws.length === 0) {
+  const cloudCustomDraws = (await fetchCloudCustomDraws()) || [];
+
+  if (fetchedDraws.length === 0 && cloudCustomDraws.length === 0) {
     return {
       draws: current,
       addedOrUpdated: 0,
@@ -190,6 +240,7 @@ export async function syncOfficialDrawsFromLiveFeed(): Promise<{
   const mergedMap = new Map<string, Draw>();
   for (const d of current) mergedMap.set(d.id, d);
   for (const d of fetchedDraws) mergedMap.set(d.id, d);
+  for (const d of cloudCustomDraws) mergedMap.set(d.id, d);
 
   const merged = Array.from(mergedMap.values()).sort((a, b) => b.date.localeCompare(a.date));
   saveDraws(merged);
@@ -215,7 +266,7 @@ export function saveDraws(draws: Draw[]): void {
 }
 
 /**
- * Add a new draw to the archive (prepend or update existing)
+ * Add a new draw to the archive (prepend or update existing) and persist to Cloud Firestore
  */
 export function insertDraw(newDraw: Draw): Draw[] {
   const current = loadDraws();
@@ -229,6 +280,7 @@ export function insertDraw(newDraw: Draw): Draw[] {
 
   current.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   saveDraws(current);
+  upsertCloudCustomDraw(newDraw).catch(() => {});
   return current;
 }
 
@@ -249,15 +301,22 @@ export function loadSavedPlays(): SavedPlay[] {
 }
 
 /**
- * Save weekly plays to localStorage + IndexedDB + Server
+ * Cache plays locally in localStorage and IndexedDB without triggering remote writes
  */
-export function savePlays(plays: SavedPlay[]): void {
+export function cachePlaysLocally(plays: SavedPlay[]): void {
   try {
     localStorage.setItem(STORAGE_KEYS.PLAYS, JSON.stringify(plays));
   } catch (e) {
-    console.error('Error saving plays to localStorage:', e);
+    console.error('Error caching plays to localStorage:', e);
   }
   savePlaysToIDB(plays);
+}
+
+/**
+ * Save weekly plays to localStorage + IndexedDB + Server + Cloud Firestore
+ */
+export function savePlays(plays: SavedPlay[]): void {
+  cachePlaysLocally(plays);
   fetch('/api/plays', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -265,46 +324,56 @@ export function savePlays(plays: SavedPlay[]): void {
   }).catch(() => {
     // Ignore if offline
   });
+  if (plays.length > 0) {
+    upsertManyCloudPlays(plays).catch(() => {});
+  }
+}
+
+function pickPreferredPlay(existing: SavedPlay, incoming: SavedPlay): SavedPlay {
+  if (incoming.status === 'VERIFICATA' && existing.status !== 'VERIFICATA') {
+    return incoming;
+  }
+  if (existing.status === 'VERIFICATA' && incoming.status !== 'VERIFICATA') {
+    return existing;
+  }
+  const existingVerTime = new Date(existing.result?.verifiedAt || existing.createdAt || 0).getTime();
+  const incomingVerTime = new Date(incoming.result?.verifiedAt || incoming.createdAt || 0).getTime();
+  return incomingVerTime >= existingVerTime ? incoming : existing;
 }
 
 /**
- * Synchronize saved plays across LocalStorage, IndexedDB, and Server (/api/plays)
- * so plays are never lost on logout, reload, or across sessions
+ * Synchronize saved plays across Cloud Firestore (/plays), Server (/api/plays), IndexedDB, and LocalStorage
+ * so plays are permanently available across any browser, device, and after stateless container restarts
  */
 export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
-  const localPlays = loadSavedPlays();
-  const idbPlays = await loadPlaysFromIDB();
-  let serverPlays: SavedPlay[] = [];
+  const deletedIds = loadDeletedPlayIds();
+  const localPlays = loadSavedPlays().filter((p) => p && !deletedIds.has(p.id));
+  const idbPlays = (await loadPlaysFromIDB()).filter((p) => p && !deletedIds.has(p.id));
 
-  try {
-    const res = await fetch('/api/plays');
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data?.plays)) {
-        serverPlays = data.plays;
-      }
-    }
-  } catch {
-    // Offline fallback
-  }
+  const [cloudPlaysResult, serverPlaysResult] = await Promise.all([
+    fetchCloudPlays(),
+    fetch('/api/plays')
+      .then(async (res) => {
+        if (!res.ok) return [] as SavedPlay[];
+        const data = await res.json();
+        return Array.isArray(data?.plays) ? (data.plays as SavedPlay[]) : [];
+      })
+      .catch(() => [] as SavedPlay[])
+  ]);
+
+  const cloudPlays = (cloudPlaysResult || []).filter((p) => p && !deletedIds.has(p.id));
+  const serverPlays = serverPlaysResult.filter((p) => p && !deletedIds.has(p.id));
 
   const mergedMap = new Map<string, SavedPlay>();
-  for (const p of serverPlays) {
-    if (p && typeof p.id === 'string') mergedMap.set(p.id, p);
-  }
-  for (const p of idbPlays) {
-    if (p && typeof p.id === 'string') {
+
+  for (const list of [serverPlays, idbPlays, localPlays, cloudPlays]) {
+    for (const p of list) {
+      if (!p || typeof p.id !== 'string') continue;
       const existing = mergedMap.get(p.id);
-      if (!existing || (p.status === 'VERIFICATA' && existing.status !== 'VERIFICATA')) {
+      if (!existing) {
         mergedMap.set(p.id, p);
-      }
-    }
-  }
-  for (const p of localPlays) {
-    if (p && typeof p.id === 'string') {
-      const existing = mergedMap.get(p.id);
-      if (!existing || (p.status === 'VERIFICATA' && existing.status !== 'VERIFICATA')) {
-        mergedMap.set(p.id, p);
+      } else {
+        mergedMap.set(p.id, pickPreferredPlay(existing, p));
       }
     }
   }
@@ -313,12 +382,22 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
     String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
   );
 
-  try {
-    localStorage.setItem(STORAGE_KEYS.PLAYS, JSON.stringify(merged));
-  } catch {
-    // Ignore
+  cachePlaysLocally(merged);
+
+  // Push any local/server plays that are missing or outdated in Cloud Firestore
+  const cloudMap = new Map(cloudPlays.map((p) => [p.id, p]));
+  const toUploadToCloud = merged.filter((p) => {
+    const inCloud = cloudMap.get(p.id);
+    if (!inCloud) return true;
+    if (p.status === 'VERIFICATA' && inCloud.status !== 'VERIFICATA') return true;
+    if ((p.result?.totalWinning ?? 0) !== (inCloud.result?.totalWinning ?? 0)) return true;
+    if (p.cost !== inCloud.cost) return true;
+    return false;
+  });
+
+  if (toUploadToCloud.length > 0) {
+    await upsertManyCloudPlays(toUploadToCloud);
   }
-  await savePlaysToIDB(merged);
 
   if (merged.length > serverPlays.length) {
     fetch('/api/plays', {
@@ -334,9 +413,10 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
 }
 
 /**
- * Add a new play (persisted to localStorage, IndexedDB, and Server)
+ * Add a new play (persisted to Cloud Firestore, Server, IndexedDB, and localStorage)
  */
 export function insertPlay(play: SavedPlay): SavedPlay[] {
+  unmarkPlayIdDeleted(play.id);
   const plays = loadSavedPlays();
   const existingIdx = plays.findIndex((p) => p.id === play.id);
   if (existingIdx >= 0) {
@@ -344,7 +424,8 @@ export function insertPlay(play: SavedPlay): SavedPlay[] {
   } else {
     plays.unshift(play);
   }
-  savePlays(plays);
+  cachePlaysLocally(plays);
+  upsertCloudPlay(play).catch(() => {});
   fetch('/api/plays', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -356,9 +437,10 @@ export function insertPlay(play: SavedPlay): SavedPlay[] {
 }
 
 /**
- * Update a play (e.g. after verification)
+ * Update a play (e.g. after verification or inline edit)
  */
 export function updatePlay(updated: SavedPlay): SavedPlay[] {
+  unmarkPlayIdDeleted(updated.id);
   const plays = loadSavedPlays();
   const idx = plays.findIndex((p) => p.id === updated.id);
   if (idx >= 0) {
@@ -366,7 +448,8 @@ export function updatePlay(updated: SavedPlay): SavedPlay[] {
   } else {
     plays.unshift(updated);
   }
-  savePlays(plays);
+  cachePlaysLocally(plays);
+  upsertCloudPlay(updated).catch(() => {});
   fetch('/api/plays', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -378,17 +461,14 @@ export function updatePlay(updated: SavedPlay): SavedPlay[] {
 }
 
 /**
- * Delete a play
+ * Delete a play across localStorage, IndexedDB, Server, and Cloud Firestore
  */
 export function deletePlay(id: string): SavedPlay[] {
+  markPlayIdDeleted(id);
   const plays = loadSavedPlays();
   const filtered = plays.filter((p) => p.id !== id);
-  try {
-    localStorage.setItem(STORAGE_KEYS.PLAYS, JSON.stringify(filtered));
-  } catch {
-    // Ignore
-  }
-  savePlaysToIDB(filtered);
+  cachePlaysLocally(filtered);
+  removeCloudPlay(id).catch(() => {});
   fetch(`/api/plays/${encodeURIComponent(id)}`, {
     method: 'DELETE'
   }).catch(() => {

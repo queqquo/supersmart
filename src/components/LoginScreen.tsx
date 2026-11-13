@@ -74,18 +74,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       provider: 'google_oauth'
     };
 
-    // If non-admin and not yet registered in ACL, automatically send an access request for approval as USER
-    if (!isPrimaryAdmin(norm)) {
-      const currentEval = evaluateUserAccess(norm, acl);
-      if (currentEval.status === 'UNREGISTERED') {
-        onRequestAccess({
-          email: norm,
-          name: resolvedName,
-          note: 'Richiesta di approvazione accesso come Utente tramite Google Login'
-        });
-      }
-    }
-
     setShowGoogleChooser(false);
     setCustomEmail('');
     setCustomName('');

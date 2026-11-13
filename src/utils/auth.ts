@@ -31,8 +31,48 @@ export interface AuthSession {
 
 const AUTH_STORAGE_KEYS = {
   ACL: 'superenalotto_zero_cost_acl_v3',
+  DELETED_ACL_EMAILS: 'superenalotto_deleted_acl_emails_v1',
   SESSION: 'superenalotto_zero_cost_session_v3'
 };
+
+function loadDeletedAclEmails(): Set<string> {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEYS.DELETED_ACL_EMAILS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return new Set(parsed);
+    }
+  } catch {
+    // Ignore
+  }
+  return new Set();
+}
+
+function markAclEmailDeleted(email: string): void {
+  const norm = normalizeEmail(email);
+  if (!norm || isPrimaryAdmin(norm)) return;
+  try {
+    const set = loadDeletedAclEmails();
+    set.add(norm);
+    localStorage.setItem(AUTH_STORAGE_KEYS.DELETED_ACL_EMAILS, JSON.stringify(Array.from(set)));
+  } catch {
+    // Ignore
+  }
+}
+
+function unmarkAclEmailDeleted(email: string): void {
+  const norm = normalizeEmail(email);
+  if (!norm) return;
+  try {
+    const set = loadDeletedAclEmails();
+    if (set.has(norm)) {
+      set.delete(norm);
+      localStorage.setItem(AUTH_STORAGE_KEYS.DELETED_ACL_EMAILS, JSON.stringify(Array.from(set)));
+    }
+  } catch {
+    // Ignore
+  }
+}
 
 /**
  * Normalize an email address
@@ -185,6 +225,7 @@ export function requestUserAccess(
     throw new Error('Indirizzo email non valido.');
   }
 
+  unmarkAclEmailDeleted(norm);
   const now = new Date().toISOString();
   const updated = ensureAdminInACL(acl);
   const existingIdx = updated.findIndex((r) => normalizeEmail(r.email) === norm);
@@ -243,6 +284,7 @@ export function authorizeUserByAdmin(
     throw new Error('Inserisci un indirizzo email valido.');
   }
 
+  unmarkAclEmailDeleted(normTarget);
   const now = new Date().toISOString();
   const updated = ensureAdminInACL(acl);
   const idx = updated.findIndex((r) => normalizeEmail(r.email) === normTarget);
@@ -334,6 +376,7 @@ export function removeUserRecordByAdmin(
     throw new Error('Non è possibile rimuovere l\'amministratore principale.');
   }
 
+  markAclEmailDeleted(normTarget);
   return ensureAdminInACL(acl).filter((r) => normalizeEmail(r.email) !== normTarget);
 }
 
@@ -390,7 +433,7 @@ async function loadACLFromIDB(): Promise<UserAccessRecord[]> {
 
 /**
  * Merge multiple ACL arrays by email, keeping the most recent updatedAt status
- * so no pending request or admin approval is ever overwritten by an empty server restart.
+ * and protecting AUTHORIZED users from accidental downgrade to PENDING on a new browser.
  */
 export function mergeACLRecords(
   ...aclLists: (UserAccessRecord[] | null | undefined)[]
@@ -410,6 +453,19 @@ export function mergeACLRecords(
           role: isPrimaryAdmin(norm) ? 'ADMIN' : 'USER'
         });
       } else {
+        // Protect an already AUTHORIZED record from being downgraded to PENDING by a new browser login
+        if (existing.status === 'AUTHORIZED' && rec.status === 'PENDING') {
+          continue;
+        }
+        if (rec.status === 'AUTHORIZED' && existing.status === 'PENDING') {
+          mergedMap.set(norm, {
+            ...existing,
+            ...rec,
+            email: norm,
+            role: isPrimaryAdmin(norm) ? 'ADMIN' : 'USER'
+          });
+          continue;
+        }
         const existingTime = new Date(existing.updatedAt || existing.requestedAt || 0).getTime();
         const incomingTime = new Date(rec.updatedAt || rec.requestedAt || 0).getTime();
         if (incomingTime >= existingTime) {
@@ -492,28 +548,66 @@ export function saveAuthSession(session: AuthSession | null): void {
 }
 
 /**
- * Shared Server + IndexedDB + LocalStorage ACL Synchronization
- * (Preserves pending user requests across logouts, browser reloads, and stateless container restarts)
+ * Shared Cloud Firestore + Server + IndexedDB + LocalStorage ACL Synchronization
+ * (Preserves authorized users and pending requests across browsers, devices, and container restarts)
  */
 export async function fetchServerACL(): Promise<UserAccessRecord[] | null> {
-  const localAcl = loadACL();
-  const idbAcl = await loadACLFromIDB();
+  const deletedEmails = loadDeletedAclEmails();
+  const localAcl = loadACL().filter(
+    (r) => isPrimaryAdmin(r.email) || !deletedEmails.has(normalizeEmail(r.email))
+  );
+  const idbAcl = (await loadACLFromIDB()).filter(
+    (r) => isPrimaryAdmin(r.email) || !deletedEmails.has(normalizeEmail(r.email))
+  );
+
+  let cloudAcl: UserAccessRecord[] = [];
   let serverAcl: UserAccessRecord[] = [];
+
+  try {
+    const { fetchCloudACL } = await import('./firebase');
+    const fetchedCloud = await fetchCloudACL();
+    if (Array.isArray(fetchedCloud)) {
+      cloudAcl = fetchedCloud.filter(
+        (r) => isPrimaryAdmin(r.email) || !deletedEmails.has(normalizeEmail(r.email))
+      );
+    }
+  } catch {
+    // Ignore if in non-browser environment
+  }
 
   try {
     const res = await fetch('/api/acl');
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.acl)) {
-        serverAcl = ensureAdminInACL(data.acl);
+        serverAcl = ensureAdminInACL(data.acl).filter(
+          (r) => isPrimaryAdmin(r.email) || !deletedEmails.has(normalizeEmail(r.email))
+        );
       }
     }
   } catch {
     // Offline fallback
   }
 
-  const merged = mergeACLRecords(serverAcl, idbAcl, localAcl);
+  const merged = mergeACLRecords(serverAcl, idbAcl, localAcl, cloudAcl);
   saveACL(merged);
+
+  // Sync missing/updated records back to Cloud Firestore
+  try {
+    const { upsertManyCloudACLRecords } = await import('./firebase');
+    const cloudMap = new Map(cloudAcl.map((r) => [normalizeEmail(r.email), r]));
+    const toUpload = merged.filter((r) => {
+      const inCloud = cloudMap.get(normalizeEmail(r.email));
+      if (!inCloud) return true;
+      if (inCloud.status !== r.status || inCloud.name !== r.name) return true;
+      return false;
+    });
+    if (toUpload.length > 0) {
+      await upsertManyCloudACLRecords(toUpload);
+    }
+  } catch {
+    // Ignore
+  }
 
   // If merged has records that the server didn't have (e.g. after container restart), push them to server
   if (merged.length > serverAcl.length) {
@@ -537,6 +631,21 @@ export async function apiRequestUserAccess(user: {
   picture?: string;
   note?: string;
 }): Promise<UserAccessRecord[] | null> {
+  const norm = normalizeEmail(user.email);
+  unmarkAclEmailDeleted(norm);
+
+  // First check Cloud Firestore so an already-authorized user on a new browser is not overwritten with PENDING
+  const latestAcl = (await fetchServerACL()) || loadACL();
+  const updatedLocal = requestUserAccess(latestAcl, user);
+  saveACL(updatedLocal);
+
+  const targetRec = updatedLocal.find((r) => normalizeEmail(r.email) === norm);
+  if (targetRec) {
+    import('./firebase')
+      .then(({ upsertCloudACLRecord }) => upsertCloudACLRecord(targetRec))
+      .catch(() => {});
+  }
+
   try {
     const res = await fetch('/api/acl/request', {
       method: 'POST',
@@ -546,15 +655,15 @@ export async function apiRequestUserAccess(user: {
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.acl)) {
-        const merged = mergeACLRecords(loadACL(), data.acl);
+        const merged = mergeACLRecords(updatedLocal, data.acl);
         saveACL(merged);
         return merged;
       }
     }
   } catch {
-    // Fallback to local
+    // Fallback to local/cloud
   }
-  return null;
+  return updatedLocal;
 }
 
 export async function apiAuthorizeUserByAdmin(
@@ -562,6 +671,19 @@ export async function apiAuthorizeUserByAdmin(
   targetEmail: string,
   options?: { name?: string; role?: UserRole; note?: string }
 ): Promise<UserAccessRecord[] | null> {
+  const normTarget = normalizeEmail(targetEmail);
+  unmarkAclEmailDeleted(normTarget);
+
+  const updatedLocal = authorizeUserByAdmin(loadACL(), adminEmail, targetEmail, options);
+  saveACL(updatedLocal);
+
+  const targetRec = updatedLocal.find((r) => normalizeEmail(r.email) === normTarget);
+  if (targetRec) {
+    import('./firebase')
+      .then(({ upsertCloudACLRecord }) => upsertCloudACLRecord(targetRec))
+      .catch(() => {});
+  }
+
   try {
     const res = await fetch('/api/acl/authorize', {
       method: 'POST',
@@ -571,21 +693,32 @@ export async function apiAuthorizeUserByAdmin(
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.acl)) {
-        const merged = mergeACLRecords(loadACL(), data.acl);
+        const merged = mergeACLRecords(updatedLocal, data.acl);
         saveACL(merged);
         return merged;
       }
     }
   } catch {
-    // Fallback to local
+    // Fallback to local/cloud
   }
-  return null;
+  return updatedLocal;
 }
 
 export async function apiRevokeUserByAdmin(
   adminEmail: string,
   targetEmail: string
 ): Promise<UserAccessRecord[] | null> {
+  const normTarget = normalizeEmail(targetEmail);
+  const updatedLocal = revokeUserByAdmin(loadACL(), adminEmail, targetEmail);
+  saveACL(updatedLocal);
+
+  const targetRec = updatedLocal.find((r) => normalizeEmail(r.email) === normTarget);
+  if (targetRec) {
+    import('./firebase')
+      .then(({ upsertCloudACLRecord }) => upsertCloudACLRecord(targetRec))
+      .catch(() => {});
+  }
+
   try {
     const res = await fetch('/api/acl/revoke', {
       method: 'POST',
@@ -595,15 +728,15 @@ export async function apiRevokeUserByAdmin(
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.acl)) {
-        const merged = mergeACLRecords(loadACL(), data.acl);
+        const merged = mergeACLRecords(updatedLocal, data.acl);
         saveACL(merged);
         return merged;
       }
     }
   } catch {
-    // Fallback to local
+    // Fallback to local/cloud
   }
-  return null;
+  return updatedLocal;
 }
 
 export async function apiRemoveUserRecordByAdmin(
@@ -611,8 +744,13 @@ export async function apiRemoveUserRecordByAdmin(
   targetEmail: string
 ): Promise<UserAccessRecord[] | null> {
   const normTarget = normalizeEmail(targetEmail);
+  markAclEmailDeleted(normTarget);
   const filteredLocal = loadACL().filter((r) => normalizeEmail(r.email) !== normTarget);
   saveACL(filteredLocal);
+
+  import('./firebase')
+    .then(({ removeCloudACLRecord }) => removeCloudACLRecord(normTarget))
+    .catch(() => {});
 
   try {
     const res = await fetch('/api/acl/remove', {
@@ -635,5 +773,6 @@ export async function apiRemoveUserRecordByAdmin(
   }
   return filteredLocal;
 }
+
 
 

@@ -33,7 +33,7 @@ import {
   saveDraws,
   syncOfficialDrawsFromLiveFeed,
   loadSavedPlays,
-  savePlays,
+  cachePlaysLocally,
   syncSavedPlaysWithServer,
   insertPlay,
   updatePlay,
@@ -61,8 +61,14 @@ import {
   apiRequestUserAccess,
   apiAuthorizeUserByAdmin,
   apiRevokeUserByAdmin,
-  apiRemoveUserRecordByAdmin
+  apiRemoveUserRecordByAdmin,
+  isPrimaryAdmin
 } from './utils/auth';
+import {
+  testFirestoreConnection,
+  subscribeCloudPlays,
+  subscribeCloudACL
+} from './utils/firebase';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('generator');
@@ -89,8 +95,9 @@ export default function App() {
   const [acl, setAcl] = useState<UserAccessRecord[]>(() => loadACL());
   const [session, setSession] = useState<AuthSession | null>(() => loadAuthSession());
 
-  // Automatically sync official draws on startup
+  // Automatically sync official draws and test Firestore connection on startup
   useEffect(() => {
+    testFirestoreConnection().catch(() => {});
     syncOfficialDrawsFromLiveFeed()
       .then((res) => {
         if (res.draws.length > 0) {
@@ -102,10 +109,44 @@ export default function App() {
       });
   }, []);
 
-  // Automatically sync savedPlays across LocalStorage, IndexedDB, and Server (/api/plays) on startup, login, and tab switch
+  const initialPlaysSyncDoneRef = React.useRef(false);
+  const initialAclSyncDoneRef = React.useRef(false);
+
+  // Real-time Cloud Firestore listeners for Saved Plays (/plays) and User ACL (/acl)
+  useEffect(() => {
+    const unsubPlays = subscribeCloudPlays((cloudPlays) => {
+      setSavedPlays((prevPlays) => {
+        if (!initialPlaysSyncDoneRef.current && cloudPlays.length === 0 && prevPlays.length > 0) {
+          return prevPlays;
+        }
+        cachePlaysLocally(cloudPlays);
+        return cloudPlays;
+      });
+    });
+
+    const unsubAcl = subscribeCloudACL((cloudAcl) => {
+      if (cloudAcl.length > 0) {
+        setAcl((prevAcl) => {
+          const nextAcl = initialAclSyncDoneRef.current
+            ? mergeACLRecords(cloudAcl)
+            : mergeACLRecords(prevAcl, cloudAcl);
+          saveACL(nextAcl);
+          return nextAcl;
+        });
+      }
+    });
+
+    return () => {
+      unsubPlays();
+      unsubAcl();
+    };
+  }, []);
+
+  // Automatically sync savedPlays across Cloud Firestore, Server (/api/plays), IndexedDB, and LocalStorage on startup, login, and tab switch
   useEffect(() => {
     let active = true;
     syncSavedPlaysWithServer().then((mergedPlays) => {
+      initialPlaysSyncDoneRef.current = true;
       if (active) {
         setSavedPlays(mergedPlays);
       }
@@ -115,22 +156,23 @@ export default function App() {
     };
   }, [session?.email, activeTab]);
 
-  // Poll server ACL on startup and every 3.5s so cross-device/cross-browser access requests appear in real time
+  // Sync ACL with Cloud Firestore + Server on startup and periodically
   useEffect(() => {
     let active = true;
     const syncAcl = async () => {
       const serverAcl = await fetchServerACL();
+      initialAclSyncDoneRef.current = true;
       if (active && serverAcl) {
         setAcl(serverAcl);
       }
     };
     syncAcl();
-    const interval = setInterval(syncAcl, 3500);
+    const interval = setInterval(syncAcl, 6000);
     return () => {
       active = false;
       clearInterval(interval);
     };
-  }, [activeTab]);
+  }, [activeTab, session?.email]);
 
   // Handle Google OAuth 2.0 Implicit Flow callback token if present in URL hash
   useEffect(() => {
@@ -157,6 +199,7 @@ export default function App() {
                 provider: 'google_oauth'
               };
               const serverAcl = (await fetchServerACL()) || loadACL();
+              setAcl(serverAcl);
               const evalRes = evaluateUserAccess(emailNorm, serverAcl);
               if (!evalRes.isAdmin && evalRes.status === 'UNREGISTERED') {
                 const reqPayload = {
@@ -180,11 +223,12 @@ export default function App() {
     }
   }, []);
 
-  // Sync ACL across tabs via storage event
+  // Sync ACL and Plays across tabs via storage event
   useEffect(() => {
     const handleStorage = () => {
       setAcl(loadACL());
       setSession(loadAuthSession());
+      setSavedPlays(loadSavedPlays());
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
@@ -194,6 +238,31 @@ export default function App() {
   const handleLogin = (newSession: AuthSession) => {
     setSession(newSession);
     saveAuthSession(newSession);
+
+    // Fetch latest ACL from Cloud Firestore before checking if the user is UNREGISTERED
+    fetchServerACL().then(async (latestAcl) => {
+      const currentAcl = latestAcl || loadACL();
+      setAcl(currentAcl);
+      if (!isPrimaryAdmin(newSession.email)) {
+        const evalRes = evaluateUserAccess(newSession.email, currentAcl);
+        if (evalRes.status === 'UNREGISTERED') {
+          const reqPayload = {
+            email: newSession.email,
+            name: newSession.name,
+            note: 'Richiesta di approvazione accesso come Utente tramite Google Login'
+          };
+          const updatedAcl =
+            (await apiRequestUserAccess(reqPayload)) ||
+            requestUserAccess(currentAcl, reqPayload);
+          setAcl(updatedAcl);
+          saveACL(updatedAcl);
+        }
+      }
+    });
+
+    syncSavedPlaysWithServer().then((mergedPlays) => {
+      setSavedPlays(mergedPlays);
+    });
   };
 
   const handleLogout = () => {

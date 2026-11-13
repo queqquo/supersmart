@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "SavedPlay": {
+      "title": "SavedPlay",
+      "description": "A registered SuperEnalotto play (system or manual) with columns, cost, status, and verification results.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the saved play" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of creation" },
+        "targetContestId": { "type": "string", "description": "Target contest identifier (e.g. 2026-175)" },
+        "mode": { "type": "string", "enum": ["pure_coverage", "superstar", "manual"] },
+        "cost": { "type": "number", "description": "Total cost in Euro" },
+        "savedAmount": { "type": "number", "description": "Piggybank saved amount in Euro" },
+        "poolNumbers": { "type": "array", "items": { "type": "number" } },
+        "columns": { "type": "array", "description": "Played 6-number columns" },
+        "status": { "type": "string", "enum": ["IN_ATTESA", "VERIFICATA"] },
+        "result": { "type": "object", "description": "Verification result and winning details" },
+        "manualNote": { "type": "string", "description": "Optional user note" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      },
+      "required": ["id", "createdAt", "targetContestId", "mode", "cost", "poolNumbers", "columns", "status"]
+    },
+    "UserAccessRecord": {
+      "title": "UserAccessRecord",
+      "description": "Access Control List (ACL) record for an authorized, pending, or rejected Gmail user.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "Normalized lowercase Gmail address" },
+        "name": { "type": "string", "description": "Display name of the user" },
+        "picture": { "type": "string", "description": "Optional avatar URL" },
+        "role": { "type": "string", "enum": ["ADMIN", "USER"] },
+        "status": { "type": "string", "enum": ["AUTHORIZED", "PENDING", "REJECTED"] },
+        "requestedAt": { "type": "string", "description": "ISO timestamp when access was requested" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last status change" },
+        "authorizedBy": { "type": "string", "description": "Administrator identifier" },
+        "note": { "type": "string", "description": "Optional request or authorization note" }
+      },
+      "required": ["email", "name", "role", "status", "requestedAt", "updatedAt"]
+    },
+    "CustomDraw": {
+      "title": "CustomDraw",
+      "description": "Custom or newly imported SuperEnalotto draw beyond the static historical seed.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Draw contest ID (e.g. 2026-175)" },
+        "contestNumber": { "type": "number" },
+        "year": { "type": "number" },
+        "date": { "type": "string" },
+        "numbers": { "type": "array", "items": { "type": "number" } },
+        "jolly": { "type": "number" },
+        "superstar": { "type": "number" }
+      },
+      "required": ["id", "contestNumber", "year", "date", "numbers", "jolly"]
+    }
+  },
+  "firestore": {
+    "/plays/{playId}": {
+      "schema": { "$ref": "#/entities/SavedPlay" },
+      "description": "Cloud-persisted registered plays shared across browsers and sessions."
+    },
+    "/acl/{emailKey}": {
+      "schema": { "$ref": "#/entities/UserAccessRecord" },
+      "description": "Cloud-persisted user access control records (authorized, pending, rejected)."
+    },
+    "/custom_draws/{drawId}": {
+      "schema": { "$ref": "#/entities/CustomDraw" },
+      "description": "Cloud-persisted custom or newly added SuperEnalotto draws."
+    }
+  }
+}

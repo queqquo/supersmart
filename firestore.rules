@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidPlay(data, playId) {
+      return data.keys().hasAll(['id', 'createdAt', 'targetContestId', 'mode', 'cost', 'poolNumbers', 'columns', 'status'])
+        && data.id is string
+        && data.id == playId
+        && data.id.size() > 0 && data.id.size() <= 128
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.targetContestId is string && data.targetContestId.size() > 0 && data.targetContestId.size() <= 64
+        && data.mode in ['pure_coverage', 'superstar', 'manual']
+        && data.cost is number && data.cost >= 0 && data.cost <= 1000000
+        && data.poolNumbers is list && data.poolNumbers.size() <= 90
+        && data.columns is list && data.columns.size() >= 1 && data.columns.size() <= 200
+        && data.status in ['IN_ATTESA', 'VERIFICATA'];
+    }
+
+    function isValidAclRecord(data, emailKey) {
+      return data.keys().hasAll(['email', 'name', 'role', 'status', 'requestedAt', 'updatedAt'])
+        && data.email is string
+        && data.email == emailKey
+        && data.email.size() >= 3 && data.email.size() <= 254
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && data.requestedAt is string && data.requestedAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && data.status in ['AUTHORIZED', 'PENDING', 'REJECTED']
+        && (
+          (emailKey == 'giuseppe.vitiello@gmail.com' && data.role == 'ADMIN' && data.status == 'AUTHORIZED')
+          || (emailKey != 'giuseppe.vitiello@gmail.com' && data.role == 'USER')
+        );
+    }
+
+    function isValidCustomDraw(data, drawId) {
+      return data.keys().hasAll(['id', 'contestNumber', 'year', 'date', 'numbers', 'jolly'])
+        && data.id is string
+        && data.id == drawId
+        && data.id.size() > 0 && data.id.size() <= 64
+        && data.contestNumber is number && data.contestNumber >= 1
+        && data.year is number && data.year >= 1997 && data.year <= 2100
+        && data.date is string && data.date.size() <= 32
+        && data.numbers is list && data.numbers.size() == 6
+        && data.jolly is number && data.jolly >= 1 && data.jolly <= 90;
+    }
+
+    match /plays/{playId} {
+      allow read: if true;
+      allow create, update: if isValidPlay(request.resource.data, playId);
+      allow delete: if true;
+    }
+
+    match /acl/{emailKey} {
+      allow read: if true;
+      allow create, update: if isValidAclRecord(request.resource.data, emailKey);
+      allow delete: if emailKey != 'giuseppe.vitiello@gmail.com';
+    }
+
+    match /custom_draws/{drawId} {
+      allow read: if true;
+      allow create, update: if isValidCustomDraw(request.resource.data, drawId);
+      allow delete: if true;
+    }
+
+    match /_connection_test/{docId} {
+      allow read: if true;
+    }
+  }
+}

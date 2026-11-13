@@ -551,18 +551,42 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        hmr: {
-          server: httpServer
-        },
-        watch: null
-      },
-      appType: 'spa'
+    let viteMiddlewares: express.RequestHandler | null = null;
+    const hmrConfig =
+      process.env.DISABLE_HMR === 'true'
+        ? false
+        : {
+            server: httpServer
+          };
+
+    const viteReadyPromise = import('vite')
+      .then(({ createServer: createViteServer }) =>
+        createViteServer({
+          server: {
+            middlewareMode: true,
+            hmr: hmrConfig,
+            watch: null
+          },
+          appType: 'spa'
+        })
+      )
+      .then((vite) => {
+        viteMiddlewares = vite.middlewares;
+      })
+      .catch((err) => {
+        console.error('Failed to initialize Vite dev middleware:', err);
+      });
+
+    app.use(async (req, res, next) => {
+      if (!viteMiddlewares) {
+        await viteReadyPromise;
+      }
+      if (viteMiddlewares) {
+        viteMiddlewares(req, res, next);
+      } else {
+        next();
+      }
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath));
