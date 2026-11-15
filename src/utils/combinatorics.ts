@@ -188,7 +188,17 @@ export function applyStatisticalFilters(
 }
 
 /**
- * Greedy Set Cover / Covering Design Reduction with Flat Uint8Array Indexing & Soft-Filter Penalty
+ * Fast 32-bit population count (Hamming weight) for 90-bit column intersection
+ */
+function popcnt32(v: number): number {
+  v = v - ((v >>> 1) & 0x55555555);
+  v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+  return (((v + (v >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+/**
+ * Greedy Set Cover / Covering Design Reduction with Flat Uint8Array Indexing, Soft-Filter Penalty,
+ * Hamming Overlap Control, and 2-Opt Kempe-Swap Local Search Refinement.
  * Selects exactly targetCount columns maximizing coverage of triplets (t=3) or pairs (t=2),
  * while balancing number frequency and applying soft-penalties for statistical filters so the
  * mathematical covering matrix is never broken by hard pre-filtering.
@@ -216,26 +226,45 @@ export function greedyCoveringReduction(
 
   const targetNumberPresence = (targetCount * 6) / Math.max(poolNumbers.length, 1);
 
-  // Flat O(1) lookup arrays replacing Set<string>:
+  // Flat O(1) reference-counted lookup arrays replacing Set<string>:
   // coveredPairs: index = a * 91 + b (max 90 * 91 + 90 = 8280 < 8281)
   // coveredTriplets: index = a * 8281 + b * 91 + c (max 90 * 8281 + 90 * 91 + 90 = 753570 < 753571)
   const coveredPairs = new Uint8Array(8281);
   const coveredTriplets = new Uint8Array(753571);
 
-  // Pre-calculate static soft-filter penalties for all candidates once
+  // Pre-calculate static soft-filter penalties and 3x30-bit masks for all candidates once
   const filterPenalties = new Float64Array(numCandidates);
-  if (filters) {
-    for (let i = 0; i < numCandidates; i++) {
-      filterPenalties[i] = computeFilterPenalty(candidates[i], filters);
+  const candM0 = new Int32Array(numCandidates);
+  const candM1 = new Int32Array(numCandidates);
+  const candM2 = new Int32Array(numCandidates);
+
+  for (let i = 0; i < numCandidates; i++) {
+    const c = candidates[i];
+    if (filters) {
+      filterPenalties[i] = computeFilterPenalty(c, filters);
     }
+    let m0 = 0;
+    let m1 = 0;
+    let m2 = 0;
+    for (let k = 0; k < 6; k++) {
+      const num = c[k];
+      if (num <= 30) m0 |= 1 << (num - 1);
+      else if (num <= 60) m1 |= 1 << (num - 31);
+      else m2 |= 1 << (num - 61);
+    }
+    candM0[i] = m0;
+    candM1[i] = m1;
+    candM2[i] = m2;
   }
 
   const usedCandidate = new Uint8Array(numCandidates);
-  const selected: number[][] = [];
+  const selectedIndices: number[] = [];
   const overUseMultiplier = coverageTarget === 'terni' ? 6 : 15;
   const underUseBonus = coverageTarget === 'terni' ? 4 : 10;
 
-  function evaluateCandidate(combo: number[], filterPenalty: number): number {
+  function evaluateCandidate(candIdx: number): number {
+    const combo = candidates[candIdx];
+    const filterPenalty = filterPenalties[candIdx];
     let score = 0;
     let balancePenalty = 0;
 
@@ -247,6 +276,24 @@ export function greedyCoveringReduction(
         balancePenalty += diff * diff * overUseMultiplier;
       } else {
         score += underUseBonus;
+      }
+    }
+
+    // Check maximum shared numbers (Hamming overlap) with already selected columns
+    let overlapPenalty = 0;
+    const m0 = candM0[candIdx];
+    const m1 = candM1[candIdx];
+    const m2 = candM2[candIdx];
+    for (let s = 0; s < selectedIndices.length; s++) {
+      const sIdx = selectedIndices[s];
+      const shared =
+        popcnt32(m0 & candM0[sIdx]) +
+        popcnt32(m1 & candM1[sIdx]) +
+        popcnt32(m2 & candM2[sIdx]);
+      if (shared >= 5) {
+        overlapPenalty += 90;
+      } else if (shared === 4 && targetCount <= 16) {
+        overlapPenalty += 12;
       }
     }
 
@@ -287,6 +334,7 @@ export function greedyCoveringReduction(
         newPairs * 1.5 -
         repeatedTriplets * 6 -
         balancePenalty -
+        overlapPenalty -
         filterPenalty;
     } else {
       // Orthogonal C(v, 6, 2) mode: prioritize new pairs (t=2) and subtract soft filterPenalty
@@ -296,19 +344,75 @@ export function greedyCoveringReduction(
         newPairs * 8 +
         newTriplets * 2 -
         balancePenalty -
+        overlapPenalty -
         filterPenalty;
     }
 
     return score;
   }
 
-  while (selected.length < targetCount) {
+  function addColumnToCover(candIdx: number) {
+    const chosen = candidates[candIdx];
+    for (let i = 0; i < 6; i++) {
+      const a = chosen[i];
+      if (poolMask[a] === 1) {
+        numberUsage[a]++;
+      }
+      const aPairOffset = a * 91;
+      const aTripOffset = a * 8281;
+      for (let j = i + 1; j < 6; j++) {
+        const b = chosen[j];
+        const pairIdx = aPairOffset + b;
+        if (coveredPairs[pairIdx] < 255) coveredPairs[pairIdx]++;
+        const abTripOffset = aTripOffset + b * 91;
+        for (let m = j + 1; m < 6; m++) {
+          const c = chosen[m];
+          const tripIdx = abTripOffset + c;
+          if (coveredTriplets[tripIdx] < 255) coveredTriplets[tripIdx]++;
+        }
+      }
+    }
+  }
+
+  function removeColumnFromCover(candIdx: number): { lostPairs: number; lostTriplets: number } {
+    const chosen = candidates[candIdx];
+    let lostPairs = 0;
+    let lostTriplets = 0;
+    for (let i = 0; i < 6; i++) {
+      const a = chosen[i];
+      if (poolMask[a] === 1) {
+        numberUsage[a]--;
+      }
+      const aPairOffset = a * 91;
+      const aTripOffset = a * 8281;
+      for (let j = i + 1; j < 6; j++) {
+        const b = chosen[j];
+        const pairIdx = aPairOffset + b;
+        if (coveredPairs[pairIdx] > 0) {
+          coveredPairs[pairIdx]--;
+          if (coveredPairs[pairIdx] === 0) lostPairs++;
+        }
+        const abTripOffset = aTripOffset + b * 91;
+        for (let m = j + 1; m < 6; m++) {
+          const c = chosen[m];
+          const tripIdx = abTripOffset + c;
+          if (coveredTriplets[tripIdx] > 0) {
+            coveredTriplets[tripIdx]--;
+            if (coveredTriplets[tripIdx] === 0) lostTriplets++;
+          }
+        }
+      }
+    }
+    return { lostPairs, lostTriplets };
+  }
+
+  while (selectedIndices.length < targetCount) {
     let bestIdx = -1;
     let bestScore = -Infinity;
 
     for (let i = 0; i < numCandidates; i++) {
       if (usedCandidate[i] === 1) continue;
-      const score = evaluateCandidate(candidates[i], filterPenalties[i]);
+      const score = evaluateCandidate(i);
       if (score > bestScore) {
         bestScore = score;
         bestIdx = i;
@@ -320,30 +424,102 @@ export function greedyCoveringReduction(
     }
 
     usedCandidate[bestIdx] = 1;
-    const chosen = candidates[bestIdx];
-    selected.push(chosen);
+    selectedIndices.push(bestIdx);
+    addColumnToCover(bestIdx);
+  }
 
-    // Update usage and covered pairs/triplets in flat Uint8Arrays
-    for (let i = 0; i < chosen.length; i++) {
-      const a = chosen[i];
-      if (poolMask[a] === 1) {
-        numberUsage[a]++;
-      }
-      const aPairOffset = a * 91;
-      const aTripOffset = a * 8281;
-      for (let j = i + 1; j < chosen.length; j++) {
-        const b = chosen[j];
-        coveredPairs[aPairOffset + b] = 1;
-        const abTripOffset = aTripOffset + b * 91;
-        for (let m = j + 1; m < chosen.length; m++) {
-          const c = chosen[m];
-          coveredTriplets[abTripOffset + c] = 1;
+  // Phase 2: 2-Opt Kempe-Swap Monotonic Local Search Refinement
+  // Attempts 1-for-1 swaps that strictly increase covered triplets/pairs without increasing filter penalty
+  if (selectedIndices.length >= 2 && numCandidates <= 5500) {
+    const maxRefinementPasses = numCandidates <= 1500 ? 2 : 1;
+    for (let pass = 0; pass < maxRefinementPasses; pass++) {
+      let improvedInPass = false;
+      for (let slot = 0; slot < selectedIndices.length; slot++) {
+        const oldIdx = selectedIndices[slot];
+        const oldPenalty = filterPenalties[oldIdx];
+        const { lostPairs, lostTriplets } = removeColumnFromCover(oldIdx);
+
+        let bestReplacementIdx = -1;
+        let bestGainPrimary = coverageTarget === 'terni' ? lostTriplets : lostPairs;
+        let bestGainSecondary = coverageTarget === 'terni' ? lostPairs : lostTriplets;
+        let bestReplacementPenalty = oldPenalty;
+
+        for (let i = 0; i < numCandidates; i++) {
+          if (usedCandidate[i] === 1) continue;
+          const candPen = filterPenalties[i];
+          if (candPen > oldPenalty) continue;
+
+          // Check max overlap with remaining selected columns
+          const m0 = candM0[i];
+          const m1 = candM1[i];
+          const m2 = candM2[i];
+          let hasExcessiveOverlap = false;
+          for (let s = 0; s < selectedIndices.length; s++) {
+            if (s === slot) continue;
+            const sIdx = selectedIndices[s];
+            const shared =
+              popcnt32(m0 & candM0[sIdx]) +
+              popcnt32(m1 & candM1[sIdx]) +
+              popcnt32(m2 & candM2[sIdx]);
+            if (shared >= 5) {
+              hasExcessiveOverlap = true;
+              break;
+            }
+          }
+          if (hasExcessiveOverlap) continue;
+
+          const combo = candidates[i];
+          let gainedPairs = 0;
+          let gainedTriplets = 0;
+          for (let aIdx = 0; aIdx < 6; aIdx++) {
+            const a = combo[aIdx];
+            const aPairOffset = a * 91;
+            const aTripOffset = a * 8281;
+            for (let bIdx = aIdx + 1; bIdx < 6; bIdx++) {
+              const b = combo[bIdx];
+              if (coveredPairs[aPairOffset + b] === 0) gainedPairs++;
+              const abTripOffset = aTripOffset + b * 91;
+              for (let cIdx = bIdx + 1; cIdx < 6; cIdx++) {
+                const c = combo[cIdx];
+                if (coveredTriplets[abTripOffset + c] === 0) gainedTriplets++;
+              }
+            }
+          }
+
+          const primary = coverageTarget === 'terni' ? gainedTriplets : gainedPairs;
+          const secondary = coverageTarget === 'terni' ? gainedPairs : gainedTriplets;
+
+          const isBetterCoverage =
+            primary > bestGainPrimary ||
+            (primary === bestGainPrimary && secondary > bestGainSecondary) ||
+            (primary === bestGainPrimary &&
+              secondary === bestGainSecondary &&
+              candPen < bestReplacementPenalty);
+
+          if (isBetterCoverage) {
+            bestGainPrimary = primary;
+            bestGainSecondary = secondary;
+            bestReplacementPenalty = candPen;
+            bestReplacementIdx = i;
+          }
+        }
+
+        if (bestReplacementIdx !== -1) {
+          usedCandidate[oldIdx] = 0;
+          usedCandidate[bestReplacementIdx] = 1;
+          selectedIndices[slot] = bestReplacementIdx;
+          addColumnToCover(bestReplacementIdx);
+          improvedInPass = true;
+        } else {
+          // Restore original column
+          addColumnToCover(oldIdx);
         }
       }
+      if (!improvedInPass) break;
     }
   }
 
-  return selected;
+  return selectedIndices.map((idx) => candidates[idx]);
 }
 
 /**
@@ -403,6 +579,35 @@ export function computeCoverageMetrics(
     }
   }
 
+  // Compute maximum overlap between any pair of columns and minimum Hamming distance
+  let maxColumnOverlap = 0;
+  if (columns.length >= 2) {
+    const colM0 = new Int32Array(columns.length);
+    const colM1 = new Int32Array(columns.length);
+    const colM2 = new Int32Array(columns.length);
+    for (let c = 0; c < columns.length; c++) {
+      let m0 = 0, m1 = 0, m2 = 0;
+      for (const num of columns[c]) {
+        if (num <= 30) m0 |= 1 << (num - 1);
+        else if (num <= 60) m1 |= 1 << (num - 31);
+        else m2 |= 1 << (num - 61);
+      }
+      colM0[c] = m0;
+      colM1[c] = m1;
+      colM2[c] = m2;
+    }
+    for (let i = 0; i < columns.length; i++) {
+      for (let j = i + 1; j < columns.length; j++) {
+        const shared =
+          popcnt32(colM0[i] & colM0[j]) +
+          popcnt32(colM1[i] & colM1[j]) +
+          popcnt32(colM2[i] & colM2[j]);
+        if (shared > maxColumnOverlap) maxColumnOverlap = shared;
+      }
+    }
+  }
+  const minHammingDistance = columns.length >= 2 ? 12 - 2 * maxColumnOverlap : 12;
+
   const presenceValues = Object.values(presence);
   const avgPresence =
     presenceValues.length > 0
@@ -416,7 +621,9 @@ export function computeCoverageMetrics(
     tripletsCoveredCount,
     tripletsTotalInPool,
     averagePresence: Number(avgPresence.toFixed(2)),
-    presenceHistogram: presence
+    presenceHistogram: presence,
+    maxColumnOverlap,
+    minHammingDistance
   };
 }
 

@@ -352,5 +352,42 @@ test('compareSavedPlayAgainstRecentDraws clamps range [10..200], highlights draw
   assert.ok(summary.grossWinnings > 0);
 });
 
+test('runCamelWorkforcePipeline coordinates 5 agents, builds 3 reduced systems with 2-Opt Kempe, and elects a champion', async () => {
+  const { generateFullHistoricalDataset } = await import('../data/seedDraws');
+  const { runCamelWorkforcePipeline } = await import('./camelWorkforce');
+  const full = generateFullHistoricalDataset();
+
+  const filters: FilterOptions = {
+    evenOdd: true,
+    highLow: true,
+    sumRange: true,
+    minSum: 190,
+    maxSum: 350,
+    consecutive: true,
+    decades: true,
+    cadences: true
+  };
+
+  const res = runCamelWorkforcePipeline({
+    draws: full,
+    poolSizeV: 12,
+    budgetEuro: 10,
+    playMode: 'pure_coverage',
+    coverageTarget: 'terni',
+    baseFilters: filters
+  });
+
+  assert.equal(res.agents.length, 5);
+  assert.equal(res.candidates.length, 3);
+  assert.equal(res.winnerCandidate.systemResult.columns.length, 10);
+  assert.ok(res.dialogueTranscript.length >= 5);
+  assert.ok(res.winnerCandidate.camelCompositeScore > 0);
+  assert.ok(
+    (res.winnerCandidate.systemResult.coverageMetrics.maxColumnOverlap ?? 6) <= 4,
+    '2-Opt Kempe + Hamming control should avoid 5-number column collisions for 10 columns on v=12'
+  );
+});
+
+
 
 

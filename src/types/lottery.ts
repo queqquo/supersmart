@@ -69,6 +69,9 @@ export interface SystemGenerationResult {
     tripletsTotalInPool: number;
     averagePresence: number; // e.g. 5.0 for v=12 and 10 columns
     presenceHistogram: Record<number, number>;
+    kempeSwapsApplied?: number;
+    maxColumnOverlap?: number;
+    minHammingDistance?: number;
   };
 }
 

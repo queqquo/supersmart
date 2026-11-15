@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "build:synology": "vite build && npx esbuild server.ts --bundle --platform=node --target=node16 --outfile=server.cjs --external:vite",
     "start": "node server.ts",
+    "start:synology": "NODE_ENV=production node server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"

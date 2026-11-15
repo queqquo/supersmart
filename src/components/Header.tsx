@@ -13,11 +13,12 @@ import {
   ShieldCheck,
   LogOut,
   Users,
-  Dices
+  Dices,
+  Bot
 } from 'lucide-react';
 import { AuthSession, isPrimaryAdmin } from '../utils/auth';
 
-export type NavTab = 'generator' | 'simulation' | 'archive' | 'ledger' | 'stats' | 'admin';
+export type NavTab = 'generator' | 'camel' | 'simulation' | 'archive' | 'ledger' | 'stats' | 'admin';
 
 interface HeaderProps {
   activeTab: NavTab;
@@ -124,6 +125,19 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Sparkles className="w-4 h-4" />
             <span>Generatore Ottimizzato</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onTabChange('camel')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
+              activeTab === 'camel'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'text-indigo-300 hover:text-white hover:bg-slate-900 border border-indigo-500/30'
+            }`}
+          >
+            <Bot className="w-4 h-4" />
+            <span>Agenti CAMEL (Sistemi)</span>
           </button>
 
           <button

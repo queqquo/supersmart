@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Header, NavTab } from './components/Header';
 import { SystemGenerator } from './components/SystemGenerator';
+import { CamelWorkforceLab } from './components/CamelWorkforceLab';
 import { SimulationEngine } from './components/SimulationEngine';
 import { HistoricalArchive } from './components/HistoricalArchive';
 import { PlaysVerification } from './components/PlaysVerification';
@@ -463,6 +464,17 @@ export default function App() {
             onClearSimPreset={() => setAppliedSimPreset(null)}
             coverageTarget={coverageTarget}
             onUpdateCoverageTarget={setCoverageTarget}
+          />
+        )}
+
+        {activeTab === 'camel' && (
+          <CamelWorkforceLab
+            draws={draws}
+            filters={filters}
+            coverageTarget={coverageTarget}
+            onUpdateCoverageTarget={setCoverageTarget}
+            onApplyToGenerator={handleApplySimulationPreset}
+            onSavePlay={handleSavePlay}
           />
         )}
 
