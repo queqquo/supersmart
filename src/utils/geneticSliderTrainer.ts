@@ -63,8 +63,8 @@ export function buildFastColumnsForTriplet(
     if (s.frequencyK > maxFreqK) maxFreqK = s.frequencyK;
   }
 
-  // Score all 90 numbers using S(x) = w1 * Rit(x) + w2 * Freq(x) + w3 * Aff(x)
-  // with a sensitive phase term so each (w1, w2, w3) triplet maps to its own specific subset
+  // Score all 90 numbers using pure statistical formula S(x) = w1 * Rit(x) + w2 * Freq(x) + w3 * Aff(x)
+  // without any artificial cosine phase distortion
   const scored = statsList
     .map((s) => {
       const normFreq = s.frequencyK / maxFreqK;
@@ -72,17 +72,20 @@ export function buildFastColumnsForTriplet(
         w1 * s.normalizedDelay +
         w2 * normFreq +
         w3 * s.affinityScore;
-      const phaseTerm =
-        Math.cos(s.number * (w1 * 3.7 + w2 * 5.3 + w3 * 7.1)) * 0.08;
       return {
         number: s.number,
-        score: baseScore + phaseTerm
+        score: baseScore
       };
     })
     .sort((a, b) => b.score - a.score || a.number - b.number);
 
-  const top18 = scored.slice(0, 18).map((s) => s.number);
-  const top12 = top18.slice(0, 12).sort((a, b) => a - b);
+  // Enforce proportional 1/3 Low (1..31) + 2/3 High (32..90) selection:
+  // Top 4 from [1..31] + Top 8 from [32..90] for top12 (and 6 low + 12 high for top18 stencils)
+  const lowRanked = scored.filter((s) => s.number <= 31).map((s) => s.number);
+  const highRanked = scored.filter((s) => s.number > 31).map((s) => s.number);
+
+  const top12 = [...lowRanked.slice(0, 4), ...highRanked.slice(0, 8)].sort((a, b) => a - b);
+  const top18 = [...lowRanked.slice(0, 6), ...highRanked.slice(0, 12)];
   const superstarPick = scored[0].number;
 
   // Choose 6 stencils from CANDIDATE_STENCILS rotated by triplet signature

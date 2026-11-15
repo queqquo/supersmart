@@ -713,25 +713,25 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
                             <span className="text-slate-400 block">1. Copertura</span>
                             <span className="text-sky-300 font-bold">
-                              {sb.coverageScore} / 35 pt
+                              {sb.coverageScore} / {sb.coverageMax} pt
                             </span>
                           </div>
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                            <span className="text-slate-400 block">2. Anti-Massa</span>
+                            <span className="text-slate-400 block">2. Struttura & Filtri</span>
                             <span className="text-amber-300 font-bold">
-                              {sb.antiCrowdScore} / 25 pt ({cand.antiCrowdScoreMean}x)
+                              {sb.antiCrowdScore} / {sb.antiCrowdMax} pt
                             </span>
                           </div>
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
                             <span className="text-slate-400 block">3. Storico Reale</span>
                             <span className="text-emerald-300 font-bold">
-                              {sb.historicalScore} / 25 pt
+                              {sb.historicalScore} / {sb.historicalMax} pt
                             </span>
                           </div>
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
                             <span className="text-slate-400 block">4. Monte Carlo</span>
                             <span className="text-purple-300 font-bold">
-                              {sb.monteCarloScore} / 15 pt
+                              {sb.monteCarloScore} / {sb.monteCarloMax} pt
                             </span>
                           </div>
                         </div>
@@ -815,7 +815,8 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                         <div className="flex items-center justify-between font-bold">
                           <span className="text-sky-300">1. Copertura Ortogonale</span>
                           <span className="font-mono text-white">
-                            {activeCandidate.scoreBreakdown.coverageScore} / 35 pt
+                            {activeCandidate.scoreBreakdown.coverageScore} /{' '}
+                            {activeCandidate.scoreBreakdown.coverageMax} pt
                           </span>
                         </div>
                         <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -824,7 +825,9 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                             style={{
                               width: `${Math.min(
                                 100,
-                                (activeCandidate.scoreBreakdown.coverageScore / 35) * 100
+                                (activeCandidate.scoreBreakdown.coverageScore /
+                                  activeCandidate.scoreBreakdown.coverageMax) *
+                                  100
                               )}%`
                             }}
                           />
@@ -837,9 +840,10 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                       {/* Pillar 2 */}
                       <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5">
                         <div className="flex items-center justify-between font-bold">
-                          <span className="text-amber-300">2. Anti-Massa & Filtri</span>
+                          <span className="text-amber-300">2. Qualità Filtri & Equilibrio 4+8</span>
                           <span className="font-mono text-white">
-                            {activeCandidate.scoreBreakdown.antiCrowdScore} / 25 pt
+                            {activeCandidate.scoreBreakdown.antiCrowdScore} /{' '}
+                            {activeCandidate.scoreBreakdown.antiCrowdMax} pt
                           </span>
                         </div>
                         <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -848,7 +852,9 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                             style={{
                               width: `${Math.min(
                                 100,
-                                (activeCandidate.scoreBreakdown.antiCrowdScore / 25) * 100
+                                (activeCandidate.scoreBreakdown.antiCrowdScore /
+                                  activeCandidate.scoreBreakdown.antiCrowdMax) *
+                                  100
                               )}%`
                             }}
                           />
@@ -861,9 +867,12 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                       {/* Pillar 3 */}
                       <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5">
                         <div className="flex items-center justify-between font-bold">
-                          <span className="text-emerald-300">3. Backtest Storico (2009–2026)</span>
+                          <span className="text-emerald-300">
+                            3. Vincite Reali su Storico ({workforceResult.historicalDrawsWindow} conc.)
+                          </span>
                           <span className="font-mono text-white">
-                            {activeCandidate.scoreBreakdown.historicalScore} / 25 pt
+                            {activeCandidate.scoreBreakdown.historicalScore} /{' '}
+                            {activeCandidate.scoreBreakdown.historicalMax} pt
                           </span>
                         </div>
                         <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -872,7 +881,9 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                             style={{
                               width: `${Math.min(
                                 100,
-                                (activeCandidate.scoreBreakdown.historicalScore / 25) * 100
+                                (activeCandidate.scoreBreakdown.historicalScore /
+                                  activeCandidate.scoreBreakdown.historicalMax) *
+                                  100
                               )}%`
                             }}
                           />
@@ -887,7 +898,8 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                         <div className="flex items-center justify-between font-bold">
                           <span className="text-purple-300">4. Tenuta Monte Carlo Futura</span>
                           <span className="font-mono text-white">
-                            {activeCandidate.scoreBreakdown.monteCarloScore} / 15 pt
+                            {activeCandidate.scoreBreakdown.monteCarloScore} /{' '}
+                            {activeCandidate.scoreBreakdown.monteCarloMax} pt
                           </span>
                         </div>
                         <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -896,7 +908,9 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                             style={{
                               width: `${Math.min(
                                 100,
-                                (activeCandidate.scoreBreakdown.monteCarloScore / 15) * 100
+                                (activeCandidate.scoreBreakdown.monteCarloScore /
+                                  activeCandidate.scoreBreakdown.monteCarloMax) *
+                                  100
                               )}%`
                             }}
                           />

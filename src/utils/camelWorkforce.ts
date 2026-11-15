@@ -71,17 +71,17 @@ export interface CamelDialogueMessage {
 }
 
 export interface CamelScoreBreakdown {
-  coverageScore: number; // max 35
-  coverageMax: 35;
+  coverageScore: number; // max 40
+  coverageMax: 40;
   coverageDetail: string;
-  antiCrowdScore: number; // max 25
-  antiCrowdMax: 25;
+  antiCrowdScore: number; // max 15
+  antiCrowdMax: 15;
   antiCrowdDetail: string;
-  historicalScore: number; // max 25
-  historicalMax: 25;
+  historicalScore: number; // max 35
+  historicalMax: 35;
   historicalDetail: string;
-  monteCarloScore: number; // max 15
-  monteCarloMax: 15;
+  monteCarloScore: number; // max 10
+  monteCarloMax: 10;
   monteCarloDetail: string;
 }
 
@@ -479,7 +479,19 @@ export function runCamelWorkforcePipeline(params: {
     wFrequency: bestTriplet.w2,
     wAffinity: bestTriplet.w3
   };
-  const statsMap = calculateNumberStatistics(draws, Math.min(36, Math.max(6, clampedWindow)));
+  // Compute statistics on the selected window (for Spia & Frequency) while preserving full archive maxHistoricalDelay
+  const fullArchiveStats = calculateNumberStatistics(draws, 36);
+  const statsMap = calculateNumberStatistics(
+    windowedDraws,
+    Math.min(36, Math.max(1, clampedWindow))
+  );
+  for (let n = 1; n <= 90; n++) {
+    if (fullArchiveStats[n] && statsMap[n]) {
+      statsMap[n].currentDelay = fullArchiveStats[n].currentDelay;
+      statsMap[n].maxHistoricalDelay = fullArchiveStats[n].maxHistoricalDelay;
+      statsMap[n].normalizedDelay = fullArchiveStats[n].normalizedDelay;
+    }
+  }
   const geneticScored = scoreAllNumbers(statsMap, geneticWeights, 36);
   const consensusPool = buildConsensusHybridPool(wfProportionalPool, geneticScored, clampedV);
   const antiCrowdPool = buildAntiCrowdResonancePool(geneticScored, clampedV);
@@ -643,30 +655,31 @@ export function runCamelWorkforcePipeline(params: {
     const actualLowInPool = item.pool.filter((n) => n <= 31).length;
     const actualHighInPool = item.pool.filter((n) => n > 31).length;
 
-    // 4-Pillar Composite score (0..100):
-    // 1. Coverage efficiency (max 35)
+    // 4-Pillar Composite score (0..100) prioritizing real mathematical coverage & historical hits:
+    // 1. Coverage efficiency (max 40)
     const covComponent = Number(
       Math.min(
-        35,
-        primaryCovPct * 0.42 + (coverageTarget === 'terni' ? ambiPct * 0.12 : terniPct * 0.15)
+        40,
+        primaryCovPct * 0.48 + (coverageTarget === 'terni' ? ambiPct * 0.14 : terniPct * 0.18)
       ).toFixed(1)
     );
-    // 2. Proportional Balance (4+8) & Filter Cleanliness (max 25)
+    // 2. Filter Cleanliness & Proportional 4+8 Structure (max 15)
     const antiCrowdComponent = Number(
-      Math.min(25, ((antiCrowdMean - 0.75) / 0.75) * 15 + zeroPenaltyRatio * 10).toFixed(1)
+      Math.min(15, zeroPenaltyRatio * 10 + Math.min(5, (antiCrowdMean - 0.8) * 6)).toFixed(1)
     );
-    // 3. Historical ROI & Real Multi-Point Hits on the selected window (max 25)
+    // 3. Historical ROI & Real Multi-Point Hits (Ambi, Terni, Quaterne, Cinquine) on the selected window (max 35)
     const roiClamped = Math.max(-60, Math.min(120, histBacktest.historicalRoiPct));
+    const hitsBonus =
+      histBacktest.tierCounts.points2 * 0.04 +
+      histBacktest.tierCounts.points3 * 0.45 +
+      histBacktest.tierCounts.points4 * 3.5 +
+      histBacktest.tierCounts.points5 * 10;
     const histComponent = Number(
-      Math.min(
-        25,
-        ((roiClamped + 60) / 180) * 15 +
-          Math.min(10, histBacktest.tierCounts.points3 * 0.25 + histBacktest.tierCounts.points4 * 2.5)
-      ).toFixed(1)
+      Math.min(35, ((roiClamped + 60) / 180) * 18 + Math.min(17, hitsBonus)).toFixed(1)
     );
-    // 4. Monte Carlo Bayesian Urn Resilience (max 15)
+    // 4. Monte Carlo Bayesian Urn Resilience (max 10)
     const mcNet = mcSim.weeklySystemPnL.meanSingleDrawNetPerSestina;
-    const mcComponent = Number(Math.max(0, Math.min(15, (mcNet + 1.0) * 8)).toFixed(1));
+    const mcComponent = Number(Math.max(0, Math.min(10, (mcNet + 1.0) * 5.5)).toFixed(1));
 
     const camelCompositeScore = Number(
       Math.min(
@@ -677,24 +690,26 @@ export function runCamelWorkforcePipeline(params: {
 
     const scoreBreakdown: CamelScoreBreakdown = {
       coverageScore: covComponent,
-      coverageMax: 35,
+      coverageMax: 40,
       coverageDetail: `${covMetrics.tripletsCoveredCount}/${covMetrics.tripletsTotalInPool} terni (${Math.round(
         terniPct
       )}%) • ${covMetrics.pairsCoveredCount}/${covMetrics.pairsTotalInPool} ambi (${Math.round(
         ambiPct
       )}%)`,
       antiCrowdScore: antiCrowdComponent,
-      antiCrowdMax: 25,
-      antiCrowdDetail: `Split ${actualLowInPool} bassi + ${actualHighInPool} alti (${antiCrowdMean.toFixed(
-        2
-      )}x) • ${Math.round(zeroPenaltyRatio * 100)}% sestine 0-penalità`,
+      antiCrowdMax: 15,
+      antiCrowdDetail: `Split ${actualLowInPool} bassi + ${actualHighInPool} alti • ${Math.round(
+        zeroPenaltyRatio * 100
+      )}% sestine 0-penalità`,
       historicalScore: histComponent,
-      historicalMax: 25,
-      historicalDetail: `Su ${clampedWindow} conc.: ${histBacktest.tierCounts.points3} terni, ${
+      historicalMax: 35,
+      historicalDetail: `Su ${clampedWindow} conc.: ${histBacktest.tierCounts.points2} ambi, ${
+        histBacktest.tierCounts.points3
+      } terni, ${
         histBacktest.tierCounts.points4
-      } quat. • Incasso ${histBacktest.totalEstimatedGrossWinnings.toLocaleString('it-IT')}€`,
+      } quat. • ${histBacktest.totalEstimatedGrossWinnings.toLocaleString('it-IT')}€`,
       monteCarloScore: mcComponent,
-      monteCarloMax: 15,
+      monteCarloMax: 10,
       monteCarloDetail: `Urna Bayesiana 500 conc.: media ${mcNet >= 0 ? '+' : ''}${mcNet.toFixed(
         2
       )}€/sestina`

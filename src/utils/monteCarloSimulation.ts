@@ -126,12 +126,9 @@ export function computeAntiCrowdMultiplier(compactDraws: Uint8Array, offset: num
     mult -= (maxInSameCadence - 2) * 0.08;
   }
 
-  // Penalize consecutive pairs and triplets (heavily played by the crowd)
-  if (consecutivePairs > 0) {
-    mult -= consecutivePairs * 0.08;
-  }
+  // Penalize only 3+ consecutive runs (since a single pair of consecutive numbers occurs in ~31% of real draws)
   if (maxConsecutiveRun >= 3) {
-    mult -= 0.10;
+    mult -= 0.14;
   }
   if (highBeyond31 <= 1) {
     mult -= 0.08;
