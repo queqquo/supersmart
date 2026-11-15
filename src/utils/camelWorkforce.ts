@@ -126,6 +126,10 @@ export interface CamelWorkforceResult {
   executedAt: string;
   totalExecutionTimeMs: number;
   poolSizeV: number;
+  historicalDrawsWindow: number;
+  maxHistoricalDraws: number;
+  lowNumbersCount: number;
+  highNumbersCount: number;
   budgetEuro: number;
   playMode: PlayMode;
   coverageTarget: CoverageTarget;
@@ -187,50 +191,79 @@ export const CAMEL_AGENTS_ROSTER: CamelAgentProfile[] = [
 ];
 
 /**
- * Helper: Build a high-dispersion "Anti-Crowd + High Resonance" pool of size V
- * that favors numbers > 31 (less played by the crowd -> higher expected payout in parimutuel tiers)
- * while maintaining strong composite score S(x).
+ * Helper: Select a proportional Low/High pool of size V from an honest statistical ranking:
+ * - Takes the top `Math.round(V / 3)` strongest numbers in [1..31] (4 numbers when V=12)
+ * - Takes the top `V - Math.round(V / 3)` strongest numbers in [32..90] (8 numbers when V=12)
+ * Never adds artificial score bonuses to numbers > 31, while respecting decade and cadence caps.
+ */
+export function selectProportionalLowHighPool(
+  rankedNumbers: number[],
+  poolSizeV: number,
+  maxPerDecade: number = 2,
+  maxPerCadence: number = 2
+): number[] {
+  const targetLowCount = Math.round(poolSizeV / 3); // 4 when V=12
+  const targetHighCount = poolSizeV - targetLowCount; // 8 when V=12
+
+  const decCounts = new Uint8Array(10);
+  const cadCounts = new Uint8Array(10);
+  const pickedSet = new Set<number>();
+
+  const pickZone = (minBall: number, maxBall: number, targetCount: number) => {
+    let count = 0;
+    // Pass 1: Respect decade and cadence dispersion caps
+    for (const num of rankedNumbers) {
+      if (count >= targetCount) break;
+      if (num < minBall || num > maxBall || pickedSet.has(num)) continue;
+      const dec = num >= 90 ? 9 : (num / 10) | 0;
+      const cad = num % 10;
+      if (decCounts[dec] >= maxPerDecade || cadCounts[cad] >= maxPerCadence) continue;
+      pickedSet.add(num);
+      decCounts[dec]++;
+      cadCounts[cad]++;
+      count++;
+    }
+    // Pass 2: Fallback to pure statistical rank within this zone if cap was reached
+    for (const num of rankedNumbers) {
+      if (count >= targetCount) break;
+      if (num < minBall || num > maxBall || pickedSet.has(num)) continue;
+      pickedSet.add(num);
+      const dec = num >= 90 ? 9 : (num / 10) | 0;
+      const cad = num % 10;
+      decCounts[dec]++;
+      cadCounts[cad]++;
+      count++;
+    }
+  };
+
+  // 1. Pick the 4 strongest numbers from 1..31 (for V=12)
+  pickZone(1, 31, targetLowCount);
+  // 2. Pick the 8 strongest numbers from 32..90 (for V=12)
+  pickZone(32, 90, targetHighCount);
+
+  return Array.from(pickedSet).sort((a, b) => a - b);
+}
+
+/**
+ * Helper: Build a high-dispersion Genetic Pool of size V using pure statistical scores S(x)
+ * without falsifying >31 scores: takes the 4 strongest in 1..31 + 8 strongest in 32..90 (for V=12)
+ * with ultra-wide decade dispersion (max 1 per decade on first pass, max 2 per cadence).
  */
 function buildAntiCrowdResonancePool(
   scoredNumbers: ReturnType<typeof scoreAllNumbers>,
   poolSizeV: number
 ): number[] {
-  const candidates = scoredNumbers.map((s) => {
-    const antiBirthdayBonus = s.number > 31 ? 0.14 : -0.04;
-    return {
-      number: s.number,
-      adjustedScore: s.compositeScore + antiBirthdayBonus
-    };
-  });
-  candidates.sort((a, b) => b.adjustedScore - a.adjustedScore);
+  // Pure statistical ranking by compositeScore (zero artificial bonus on >31)
+  const pureRankedNumbers = [...scoredNumbers]
+    .sort((a, b) => b.compositeScore - a.compositeScore || a.number - b.number)
+    .map((s) => s.number);
 
-  const decCounts = new Uint8Array(10);
-  const cadCounts = new Uint8Array(10);
-  const maxPerBucket = poolSizeV <= 13 ? 2 : 3;
-  const pool: number[] = [];
-
-  for (const cand of candidates) {
-    if (pool.length >= poolSizeV) break;
-    const dec = cand.number >= 90 ? 9 : (cand.number / 10) | 0;
-    const cad = cand.number % 10;
-    if (decCounts[dec] >= maxPerBucket || cadCounts[cad] >= maxPerBucket) continue;
-    pool.push(cand.number);
-    decCounts[dec]++;
-    cadCounts[cad]++;
-  }
-
-  for (const cand of candidates) {
-    if (pool.length >= poolSizeV) break;
-    if (!pool.includes(cand.number)) {
-      pool.push(cand.number);
-    }
-  }
-
-  return pool.sort((a, b) => a - b);
+  return selectProportionalLowHighPool(pureRankedNumbers, poolSizeV, 1, 2);
 }
 
 /**
- * Helper: Build a Consensus Hybrid Pool combining Walk-Forward Pool and Genetic Top Numbers
+ * Helper: Build a Consensus Hybrid Pool combining Walk-Forward Pool and Genetic Top Numbers,
+ * strictly selecting the 4 strongest in 1..31 and 8 strongest in 32..90 (when V=12) without >31 bias.
  */
 function buildConsensusHybridPool(
   wfPool: number[],
@@ -244,37 +277,18 @@ function buildConsensusHybridPool(
     rankMap.set(n, (poolSizeV - idx) * 1.45);
   });
 
-  geneticScored.slice(0, 22).forEach((s, idx) => {
+  geneticScored.forEach((s, idx) => {
     const prev = rankMap.get(s.number) || 0;
-    const bonus = wfSet.has(s.number) ? 4.0 : 0;
-    rankMap.set(s.number, prev + (22 - idx) * 1.1 + bonus);
+    const convergenceBonus = wfSet.has(s.number) ? 6.0 : 0;
+    rankMap.set(s.number, prev + (90 - idx) * 0.35 + convergenceBonus);
   });
 
-  const merged = Array.from(rankMap.entries())
+  const mergedRanked = Array.from(rankMap.entries())
     .sort((a, b) => b[1] - a[1])
     .map((e) => e[0]);
 
-  const decCounts = new Uint8Array(10);
-  const cadCounts = new Uint8Array(10);
   const maxPerBucket = poolSizeV <= 13 ? 2 : 3;
-  const selected: number[] = [];
-
-  for (const num of merged) {
-    if (selected.length >= poolSizeV) break;
-    const dec = num >= 90 ? 9 : (num / 10) | 0;
-    const cad = num % 10;
-    if (decCounts[dec] >= maxPerBucket || cadCounts[cad] >= maxPerBucket) continue;
-    selected.push(num);
-    decCounts[dec]++;
-    cadCounts[cad]++;
-  }
-
-  for (const num of merged) {
-    if (selected.length >= poolSizeV) break;
-    if (!selected.includes(num)) selected.push(num);
-  }
-
-  return selected.sort((a, b) => a - b);
+  return selectProportionalLowHighPool(mergedRanked, poolSizeV, maxPerBucket, maxPerBucket);
 }
 
 /**
@@ -286,7 +300,8 @@ function buildPoolNumberReasons(
   weightsUsed: ScoringWeights,
   wfPoolSet: Set<number>,
   geneticTopSet: Set<number>,
-  strategyId: string
+  strategyId: string,
+  historicalDrawsWindow: number
 ): CamelPoolNumberReason[] {
   const scoredForWeights = scoreAllNumbers(statsMap, weightsUsed, 36);
   const scoreMap = new Map<number, NumberStat>();
@@ -296,6 +311,10 @@ function buildPoolNumberReasons(
     if (s.frequencyK > maxFreqK) maxFreqK = s.frequencyK;
   }
 
+  // Rank within low [1..31] and high [32..90] inside the selected pool
+  const lowInPool = poolNumbers.filter((n) => n <= 31);
+  const highInPool = poolNumbers.filter((n) => n > 31);
+
   return poolNumbers.map((num) => {
     const st = scoreMap.get(num) || statsMap[num];
     const inWalkForward = wfPoolSet.has(num);
@@ -304,44 +323,41 @@ function buildPoolNumberReasons(
     const normFreq = st ? st.frequencyK / maxFreqK : 0;
     const normDel = st ? st.normalizedDelay : 0;
     const normAff = st ? st.affinityScore : 0;
+    const zoneLabel = isAntiCrowdHigh
+      ? `Top ${highInPool.length} Fascia 32–90`
+      : `Top ${lowInPool.length} Fascia 1–31`;
 
-    let primaryTag = 'Bilanciamento Pool';
-    let tagColor: CamelPoolNumberReason['tagColor'] = 'sky';
+    let primaryTag = `${zoneLabel} • Bilanciato`;
+    let tagColor: CamelPoolNumberReason['tagColor'] = isAntiCrowdHigh ? 'amber' : 'sky';
 
     if (inWalkForward && inGeneticTop) {
-      primaryTag = 'Convergenza WF + Genetico';
+      primaryTag = `${zoneLabel} • WF + Genetico`;
       tagColor = 'emerald';
-    } else if (strategyId === 'cand-anticrowd' && isAntiCrowdHigh && (normFreq >= 0.6 || normAff >= 0.6)) {
-      primaryTag = 'Anti-Massa (>31) + Spia';
-      tagColor = 'amber';
     } else if (normFreq >= 0.72) {
-      primaryTag = `Caldo (${st.frequencyK} uscite/36)`;
+      primaryTag = `${zoneLabel} • Caldo (${st.frequencyK} uscite)`;
       tagColor = 'sky';
     } else if (normAff >= 0.72) {
-      primaryTag = `Affinità Spia (${Math.round(normAff * 100)}%)`;
+      primaryTag = `${zoneLabel} • Spia (${Math.round(normAff * 100)}%)`;
       tagColor = 'purple';
     } else if (normDel >= 0.65) {
-      primaryTag = `Ritardatario (${st.currentDelay}/${st.maxHistoricalDelay})`;
+      primaryTag = `${zoneLabel} • Ritardo (${st.currentDelay}/${st.maxHistoricalDelay})`;
       tagColor = 'rose';
-    } else if (isAntiCrowdHigh) {
-      primaryTag = 'Dispersione Anti-Massa (>31)';
+    } else if (strategyId === 'cand-anticrowd') {
+      primaryTag = `${zoneLabel} • Dispersione Decine`;
       tagColor = 'amber';
     }
 
-    const parts: string[] = [];
+    const parts: string[] = [zoneLabel];
     if (inWalkForward && inGeneticTop) {
-      parts.push('Scelto sia dal Walk-Forward (40 estrazioni) sia dal Genetista (17 anni)');
+      parts.push(`Forte sia nel Walk-Forward (${historicalDrawsWindow} conc.) sia nel Genetista`);
     } else if (inWalkForward) {
-      parts.push('Selezionato dalla validazione Walk-Forward (ultime 40 estrazioni)');
+      parts.push(`Selezionato dal Walk-Forward (${historicalDrawsWindow} estrazioni)`);
     } else if (inGeneticTop) {
-      parts.push('Top ranking del Genetista Storico (2.946 estrazioni)');
+      parts.push(`Top classifica pura del Genetista (${historicalDrawsWindow} estrazioni)`);
     }
     parts.push(`Freq(36): ${st?.frequencyK ?? 0} uscite`);
     parts.push(`Ritardo: ${st?.currentDelay ?? 0}/${st?.maxHistoricalDelay ?? 1} conc.`);
     parts.push(`Spia: ${Math.round((st?.affinityScore ?? 0) * 100)}%`);
-    if (isAntiCrowdHigh) {
-      parts.push('Quota alta (>31 fuori date)');
-    }
 
     return {
       number: num,
@@ -367,6 +383,7 @@ function buildPoolNumberReasons(
 export function runCamelWorkforcePipeline(params: {
   draws: Draw[];
   poolSizeV: number;
+  historicalDrawsWindow?: number;
   budgetEuro: number;
   playMode: PlayMode;
   coverageTarget: CoverageTarget;
@@ -374,9 +391,21 @@ export function runCamelWorkforcePipeline(params: {
 }): CamelWorkforceResult {
   const tStart = performance.now();
   const { draws, poolSizeV, budgetEuro, playMode, coverageTarget, baseFilters } = params;
+  const maxHistoricalDraws = Math.max(1, draws.length);
+  const clampedWindow = Math.min(
+    maxHistoricalDraws,
+    Math.max(1, Math.round(params.historicalDrawsWindow ?? 200))
+  );
   const clampedV = Math.min(15, Math.max(10, Math.round(poolSizeV || 12)));
+  const lowTargetCount = Math.round(clampedV / 3); // 4 when V=12
+  const highTargetCount = clampedV - lowTargetCount; // 8 when V=12
+
   const budgetAlloc = calculateBudgetSystemAllocation(budgetEuro, playMode);
   const targetCols = budgetAlloc.targetColumnsCount;
+
+  // Sort draws newest-first to slice the exact N historical draws requested by the user
+  const sortedNewestDraws = [...draws].sort((a, b) => b.date.localeCompare(a.date));
+  const windowedDraws = sortedNewestDraws.slice(0, clampedWindow);
 
   const dialogueTranscript: CamelDialogueMessage[] = [];
   let stepCounter = 1;
@@ -392,15 +421,20 @@ export function runCamelWorkforcePipeline(params: {
       coverageTarget === 'terni' ? '3' : '2'
     }, ${targetCols}) per budget ${budgetAlloc.actualCost.toFixed(2)}€ (${targetCols} sestine, modalità ${
       playMode === 'superstar' ? 'SuperStar' : 'Copertura Pura'
-    }). @Scout Walk-Forward: avvia l'analisi rolling senza data-leakage sull'archivio di ${
-      draws.length
-    } concorsi.`,
-    metricsBadge: `Target: C(${clampedV}, 6, ${coverageTarget === 'terni' ? 3 : 2}, ${targetCols})`
+    }). Regola Pool Proporzionale attiva: ${lowTargetCount} numeri più forti in fascia 1–31 + ${highTargetCount} numeri più forti in fascia 32–90 (senza bonus artificiali). @Scout Walk-Forward: avvia l'analisi sulle ultime ${clampedWindow} estrazioni storiche (su ${maxHistoricalDraws} disponibili).`,
+    metricsBadge: `Finestra: ${clampedWindow}/${maxHistoricalDraws} conc. • Split ${lowTargetCount}+${highTargetCount}`
   });
 
-  // --- STEP 2: Walk-Forward Scout runs rolling window validation ---
+  // --- STEP 2: Walk-Forward Scout runs rolling window validation on clampedWindow draws ---
   const tWf0 = performance.now();
-  const wfRes40 = generateSmartPoolRecommendation(draws, clampedV, 40);
+  const wfRes = generateSmartPoolRecommendation(draws, clampedV, clampedWindow);
+  // Ensure strict proportional split (4 low + 8 high for V=12) on the Walk-Forward pool
+  const wfProportionalPool = selectProportionalLowHighPool(
+    wfRes.recommendedPool,
+    clampedV,
+    clampedV <= 13 ? 2 : 3,
+    clampedV <= 13 ? 2 : 3
+  );
   const wfMs = Math.max(1, Math.round(performance.now() - tWf0));
 
   dialogueTranscript.push({
@@ -409,32 +443,34 @@ export function runCamelWorkforcePipeline(params: {
     senderId: 'walk_forward_scout',
     receiverId: 'genetic_strategist',
     phase: 'exploration',
-    content: `Ho testato 6 vettori a 5 fattori in validazione Walk-Forward (finestra 40 estrazioni). La strategia dominante è "${
-      wfRes40.bestStrategy.label
-    }" con ${wfRes40.bestStrategy.terniHitCount} terni e ${
-      wfRes40.bestStrategy.ambiHitCount
-    } ambi colpiti out-of-sample. Propongo il Pool Walk-Forward [${wfRes40.recommendedPool.join(
+    content: `Ho testato 6 vettori statistici puri in validazione Walk-Forward su ${
+      wfRes.walkForwardWindowSize
+    } estrazioni storiche (zero bonus artificiali >31). La strategia dominante è "${
+      wfRes.bestStrategy.label
+    }" con ${wfRes.bestStrategy.terniHitCount} terni e ${
+      wfRes.bestStrategy.ambiHitCount
+    } ambi colpiti out-of-sample. Ho estratto i ${lowTargetCount} migliori in [1–31] e gli ${highTargetCount} migliori in [32–90]: Pool [${wfProportionalPool.join(
       ', '
-    )}] e passo la parola al @Genetista Storico.`,
+    )}]. Passo al @Genetista Storico.`,
     toolCall: {
       toolName: 'generateSmartPoolRecommendation',
       executionMs: wfMs,
-      inputSummary: `draws=${draws.length}, poolSize=${clampedV}, window=40`,
-      outputSummary: `Best="${wfRes40.bestStrategy.id}", Score=${wfRes40.bestStrategy.compositeYieldScore.toFixed(
+      inputSummary: `draws=${draws.length}, poolSize=${clampedV} (${lowTargetCount} bassi + ${highTargetCount} alti), window=${clampedWindow}`,
+      outputSummary: `Best="${wfRes.bestStrategy.id}", Score=${wfRes.bestStrategy.compositeYieldScore.toFixed(
         1
-      )}, Pool=[${wfRes40.recommendedPool.join(',')}]`
+      )}, Pool=[${wfProportionalPool.join(',')}]`
     },
-    metricsBadge: `Walk-Forward: ${wfRes40.bestStrategy.terniHitCount} Terni / ${wfRes40.bestStrategy.ambiHitCount} Ambi`
+    metricsBadge: `WF (${clampedWindow} conc.): ${wfRes.bestStrategy.terniHitCount} Terni / ${wfRes.bestStrategy.ambiHitCount} Ambi`
   });
 
-  // --- STEP 3: Genetic Strategist runs bitmask evolutionary training on full archive ---
+  // --- STEP 3: Genetic Strategist runs bitmask evolutionary training on the selected window ---
   const tGen0 = performance.now();
   const evoRes = runEvolutionarySliderTraining(
-    draws,
+    sortedNewestDraws,
     16,
-    draws.length,
+    clampedWindow,
     6,
-    202605 + clampedV,
+    202605 + clampedV + clampedWindow,
     'historical_benchmark_surplus'
   );
   const bestTriplet = evoRes.bestOverallTriplet;
@@ -443,14 +479,14 @@ export function runCamelWorkforcePipeline(params: {
     wFrequency: bestTriplet.w2,
     wAffinity: bestTriplet.w3
   };
-  const statsMap = calculateNumberStatistics(draws, 36);
+  const statsMap = calculateNumberStatistics(draws, Math.min(36, Math.max(6, clampedWindow)));
   const geneticScored = scoreAllNumbers(statsMap, geneticWeights, 36);
-  const consensusPool = buildConsensusHybridPool(wfRes40.recommendedPool, geneticScored, clampedV);
+  const consensusPool = buildConsensusHybridPool(wfProportionalPool, geneticScored, clampedV);
   const antiCrowdPool = buildAntiCrowdResonancePool(geneticScored, clampedV);
   const genMs = Math.max(1, Math.round(performance.now() - tGen0));
 
-  const wfPoolSet = new Set(wfRes40.recommendedPool);
-  const geneticTopSet = new Set(geneticScored.slice(0, clampedV + 3).map((s) => s.number));
+  const wfPoolSet = new Set(wfProportionalPool);
+  const geneticTopSet = new Set(geneticScored.slice(0, clampedV + 6).map((s) => s.number));
 
   dialogueTranscript.push({
     id: `msg-${stepCounter}`,
@@ -460,21 +496,23 @@ export function runCamelWorkforcePipeline(params: {
     phase: 'exploration',
     content: `Ho addestrato 6 generazioni genetiche su ${
       evoRes.n2TrainingDraws
-    } concorsi ufficiali con bitmask a 32-bit. La migliore tripletta è (w₁=${bestTriplet.w1.toFixed(
+    } concorsi ufficiali tramite bitmask a 32-bit. La migliore tripletta è (w₁=${bestTriplet.w1.toFixed(
       2
     )}, w₂=${bestTriplet.w2.toFixed(2)}, w₃=${bestTriplet.w3.toFixed(
       2
     )}) con vincita lorda storica di ${(
       bestTriplet.rawHistoricalGrossWin ?? bestTriplet.totalGrossGain
-    ).toLocaleString('it-IT')}€. Ho sintetizzato il Pool Consensus Ibrido [${consensusPool.join(
+    ).toLocaleString(
+      'it-IT'
+    )}€. Rispettando la regola onesta (${lowTargetCount} più forti 1–31 + ${highTargetCount} più forti 32–90), ho generato il Pool Consensus [${consensusPool.join(
       ', '
-    )}] e il Pool Anti-Massa High-Payout [${antiCrowdPool.join(
+    )}] e il Pool Genetico Puro Dispersione [${antiCrowdPool.join(
       ', '
     )}]. @Architetto Ortogonale: procedi con la riduzione 2-Opt Kempe.`,
     toolCall: {
       toolName: 'runEvolutionarySliderTraining',
       executionMs: genMs,
-      inputSummary: `n1=16, draws=${draws.length}, generations=6, mode=surplus`,
+      inputSummary: `n1=16, windowDraws=${clampedWindow}, generations=6, split=${lowTargetCount}+${highTargetCount}`,
       outputSummary: `w1=${bestTriplet.w1.toFixed(2)}, w2=${bestTriplet.w2.toFixed(
         2
       )}, w3=${bestTriplet.w3.toFixed(2)} -> Consensus=[${consensusPool.join(',')}]`
@@ -509,27 +547,24 @@ export function runCamelWorkforcePipeline(params: {
   }> = [
     {
       id: 'cand-wf',
-      strategyName: 'Strategia A — Walk-Forward Out-of-Sample',
-      strategyOriginDescription:
-        'Numeri estratti simulando alla cieca le ultime 40 estrazioni reali (finestra mobile) con la formula a 5 fattori che ha realizzato più terni e ambi recenti (max 2 per decina/cadenza).',
+      strategyName: `Strategia A — Walk-Forward (${clampedWindow} Estrazioni, ${lowTargetCount} Bassi + ${highTargetCount} Alti)`,
+      strategyOriginDescription: `Prende i ${lowTargetCount} numeri più forti in fascia 1–31 e gli ${highTargetCount} numeri più forti in fascia 32–90 validati sulle ultime ${clampedWindow} estrazioni reali (senza bonus artificiali ai numeri >31).`,
       proposedByAgent: 'walk_forward_scout',
-      pool: wfRes40.recommendedPool,
-      weights: wfRes40.mappedScoringWeights
+      pool: wfProportionalPool,
+      weights: wfRes.mappedScoringWeights
     },
     {
       id: 'cand-consensus',
-      strategyName: 'Strategia B — Consensus Ibrido (Walk-Forward + Genetico)',
-      strategyOriginDescription:
-        'Incrocio tra i migliori numeri del Walk-Forward (breve periodo, 40 concorsi) e i migliori dell\'Algoritmo Genetico (lungo periodo, 2.946 concorsi 2009–2026): premia i numeri forti in entrambe le classifiche.',
+      strategyName: `Strategia B — Consensus Ibrido WF + Genetico (${lowTargetCount} Bassi + ${highTargetCount} Alti)`,
+      strategyOriginDescription: `Unisce la classifica Walk-Forward (${clampedWindow} estrazioni) e la classifica dell'Algoritmo Genetico, estraendo onestamente i ${lowTargetCount} migliori in [1–31] e gli ${highTargetCount} migliori in [32–90].`,
       proposedByAgent: 'genetic_strategist',
       pool: consensusPool,
       weights: geneticWeights
     },
     {
       id: 'cand-anticrowd',
-      strategyName: 'Strategia C — Ortogonale Anti-Massa High-Payout (>31)',
-      strategyOriginDescription:
-        'Parte dalla classifica genetica ma penalizza i numeri 1–31 (date di nascita giocate dalla massa) e premia i numeri 32–90 ben dispersi per massimizzare le quote in caso di vincita.',
+      strategyName: `Strategia C — Genetico Puro & Dispersione Decine (${lowTargetCount} Bassi + ${highTargetCount} Alti)`,
+      strategyOriginDescription: `Usa la classifica genetica pura (w₁, w₂, w₃ su ${clampedWindow} concorsi, zero punti finti ai >31) e seleziona i ${lowTargetCount} più forti in [1–31] e gli ${highTargetCount} più forti in [32–90] con massima dispersione tra le decine.`,
       proposedByAgent: 'anti_crowd_critic',
       pool: antiCrowdPool,
       weights: geneticWeights
@@ -554,7 +589,7 @@ export function runCamelWorkforcePipeline(params: {
     senderId: 'orthogonal_architect',
     receiverId: 'anti_crowd_critic',
     phase: 'reduction',
-    content: `Ho generato i 3 sistemi ridotti da ${targetCols} sestine ciascuno applicando Greedy Set Cover + 2-Opt Kempe-Swap Local Search e vincolo di sovrapposizione Hamming. La copertura terni raggiunge fino a ${
+    content: `Ho generato i 3 sistemi ridotti da ${targetCols} sestine ciascuno (tutti con proporzione ${lowTargetCount} numeri 1–31 e ${highTargetCount} numeri 32–90) applicando Greedy Set Cover + 2-Opt Kempe-Swap Local Search. La copertura terni raggiunge ${
       builtSystems[1].sys.coverageMetrics.tripletsCoveredCount
     }/${builtSystems[1].sys.coverageMetrics.tripletsTotalInPool} (${Math.round(
       (builtSystems[1].sys.coverageMetrics.tripletsCoveredCount /
@@ -562,11 +597,11 @@ export function runCamelWorkforcePipeline(params: {
         100
     )}%) e ambi ${builtSystems[1].sys.coverageMetrics.pairsCoveredCount}/${
       builtSystems[1].sys.coverageMetrics.pairsTotalInPool
-    }. @Critico Anti-Massa: esegui l'audit su Storico Reale e Monte Carlo.`,
+    }. @Critico Anti-Massa: esegui l'audit sulle ${clampedWindow} estrazioni storiche e Monte Carlo.`,
     toolCall: {
       toolName: 'generateOptimizedSystem (Greedy + 2-Opt Kempe)',
       executionMs: archMs,
-      inputSummary: `3 pools of v=${clampedV}, targetCols=${targetCols}, target=${coverageTarget}`,
+      inputSummary: `3 pools of v=${clampedV} (${lowTargetCount}+${highTargetCount}), targetCols=${targetCols}, target=${coverageTarget}`,
       outputSummary: `Generated 3 orthogonal matrices; maxOverlap=${
         builtSystems[1].sys.coverageMetrics.maxColumnOverlap ?? 3
       }, minHamming=${builtSystems[1].sys.coverageMetrics.minHammingDistance ?? 6}`
@@ -574,7 +609,7 @@ export function runCamelWorkforcePipeline(params: {
     metricsBadge: `2-Opt Kempe: ${builtSystems[1].sys.coverageMetrics.tripletsCoveredCount} Terni Coperti`
   });
 
-  // --- STEP 5: Anti-Crowd Critic audits all 3 systems on Historical Archive & Monte Carlo ---
+  // --- STEP 5: Anti-Crowd Critic audits all 3 systems on the selected Historical Window & Monte Carlo ---
   const tCrit0 = performance.now();
   const evaluatedCandidates: CamelSystemCandidate[] = builtSystems.map((item, idx) => {
     const cols = item.sys.columns;
@@ -588,7 +623,7 @@ export function runCamelWorkforcePipeline(params: {
     }
     const zeroPenaltyRatio = zeroPenCount / Math.max(1, cols.length);
 
-    const histBacktest = runHistoricalRealBacktest(cols, draws);
+    const histBacktest = runHistoricalRealBacktest(cols, windowedDraws);
     const mcSim = runNext100DrawsSimulation(
       draws,
       cols,
@@ -605,6 +640,9 @@ export function runCamelWorkforcePipeline(params: {
       (covMetrics.pairsCoveredCount / Math.max(1, covMetrics.pairsTotalInPool)) * 100;
     const primaryCovPct = coverageTarget === 'terni' ? terniPct : ambiPct;
 
+    const actualLowInPool = item.pool.filter((n) => n <= 31).length;
+    const actualHighInPool = item.pool.filter((n) => n > 31).length;
+
     // 4-Pillar Composite score (0..100):
     // 1. Coverage efficiency (max 35)
     const covComponent = Number(
@@ -613,11 +651,11 @@ export function runCamelWorkforcePipeline(params: {
         primaryCovPct * 0.42 + (coverageTarget === 'terni' ? ambiPct * 0.12 : terniPct * 0.15)
       ).toFixed(1)
     );
-    // 2. Anti-Crowd & Filter Cleanliness (max 25)
+    // 2. Proportional Balance (4+8) & Filter Cleanliness (max 25)
     const antiCrowdComponent = Number(
       Math.min(25, ((antiCrowdMean - 0.75) / 0.75) * 15 + zeroPenaltyRatio * 10).toFixed(1)
     );
-    // 3. Historical ROI & Real Multi-Point Hits (max 25)
+    // 3. Historical ROI & Real Multi-Point Hits on the selected window (max 25)
     const roiClamped = Math.max(-60, Math.min(120, histBacktest.historicalRoiPct));
     const histComponent = Number(
       Math.min(
@@ -647,14 +685,14 @@ export function runCamelWorkforcePipeline(params: {
       )}%)`,
       antiCrowdScore: antiCrowdComponent,
       antiCrowdMax: 25,
-      antiCrowdDetail: `Moltiplicatore quote ${antiCrowdMean.toFixed(2)}x • ${Math.round(
-        zeroPenaltyRatio * 100
-      )}% sestine 0-penalità`,
+      antiCrowdDetail: `Split ${actualLowInPool} bassi + ${actualHighInPool} alti (${antiCrowdMean.toFixed(
+        2
+      )}x) • ${Math.round(zeroPenaltyRatio * 100)}% sestine 0-penalità`,
       historicalScore: histComponent,
       historicalMax: 25,
-      historicalDetail: `${histBacktest.tierCounts.points3} terni, ${
+      historicalDetail: `Su ${clampedWindow} conc.: ${histBacktest.tierCounts.points3} terni, ${
         histBacktest.tierCounts.points4
-      } quaterne • Incasso ${histBacktest.totalEstimatedGrossWinnings.toLocaleString('it-IT')}€`,
+      } quat. • Incasso ${histBacktest.totalEstimatedGrossWinnings.toLocaleString('it-IT')}€`,
       monteCarloScore: mcComponent,
       monteCarloMax: 15,
       monteCarloDetail: `Urna Bayesiana 500 conc.: media ${mcNet >= 0 ? '+' : ''}${mcNet.toFixed(
@@ -668,15 +706,16 @@ export function runCamelWorkforcePipeline(params: {
       item.weights,
       wfPoolSet,
       geneticTopSet,
-      item.id
+      item.id,
+      clampedWindow
     );
 
     const verdict =
       camelCompositeScore >= 78
-        ? 'ECCELLENTE — Copertura ortogonale ottimale, zero penalità filtri e alto moltiplicatore Anti-Massa.'
+        ? `ECCELLENTE — Proporzione ${actualLowInPool}+${actualHighInPool} rispettata, zero penalità filtri e ottima resa sulle ${clampedWindow} estrazioni.`
         : camelCompositeScore >= 68
-        ? 'SOLIDO — Buon bilanciamento tra copertura matematica e tenuta sullo storico.'
-        : 'STANDARD — Copertura valida ma minore dispersione Anti-Massa.';
+        ? `SOLIDO — Bilanciamento ${actualLowInPool}+${actualHighInPool} e buona copertura matematica.`
+        : `STANDARD — Copertura valida su ${clampedWindow} estrazioni.`;
 
     return {
       id: item.id,
@@ -709,24 +748,24 @@ export function runCamelWorkforcePipeline(params: {
     senderId: 'anti_crowd_critic',
     receiverId: 'coordinator',
     phase: 'critique_refinement',
-    content: `Audit completato sui 3 sistemi ridotti (${draws.length} estrazioni reali + 500 simulazioni Monte Carlo Bayesiane). Il sistema migliore è "${
+    content: `Audit completato sui 3 sistemi ridotti (${clampedWindow} estrazioni storiche esaminate + 500 simulazioni Monte Carlo Bayesiane). Il sistema migliore è "${
       winnerCandidate.strategyName
-    }" con CAMEL Score ${winnerCandidate.camelCompositeScore}/100: moltiplicatore Anti-Massa ${
-      winnerCandidate.antiCrowdScoreMean
-    }x, ${Math.round(winnerCandidate.zeroPenaltyColumnsRatio * 100)}% sestine a penalità zero, ${
+    }" con CAMEL Score ${winnerCandidate.camelCompositeScore}/100: proporzione ${lowTargetCount} bassi (1–31) + ${highTargetCount} alti (32–90), ${Math.round(
+      winnerCandidate.zeroPenaltyColumnsRatio * 100
+    )}% sestine a penalità zero, ${
       winnerCandidate.historicalBacktest.tierCounts.points3
     } terni e ${
       winnerCandidate.historicalBacktest.tierCounts.points4
-    } quaterne su storico reale (incasso lordo storico: ${winnerCandidate.historicalBacktest.totalEstimatedGrossWinnings.toLocaleString(
+    } quaterne sulle ${clampedWindow} estrazioni (incasso lordo: ${winnerCandidate.historicalBacktest.totalEstimatedGrossWinnings.toLocaleString(
       'it-IT'
     )}€).`,
     toolCall: {
       toolName: 'runHistoricalRealBacktest + computeAntiCrowdMultiplier',
       executionMs: critMs,
-      inputSummary: `3 systems x ${draws.length} historical draws + 500 Bayesian urn draws`,
-      outputSummary: `Winner="${winnerCandidate.id}" (Score=${winnerCandidate.camelCompositeScore}/100, AntiCrowd=${winnerCandidate.antiCrowdScoreMean}x)`
+      inputSummary: `3 systems x ${clampedWindow} historical draws + 500 Bayesian urn draws`,
+      outputSummary: `Winner="${winnerCandidate.id}" (Score=${winnerCandidate.camelCompositeScore}/100, Split=${lowTargetCount}+${highTargetCount})`
     },
-    metricsBadge: `Winner Score: ${winnerCandidate.camelCompositeScore}/100 (${winnerCandidate.antiCrowdScoreMean}x Anti-Massa)`
+    metricsBadge: `Winner Score: ${winnerCandidate.camelCompositeScore}/100 (${lowTargetCount}+${highTargetCount})`
   });
 
   // --- STEP 6: Coordinator finalizes consensus and prepares preset for SystemGenerator ---
@@ -743,7 +782,7 @@ export function runCamelWorkforcePipeline(params: {
   const readyPreset: SimulationGeneratorPreset = {
     id: `camel-preset-${Date.now()}`,
     appliedAt: new Date().toISOString(),
-    simulatedDrawsCount: draws.length,
+    simulatedDrawsCount: clampedWindow,
     methodology: 'bayesian_hybrid_urn',
     coverageTarget,
     highProbabilityNumbers: pinnedSix,
@@ -754,7 +793,7 @@ export function runCamelWorkforcePipeline(params: {
     recommendedFilters: winnerCandidate.filtersUsed,
     confidenceIndex: winnerCandidate.camelCompositeScore,
     enforceTenEuroBudget: false,
-    sourceLabel: `CAMEL Multi-Agent Workforce • ${winnerCandidate.strategyName} (Score ${winnerCandidate.camelCompositeScore}/100)`
+    sourceLabel: `CAMEL Workforce (${clampedWindow} estrazioni) • ${winnerCandidate.strategyName} (Score ${winnerCandidate.camelCompositeScore}/100)`
   };
 
   dialogueTranscript.push({
@@ -767,7 +806,7 @@ export function runCamelWorkforcePipeline(params: {
       winnerCandidate.strategyName
     }" (${winnerCandidate.systemResult.columns.length} sestine su pool di ${
       winnerCandidate.poolNumbers.length
-    } numeri) è certificato e pronto per essere applicato al Generatore o salvato nel Registro Giocate.`,
+    } numeri: ${lowTargetCount} tra 1–31 e ${highTargetCount} tra 32–90) è certificato e pronto per essere applicato al Generatore o salvato nel Registro Giocate.`,
     metricsBadge: 'Consenso Certificato ✓'
   });
 
@@ -778,6 +817,10 @@ export function runCamelWorkforcePipeline(params: {
     executedAt: new Date().toISOString(),
     totalExecutionTimeMs,
     poolSizeV: clampedV,
+    historicalDrawsWindow: clampedWindow,
+    maxHistoricalDraws,
+    lowNumbersCount: lowTargetCount,
+    highNumbersCount: highTargetCount,
     budgetEuro: budgetAlloc.actualCost,
     playMode,
     coverageTarget,

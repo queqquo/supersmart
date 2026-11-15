@@ -352,7 +352,7 @@ test('compareSavedPlayAgainstRecentDraws clamps range [10..200], highlights draw
   assert.ok(summary.grossWinnings > 0);
 });
 
-test('runCamelWorkforcePipeline coordinates 5 agents, builds 3 reduced systems with 2-Opt Kempe, and elects a champion', async () => {
+test('runCamelWorkforcePipeline coordinates 5 agents, enforces 4 low (1..31) + 8 high (32..90) split, and supports window from 1 to max draws (default 200)', async () => {
   const { generateFullHistoricalDataset } = await import('../data/seedDraws');
   const { runCamelWorkforcePipeline } = await import('./camelWorkforce');
   const full = generateFullHistoricalDataset();
@@ -368,6 +368,7 @@ test('runCamelWorkforcePipeline coordinates 5 agents, builds 3 reduced systems w
     cadences: true
   };
 
+  // Default window (200 draws)
   const res = runCamelWorkforcePipeline({
     draws: full,
     poolSizeV: 12,
@@ -377,8 +378,17 @@ test('runCamelWorkforcePipeline coordinates 5 agents, builds 3 reduced systems w
     baseFilters: filters
   });
 
+  assert.equal(res.historicalDrawsWindow, 200);
+  assert.equal(res.lowNumbersCount, 4);
+  assert.equal(res.highNumbersCount, 8);
   assert.equal(res.agents.length, 5);
   assert.equal(res.candidates.length, 3);
+  for (const cand of res.candidates) {
+    const lowCount = cand.poolNumbers.filter((n) => n >= 1 && n <= 31).length;
+    const highCount = cand.poolNumbers.filter((n) => n >= 32 && n <= 90).length;
+    assert.equal(lowCount, 4, `Candidate ${cand.id} must have 4 numbers in 1..31`);
+    assert.equal(highCount, 8, `Candidate ${cand.id} must have 8 numbers in 32..90`);
+  }
   assert.equal(res.winnerCandidate.systemResult.columns.length, 10);
   assert.ok(res.dialogueTranscript.length >= 5);
   assert.ok(res.winnerCandidate.camelCompositeScore > 0);
@@ -386,6 +396,20 @@ test('runCamelWorkforcePipeline coordinates 5 agents, builds 3 reduced systems w
     (res.winnerCandidate.systemResult.coverageMetrics.maxColumnOverlap ?? 6) <= 4,
     '2-Opt Kempe + Hamming control should avoid 5-number column collisions for 10 columns on v=12'
   );
+
+  // Edge case: window = 1 draw
+  const res1 = runCamelWorkforcePipeline({
+    draws: full,
+    poolSizeV: 12,
+    historicalDrawsWindow: 1,
+    budgetEuro: 10,
+    playMode: 'pure_coverage',
+    coverageTarget: 'terni',
+    baseFilters: filters
+  });
+  assert.equal(res1.historicalDrawsWindow, 1);
+  assert.equal(res1.winnerCandidate.poolNumbers.filter((n) => n <= 31).length, 4);
+  assert.equal(res1.winnerCandidate.poolNumbers.filter((n) => n > 31).length, 8);
 });
 
 

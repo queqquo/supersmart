@@ -97,7 +97,9 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
   onApplyToGenerator,
   onSavePlay
 }) => {
+  const maxHistoricalDraws = Math.max(1, draws.length);
   const [poolSizeV, setPoolSizeV] = useState<number>(12);
+  const [historicalDrawsWindow, setHistoricalDrawsWindow] = useState<number>(200);
   const [budgetEuro, setBudgetEuro] = useState<number>(10);
   const [playMode, setPlayMode] = useState<PlayMode>('pure_coverage');
   const [workforceResult, setWorkforceResult] = useState<CamelWorkforceResult | null>(null);
@@ -106,17 +108,23 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
   const [copied, setCopied] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
+  const lowCountForV = Math.round(poolSizeV / 3);
+  const highCountForV = poolSizeV - lowCountForV;
+
   const executeWorkforce = (
     v = poolSizeV,
     b = budgetEuro,
     pm = playMode,
-    ct = coverageTarget
+    ct = coverageTarget,
+    hw = historicalDrawsWindow
   ) => {
+    const safeWindow = Math.min(maxHistoricalDraws, Math.max(1, Math.round(hw || 200)));
     setIsRunning(true);
     setTimeout(() => {
       const res = runCamelWorkforcePipeline({
         draws,
         poolSizeV: v,
+        historicalDrawsWindow: safeWindow,
         budgetEuro: b,
         playMode: pm,
         coverageTarget: ct,
@@ -131,7 +139,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
 
   useEffect(() => {
     if (draws.length > 0 && !workforceResult) {
-      executeWorkforce();
+      executeWorkforce(poolSizeV, budgetEuro, playMode, coverageTarget, 200);
     }
   }, [draws.length]);
 
@@ -242,125 +250,295 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
         </div>
 
         {/* Workforce Parameters Bar */}
-        <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 md:grid-cols-4 gap-3">
-          {/* Pool Size V */}
-          <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Layers className="w-4 h-4 text-amber-400" />
-              <span>Pool v:</span>
-            </span>
-            <div className="flex items-center gap-1">
-              {[10, 11, 12, 13, 14, 15].map((v) => (
+        <div className="pt-3 border-t border-slate-800/80 space-y-3">
+          {/* Historical Draws Window Selector (1 to Max Historical, default 200) */}
+          <div className="bg-slate-950/90 p-3.5 rounded-xl border border-indigo-500/30 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-extrabold text-white flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-indigo-400" />
+                  <span>Estrazioni Storiche da considerare:</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-mono font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                  {historicalDrawsWindow.toLocaleString('it-IT')} / {maxHistoricalDraws.toLocaleString('it-IT')} concorsi
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                  Regola Pool: {lowCountForV} più forti [1–31] + {highCountForV} più forti [32–90]
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Seleziona da <strong>1</strong> fino al massimo storico (<strong>{maxHistoricalDraws}</strong> estrazioni, default <strong>200</strong>). Nessun bonus artificiale ai numeri &gt;31: vengono presi i {lowCountForV} migliori da 1 a 31 e gli {highCountForV} migliori da 32 a 90.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap items-center gap-1">
+                {[
+                  { label: '1', val: 1 },
+                  { label: '40', val: 40 },
+                  { label: '100', val: 100 },
+                  { label: '200', val: 200 },
+                  { label: '500', val: 500 },
+                  { label: '1000', val: 1000 },
+                  { label: `Max (${maxHistoricalDraws})`, val: maxHistoricalDraws }
+                ].map((preset) => {
+                  const clampedPreset = Math.min(maxHistoricalDraws, Math.max(1, preset.val));
+                  const isActive = historicalDrawsWindow === clampedPreset;
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        setHistoricalDrawsWindow(clampedPreset);
+                        executeWorkforce(
+                          poolSizeV,
+                          budgetEuro,
+                          playMode,
+                          coverageTarget,
+                          clampedPreset
+                        );
+                      }}
+                      className={`px-2 py-1 rounded text-xs font-mono font-bold cursor-pointer transition-colors ${
+                        isActive
+                          ? 'bg-indigo-500 text-white font-extrabold shadow'
+                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Range Slider + Exact Number Input (1 .. maxHistoricalDraws) */}
+              <div className="flex items-center gap-2 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
+                <input
+                  type="range"
+                  min={1}
+                  max={maxHistoricalDraws}
+                  value={historicalDrawsWindow}
+                  onChange={(e) => {
+                    const nextVal = Math.min(
+                      maxHistoricalDraws,
+                      Math.max(1, Number(e.target.value) || 1)
+                    );
+                    setHistoricalDrawsWindow(nextVal);
+                  }}
+                  onMouseUp={() =>
+                    executeWorkforce(
+                      poolSizeV,
+                      budgetEuro,
+                      playMode,
+                      coverageTarget,
+                      historicalDrawsWindow
+                    )
+                  }
+                  onTouchEnd={() =>
+                    executeWorkforce(
+                      poolSizeV,
+                      budgetEuro,
+                      playMode,
+                      coverageTarget,
+                      historicalDrawsWindow
+                    )
+                  }
+                  className="w-24 sm:w-32 accent-indigo-500 cursor-pointer"
+                  title="Trascina per scegliere il numero di estrazioni storiche (da 1 al massimo storico)"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  max={maxHistoricalDraws}
+                  value={historicalDrawsWindow}
+                  onChange={(e) => {
+                    const raw = parseInt(e.target.value, 10);
+                    if (Number.isNaN(raw)) return;
+                    const clamped = Math.min(maxHistoricalDraws, Math.max(1, raw));
+                    setHistoricalDrawsWindow(clamped);
+                  }}
+                  onBlur={() =>
+                    executeWorkforce(
+                      poolSizeV,
+                      budgetEuro,
+                      playMode,
+                      coverageTarget,
+                      historicalDrawsWindow
+                    )
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      executeWorkforce(
+                        poolSizeV,
+                        budgetEuro,
+                        playMode,
+                        coverageTarget,
+                        historicalDrawsWindow
+                      );
+                    }
+                  }}
+                  className="w-16 bg-slate-950 text-amber-300 font-mono font-bold text-xs px-2 py-1 rounded border border-slate-700 text-center focus:outline-none focus:border-indigo-400"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            {/* Pool Size V */}
+            <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-amber-400" />
+                <span>Pool v:</span>
+              </span>
+              <div className="flex items-center gap-1">
+                {[10, 11, 12, 13, 14, 15].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => {
+                      setPoolSizeV(v);
+                      executeWorkforce(
+                        v,
+                        budgetEuro,
+                        playMode,
+                        coverageTarget,
+                        historicalDrawsWindow
+                      );
+                    }}
+                    className={`px-2 py-1 rounded text-xs font-mono font-bold cursor-pointer ${
+                      poolSizeV === v
+                        ? 'bg-amber-500 text-slate-950 font-extrabold'
+                        : 'bg-slate-900 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Budget Selector */}
+            <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300">Budget:</span>
+              <div className="flex items-center gap-1">
+                {[10, 15, 20, 30, 50].map((b) => (
+                  <button
+                    key={b}
+                    type="button"
+                    onClick={() => {
+                      setBudgetEuro(b);
+                      executeWorkforce(
+                        poolSizeV,
+                        b,
+                        playMode,
+                        coverageTarget,
+                        historicalDrawsWindow
+                      );
+                    }}
+                    className={`px-2 py-1 rounded text-xs font-mono font-bold cursor-pointer ${
+                      budgetEuro === b
+                        ? 'bg-amber-500 text-slate-950 font-extrabold'
+                        : 'bg-slate-900 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {b}€
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Coverage Target */}
+            <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300">Garanzia:</span>
+              <div className="flex items-center gap-1.5">
                 <button
-                  key={v}
                   type="button"
                   onClick={() => {
-                    setPoolSizeV(v);
-                    executeWorkforce(v, budgetEuro, playMode, coverageTarget);
+                    onUpdateCoverageTarget('terni');
+                    executeWorkforce(
+                      poolSizeV,
+                      budgetEuro,
+                      playMode,
+                      'terni',
+                      historicalDrawsWindow
+                    );
                   }}
-                  className={`px-2 py-1 rounded text-xs font-mono font-bold cursor-pointer ${
-                    poolSizeV === v
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                    coverageTarget === 'terni'
+                      ? 'bg-sky-500 text-slate-950 font-extrabold'
+                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Terni (t=3)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onUpdateCoverageTarget('ambi');
+                    executeWorkforce(
+                      poolSizeV,
+                      budgetEuro,
+                      playMode,
+                      'ambi',
+                      historicalDrawsWindow
+                    );
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                    coverageTarget === 'ambi'
                       ? 'bg-amber-500 text-slate-950 font-extrabold'
                       : 'bg-slate-900 text-slate-400 hover:text-white'
                   }`}
                 >
-                  {v}
+                  Ambi (t=2)
                 </button>
-              ))}
+              </div>
             </div>
-          </div>
 
-          {/* Budget Selector */}
-          <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300">Budget:</span>
-            <div className="flex items-center gap-1">
-              {[10, 15, 20, 30, 50].map((b) => (
+            {/* Play Mode */}
+            <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300">Modalità:</span>
+              <div className="flex items-center gap-1.5">
                 <button
-                  key={b}
                   type="button"
                   onClick={() => {
-                    setBudgetEuro(b);
-                    executeWorkforce(poolSizeV, b, playMode, coverageTarget);
+                    setPlayMode('pure_coverage');
+                    executeWorkforce(
+                      poolSizeV,
+                      budgetEuro,
+                      'pure_coverage',
+                      coverageTarget,
+                      historicalDrawsWindow
+                    );
                   }}
-                  className={`px-2 py-1 rounded text-xs font-mono font-bold cursor-pointer ${
-                    budgetEuro === b
-                      ? 'bg-amber-500 text-slate-950 font-extrabold'
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                    playMode === 'pure_coverage'
+                      ? 'bg-emerald-500 text-slate-950 font-extrabold'
                       : 'bg-slate-900 text-slate-400 hover:text-white'
                   }`}
                 >
-                  {b}€
+                  Pura (1€)
                 </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Coverage Target */}
-          <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300">Garanzia:</span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdateCoverageTarget('terni');
-                  executeWorkforce(poolSizeV, budgetEuro, playMode, 'terni');
-                }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
-                  coverageTarget === 'terni'
-                    ? 'bg-sky-500 text-slate-950 font-extrabold'
-                    : 'bg-slate-900 text-slate-400 hover:text-white'
-                }`}
-              >
-                Terni (t=3)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdateCoverageTarget('ambi');
-                  executeWorkforce(poolSizeV, budgetEuro, playMode, 'ambi');
-                }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
-                  coverageTarget === 'ambi'
-                    ? 'bg-amber-500 text-slate-950 font-extrabold'
-                    : 'bg-slate-900 text-slate-400 hover:text-white'
-                }`}
-              >
-                Ambi (t=2)
-              </button>
-            </div>
-          </div>
-
-          {/* Play Mode */}
-          <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300">Modalità:</span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setPlayMode('pure_coverage');
-                  executeWorkforce(poolSizeV, budgetEuro, 'pure_coverage', coverageTarget);
-                }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
-                  playMode === 'pure_coverage'
-                    ? 'bg-emerald-500 text-slate-950 font-extrabold'
-                    : 'bg-slate-900 text-slate-400 hover:text-white'
-                }`}
-              >
-                Pura (1€)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPlayMode('superstar');
-                  executeWorkforce(poolSizeV, budgetEuro, 'superstar', coverageTarget);
-                }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
-                  playMode === 'superstar'
-                    ? 'bg-purple-500 text-white font-extrabold'
-                    : 'bg-slate-900 text-slate-400 hover:text-white'
-                }`}
-              >
-                ★ SuperStar
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlayMode('superstar');
+                    executeWorkforce(
+                      poolSizeV,
+                      budgetEuro,
+                      'superstar',
+                      coverageTarget,
+                      historicalDrawsWindow
+                    );
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                    playMode === 'superstar'
+                      ? 'bg-purple-500 text-white font-extrabold'
+                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  ★ SuperStar
+                </button>
+              </div>
             </div>
           </div>
         </div>

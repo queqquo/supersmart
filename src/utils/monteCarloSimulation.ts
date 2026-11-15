@@ -576,7 +576,7 @@ function deriveSimulationRecommendedWeights(
 export function generateSmartPoolRecommendation(
   historicalDraws: Draw[],
   poolSize: number = 12,
-  walkForwardWindow: number = 40
+  walkForwardWindow: number = 200
 ): SmartPoolRecommendationResult {
   const startTime = performance.now();
   const clampedPoolSize = Math.min(15, Math.max(10, Math.round(poolSize || 12)));
@@ -650,52 +650,78 @@ export function generateSmartPoolRecommendation(
     }
   ];
 
-  // Helper to select a balanced pool of size V given raw ball scores, enforcing decade and cadence caps
+  // Helper to select a balanced pool of size V given raw ball scores:
+  // Takes the top 1/3 strongest numbers in [1..31] (4 numbers when V=12)
+  // and the top 2/3 strongest numbers in [32..90] (8 numbers when V=12),
+  // without inflating >31 scores, while enforcing decade and cadence dispersion caps.
   const maxPerDecadeAndCadence = clampedPoolSize <= 13 ? 2 : 3;
-  function selectBalancedPoolFromScores(scores: Float64Array, targetV: number, wBalance: number): number[] {
-    const order = Array.from({ length: 90 }, (_, i) => i + 1);
-    order.sort((a, b) => scores[b] - scores[a]);
+  const pickedMaskBuf = new Uint8Array(91);
+  const decCountsBuf = new Uint8Array(10);
+  const cadCountsBuf = new Uint8Array(10);
 
-    const decCounts = new Uint8Array(10);
-    const cadCounts = new Uint8Array(10);
+  function selectBalancedPoolFromScores(
+    scores: Float64Array,
+    targetV: number,
+    wBalance: number
+  ): number[] {
+    const targetLowCount = Math.round(targetV / 3); // e.g. 4 for V=12
+    const targetHighCount = targetV - targetLowCount; // e.g. 8 for V=12
+
+    pickedMaskBuf.fill(0);
+    decCountsBuf.fill(0);
+    cadCountsBuf.fill(0);
     const selected: number[] = [];
 
-    // First pass: strict balance cap (max 2 or 3 per decade and cadence) with dynamic dispersion penalty
-    while (selected.length < targetV) {
-      let bestBall = -1;
-      let bestAdjustedScore = -Infinity;
+    const pickFromRange = (minBall: number, maxBall: number, countNeeded: number) => {
+      let pickedInZone = 0;
+      while (pickedInZone < countNeeded) {
+        let bestBall = -1;
+        let bestAdjustedScore = -Infinity;
 
-      for (let i = 0; i < 90; i++) {
-        const ball = order[i];
-        if (selected.includes(ball)) continue;
-        const dec = ball >= 90 ? 9 : (ball / 10) | 0;
-        const cad = ball % 10;
-        if (decCounts[dec] >= maxPerDecadeAndCadence || cadCounts[cad] >= maxPerDecadeAndCadence) {
-          continue;
+        for (let ball = minBall; ball <= maxBall; ball++) {
+          if (pickedMaskBuf[ball] === 1) continue;
+          const dec = ball >= 90 ? 9 : (ball / 10) | 0;
+          const cad = ball % 10;
+          if (
+            decCountsBuf[dec] >= maxPerDecadeAndCadence ||
+            cadCountsBuf[cad] >= maxPerDecadeAndCadence
+          ) {
+            continue;
+          }
+          const dispersionPenalty = (decCountsBuf[dec] * 0.18 + cadCountsBuf[cad] * 0.15) * wBalance;
+          const adj = scores[ball] - dispersionPenalty;
+          if (adj > bestAdjustedScore) {
+            bestAdjustedScore = adj;
+            bestBall = ball;
+          }
         }
-        const dispersionPenalty = (decCounts[dec] * 0.18 + cadCounts[cad] * 0.15) * wBalance;
-        const adj = scores[ball] - dispersionPenalty;
-        if (adj > bestAdjustedScore) {
-          bestAdjustedScore = adj;
-          bestBall = ball;
+
+        // Fallback if strict decade/cadence cap blocked remaining balls in this zone
+        if (bestBall === -1) {
+          for (let ball = minBall; ball <= maxBall; ball++) {
+            if (pickedMaskBuf[ball] === 1) continue;
+            if (scores[ball] > bestAdjustedScore) {
+              bestAdjustedScore = scores[ball];
+              bestBall = ball;
+            }
+          }
         }
-      }
 
-      if (bestBall === -1) break;
-      selected.push(bestBall);
-      const dec = bestBall >= 90 ? 9 : (bestBall / 10) | 0;
-      const cad = bestBall % 10;
-      decCounts[dec]++;
-      cadCounts[cad]++;
-    }
-
-    // Fallback if strict cap left fewer than targetV balls
-    for (let i = 0; i < 90 && selected.length < targetV; i++) {
-      const ball = order[i];
-      if (!selected.includes(ball)) {
-        selected.push(ball);
+        if (bestBall === -1) break;
+        pickedMaskBuf[bestBall] = 1;
+        selected.push(bestBall);
+        const dec = bestBall >= 90 ? 9 : (bestBall / 10) | 0;
+        const cad = bestBall % 10;
+        decCountsBuf[dec]++;
+        cadCountsBuf[cad]++;
+        pickedInZone++;
       }
-    }
+    };
+
+    // 1. Select the 4 strongest numbers from 1 to 31 (for V=12)
+    pickFromRange(1, 31, targetLowCount);
+    // 2. Select the 8 strongest numbers from 32 to 90 (for V=12)
+    pickFromRange(32, 90, targetHighCount);
 
     return selected.sort((a, b) => a - b);
   }
@@ -708,7 +734,8 @@ export function generateSmartPoolRecommendation(
   const recentWindowSize = 36;
   const recentFreq = new Int32Array(91);
 
-  const actualWindow = Math.min(walkForwardWindow, Math.max(1, totalDraws - 20));
+  const clampedRequestedWindow = Math.max(1, Math.round(walkForwardWindow || 200));
+  const actualWindow = Math.min(clampedRequestedWindow, Math.max(1, totalDraws));
   const wfStartIdx = Math.max(1, totalDraws - actualWindow);
 
   // Initialize state with draws [0 .. wfStartIdx - 1]
@@ -795,13 +822,12 @@ export function generateSmartPoolRecommendation(
     for (let sIdx = 0; sIdx < evaluatedStrategies.length; sIdx++) {
       const strat = evaluatedStrategies[sIdx];
       for (let n = 1; n <= 90; n++) {
-        const highNumberBonus = n > 31 ? 0.08 * strat.wDecadeBalance : 0;
+        // Pure statistical score without any artificial bonus on numbers > 31
         ballScores[n] =
           strat.wFreqHot * normHotArr[n] +
           strat.wFreqCold * normColdArr[n] +
           strat.wDelay * normDelayArr[n] +
-          strat.wCoOccurrence * normCoArr[n] +
-          highNumberBonus;
+          strat.wCoOccurrence * normCoArr[n];
       }
 
       const poolAtT = selectBalancedPoolFromScores(ballScores, clampedPoolSize, strat.wDecadeBalance);
@@ -876,13 +902,12 @@ export function generateSmartPoolRecommendation(
   computeSignalsAtStep(totalDraws, latestDrawNums);
 
   for (let n = 1; n <= 90; n++) {
-    const highNumberBonus = n > 31 ? 0.08 * bestStrategy.wDecadeBalance : 0;
+    // Pure statistical score without any artificial bonus on numbers > 31
     ballScores[n] =
       bestStrategy.wFreqHot * normHotArr[n] +
       bestStrategy.wFreqCold * normColdArr[n] +
       bestStrategy.wDelay * normDelayArr[n] +
-      bestStrategy.wCoOccurrence * normCoArr[n] +
-      highNumberBonus;
+      bestStrategy.wCoOccurrence * normCoArr[n];
   }
 
   const recommendedPool = selectBalancedPoolFromScores(
