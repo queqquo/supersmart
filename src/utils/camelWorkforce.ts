@@ -12,12 +12,12 @@
 
 import {
   Draw,
+  NumberStat,
   ScoringWeights,
   FilterOptions,
   PlayMode,
   CoverageTarget,
   SystemGenerationResult,
-  GeneratedColumn,
   SimulationGeneratorPreset,
   HistoricalRealBacktestResult
 } from '../types/lottery';
@@ -70,11 +70,44 @@ export interface CamelDialogueMessage {
   metricsBadge?: string;
 }
 
+export interface CamelScoreBreakdown {
+  coverageScore: number; // max 35
+  coverageMax: 35;
+  coverageDetail: string;
+  antiCrowdScore: number; // max 25
+  antiCrowdMax: 25;
+  antiCrowdDetail: string;
+  historicalScore: number; // max 25
+  historicalMax: 25;
+  historicalDetail: string;
+  monteCarloScore: number; // max 15
+  monteCarloMax: 15;
+  monteCarloDetail: string;
+}
+
+export interface CamelPoolNumberReason {
+  number: number;
+  compositeScore: number;
+  currentDelay: number;
+  maxHistoricalDelay: number;
+  normalizedDelay: number;
+  frequencyK: number;
+  affinityScore: number;
+  inWalkForward: boolean;
+  inGeneticTop: boolean;
+  isAntiCrowdHigh: boolean;
+  primaryTag: string;
+  tagColor: 'emerald' | 'sky' | 'amber' | 'purple' | 'rose';
+  explanation: string;
+}
+
 export interface CamelSystemCandidate {
   id: string;
   strategyName: string;
+  strategyOriginDescription: string;
   proposedByAgent: CamelAgentId;
   poolNumbers: number[];
+  poolReasons: CamelPoolNumberReason[];
   weightsUsed: ScoringWeights;
   filtersUsed: FilterOptions;
   systemResult: SystemGenerationResult;
@@ -82,6 +115,7 @@ export interface CamelSystemCandidate {
   zeroPenaltyColumnsRatio: number; // [0 .. 1]
   historicalBacktest: HistoricalRealBacktestResult;
   monteCarloNetPerDraw: number;
+  scoreBreakdown: CamelScoreBreakdown;
   camelCompositeScore: number; // 0 .. 100
   criticVerdict: string;
   kempeRefinementsCount: number;
@@ -244,6 +278,90 @@ function buildConsensusHybridPool(
 }
 
 /**
+ * Helper: Explain why each individual number in a pool of V numbers was selected
+ */
+function buildPoolNumberReasons(
+  poolNumbers: number[],
+  statsMap: Record<number, NumberStat>,
+  weightsUsed: ScoringWeights,
+  wfPoolSet: Set<number>,
+  geneticTopSet: Set<number>,
+  strategyId: string
+): CamelPoolNumberReason[] {
+  const scoredForWeights = scoreAllNumbers(statsMap, weightsUsed, 36);
+  const scoreMap = new Map<number, NumberStat>();
+  let maxFreqK = 1;
+  for (const s of scoredForWeights) {
+    scoreMap.set(s.number, s);
+    if (s.frequencyK > maxFreqK) maxFreqK = s.frequencyK;
+  }
+
+  return poolNumbers.map((num) => {
+    const st = scoreMap.get(num) || statsMap[num];
+    const inWalkForward = wfPoolSet.has(num);
+    const inGeneticTop = geneticTopSet.has(num);
+    const isAntiCrowdHigh = num > 31;
+    const normFreq = st ? st.frequencyK / maxFreqK : 0;
+    const normDel = st ? st.normalizedDelay : 0;
+    const normAff = st ? st.affinityScore : 0;
+
+    let primaryTag = 'Bilanciamento Pool';
+    let tagColor: CamelPoolNumberReason['tagColor'] = 'sky';
+
+    if (inWalkForward && inGeneticTop) {
+      primaryTag = 'Convergenza WF + Genetico';
+      tagColor = 'emerald';
+    } else if (strategyId === 'cand-anticrowd' && isAntiCrowdHigh && (normFreq >= 0.6 || normAff >= 0.6)) {
+      primaryTag = 'Anti-Massa (>31) + Spia';
+      tagColor = 'amber';
+    } else if (normFreq >= 0.72) {
+      primaryTag = `Caldo (${st.frequencyK} uscite/36)`;
+      tagColor = 'sky';
+    } else if (normAff >= 0.72) {
+      primaryTag = `Affinità Spia (${Math.round(normAff * 100)}%)`;
+      tagColor = 'purple';
+    } else if (normDel >= 0.65) {
+      primaryTag = `Ritardatario (${st.currentDelay}/${st.maxHistoricalDelay})`;
+      tagColor = 'rose';
+    } else if (isAntiCrowdHigh) {
+      primaryTag = 'Dispersione Anti-Massa (>31)';
+      tagColor = 'amber';
+    }
+
+    const parts: string[] = [];
+    if (inWalkForward && inGeneticTop) {
+      parts.push('Scelto sia dal Walk-Forward (40 estrazioni) sia dal Genetista (17 anni)');
+    } else if (inWalkForward) {
+      parts.push('Selezionato dalla validazione Walk-Forward (ultime 40 estrazioni)');
+    } else if (inGeneticTop) {
+      parts.push('Top ranking del Genetista Storico (2.946 estrazioni)');
+    }
+    parts.push(`Freq(36): ${st?.frequencyK ?? 0} uscite`);
+    parts.push(`Ritardo: ${st?.currentDelay ?? 0}/${st?.maxHistoricalDelay ?? 1} conc.`);
+    parts.push(`Spia: ${Math.round((st?.affinityScore ?? 0) * 100)}%`);
+    if (isAntiCrowdHigh) {
+      parts.push('Quota alta (>31 fuori date)');
+    }
+
+    return {
+      number: num,
+      compositeScore: st?.compositeScore ?? 0,
+      currentDelay: st?.currentDelay ?? 0,
+      maxHistoricalDelay: st?.maxHistoricalDelay ?? 1,
+      normalizedDelay: st?.normalizedDelay ?? 0,
+      frequencyK: st?.frequencyK ?? 0,
+      affinityScore: st?.affinityScore ?? 0,
+      inWalkForward,
+      inGeneticTop,
+      isAntiCrowdHigh,
+      primaryTag,
+      tagColor,
+      explanation: parts.join(' • ')
+    };
+  });
+}
+
+/**
  * Execute the full CAMEL Multi-Agent Workforce pipeline synchronously/asynchronously in < 250ms
  */
 export function runCamelWorkforcePipeline(params: {
@@ -331,6 +449,9 @@ export function runCamelWorkforcePipeline(params: {
   const antiCrowdPool = buildAntiCrowdResonancePool(geneticScored, clampedV);
   const genMs = Math.max(1, Math.round(performance.now() - tGen0));
 
+  const wfPoolSet = new Set(wfRes40.recommendedPool);
+  const geneticTopSet = new Set(geneticScored.slice(0, clampedV + 3).map((s) => s.number));
+
   dialogueTranscript.push({
     id: `msg-${stepCounter}`,
     stepNumber: stepCounter++,
@@ -381,6 +502,7 @@ export function runCamelWorkforcePipeline(params: {
   const rawConfigs: Array<{
     id: string;
     strategyName: string;
+    strategyOriginDescription: string;
     proposedByAgent: CamelAgentId;
     pool: number[];
     weights: ScoringWeights;
@@ -388,6 +510,8 @@ export function runCamelWorkforcePipeline(params: {
     {
       id: 'cand-wf',
       strategyName: 'Strategia A — Walk-Forward Out-of-Sample',
+      strategyOriginDescription:
+        'Numeri estratti simulando alla cieca le ultime 40 estrazioni reali (finestra mobile) con la formula a 5 fattori che ha realizzato più terni e ambi recenti (max 2 per decina/cadenza).',
       proposedByAgent: 'walk_forward_scout',
       pool: wfRes40.recommendedPool,
       weights: wfRes40.mappedScoringWeights
@@ -395,6 +519,8 @@ export function runCamelWorkforcePipeline(params: {
     {
       id: 'cand-consensus',
       strategyName: 'Strategia B — Consensus Ibrido (Walk-Forward + Genetico)',
+      strategyOriginDescription:
+        'Incrocio tra i migliori numeri del Walk-Forward (breve periodo, 40 concorsi) e i migliori dell\'Algoritmo Genetico (lungo periodo, 2.946 concorsi 2009–2026): premia i numeri forti in entrambe le classifiche.',
       proposedByAgent: 'genetic_strategist',
       pool: consensusPool,
       weights: geneticWeights
@@ -402,6 +528,8 @@ export function runCamelWorkforcePipeline(params: {
     {
       id: 'cand-anticrowd',
       strategyName: 'Strategia C — Ortogonale Anti-Massa High-Payout (>31)',
+      strategyOriginDescription:
+        'Parte dalla classifica genetica ma penalizza i numeri 1–31 (date di nascita giocate dalla massa) e premia i numeri 32–90 ben dispersi per massimizzare le quote in caso di vincita.',
       proposedByAgent: 'anti_crowd_critic',
       pool: antiCrowdPool,
       weights: geneticWeights
@@ -477,24 +605,70 @@ export function runCamelWorkforcePipeline(params: {
       (covMetrics.pairsCoveredCount / Math.max(1, covMetrics.pairsTotalInPool)) * 100;
     const primaryCovPct = coverageTarget === 'terni' ? terniPct : ambiPct;
 
-    // Composite score (0..100):
-    // 35% Coverage efficiency + 25% Anti-Crowd & Filter Cleanliness + 25% Historical ROI / Hits + 15% Monte Carlo
-    const covComponent = Math.min(35, primaryCovPct * 0.42 + (coverageTarget === 'terni' ? ambiPct * 0.12 : terniPct * 0.15));
-    const antiCrowdComponent = Math.min(
-      25,
-      ((antiCrowdMean - 0.75) / 0.75) * 15 + zeroPenaltyRatio * 10
+    // 4-Pillar Composite score (0..100):
+    // 1. Coverage efficiency (max 35)
+    const covComponent = Number(
+      Math.min(
+        35,
+        primaryCovPct * 0.42 + (coverageTarget === 'terni' ? ambiPct * 0.12 : terniPct * 0.15)
+      ).toFixed(1)
     );
+    // 2. Anti-Crowd & Filter Cleanliness (max 25)
+    const antiCrowdComponent = Number(
+      Math.min(25, ((antiCrowdMean - 0.75) / 0.75) * 15 + zeroPenaltyRatio * 10).toFixed(1)
+    );
+    // 3. Historical ROI & Real Multi-Point Hits (max 25)
     const roiClamped = Math.max(-60, Math.min(120, histBacktest.historicalRoiPct));
-    const histComponent = Math.min(
-      25,
-      ((roiClamped + 60) / 180) * 15 +
-        Math.min(10, histBacktest.tierCounts.points3 * 0.25 + histBacktest.tierCounts.points4 * 2.5)
+    const histComponent = Number(
+      Math.min(
+        25,
+        ((roiClamped + 60) / 180) * 15 +
+          Math.min(10, histBacktest.tierCounts.points3 * 0.25 + histBacktest.tierCounts.points4 * 2.5)
+      ).toFixed(1)
     );
+    // 4. Monte Carlo Bayesian Urn Resilience (max 15)
     const mcNet = mcSim.weeklySystemPnL.meanSingleDrawNetPerSestina;
-    const mcComponent = Math.max(0, Math.min(15, (mcNet + 1.0) * 8));
+    const mcComponent = Number(Math.max(0, Math.min(15, (mcNet + 1.0) * 8)).toFixed(1));
 
     const camelCompositeScore = Number(
-      Math.min(99.4, Math.max(40, covComponent + antiCrowdComponent + histComponent + mcComponent)).toFixed(1)
+      Math.min(
+        99.4,
+        Math.max(40, covComponent + antiCrowdComponent + histComponent + mcComponent)
+      ).toFixed(1)
+    );
+
+    const scoreBreakdown: CamelScoreBreakdown = {
+      coverageScore: covComponent,
+      coverageMax: 35,
+      coverageDetail: `${covMetrics.tripletsCoveredCount}/${covMetrics.tripletsTotalInPool} terni (${Math.round(
+        terniPct
+      )}%) • ${covMetrics.pairsCoveredCount}/${covMetrics.pairsTotalInPool} ambi (${Math.round(
+        ambiPct
+      )}%)`,
+      antiCrowdScore: antiCrowdComponent,
+      antiCrowdMax: 25,
+      antiCrowdDetail: `Moltiplicatore quote ${antiCrowdMean.toFixed(2)}x • ${Math.round(
+        zeroPenaltyRatio * 100
+      )}% sestine 0-penalità`,
+      historicalScore: histComponent,
+      historicalMax: 25,
+      historicalDetail: `${histBacktest.tierCounts.points3} terni, ${
+        histBacktest.tierCounts.points4
+      } quaterne • Incasso ${histBacktest.totalEstimatedGrossWinnings.toLocaleString('it-IT')}€`,
+      monteCarloScore: mcComponent,
+      monteCarloMax: 15,
+      monteCarloDetail: `Urna Bayesiana 500 conc.: media ${mcNet >= 0 ? '+' : ''}${mcNet.toFixed(
+        2
+      )}€/sestina`
+    };
+
+    const poolReasons = buildPoolNumberReasons(
+      item.pool,
+      statsMap,
+      item.weights,
+      wfPoolSet,
+      geneticTopSet,
+      item.id
     );
 
     const verdict =
@@ -507,8 +681,10 @@ export function runCamelWorkforcePipeline(params: {
     return {
       id: item.id,
       strategyName: item.strategyName,
+      strategyOriginDescription: item.strategyOriginDescription,
       proposedByAgent: item.proposedByAgent,
       poolNumbers: item.pool,
+      poolReasons,
       weightsUsed: item.weights,
       filtersUsed: strictFilters,
       systemResult: item.sys,
@@ -516,6 +692,7 @@ export function runCamelWorkforcePipeline(params: {
       zeroPenaltyColumnsRatio: Number(zeroPenaltyRatio.toFixed(2)),
       historicalBacktest: histBacktest,
       monteCarloNetPerDraw: mcNet,
+      scoreBreakdown,
       camelCompositeScore,
       criticVerdict: verdict,
       kempeRefinementsCount: Math.max(1, Math.round(targetCols * 0.3))

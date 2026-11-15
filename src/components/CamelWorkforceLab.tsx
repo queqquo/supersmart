@@ -18,7 +18,8 @@ import {
   ArrowRight,
   Layers,
   Clock,
-  Sliders
+  Sliders,
+  Info
 } from 'lucide-react';
 import {
   Draw,
@@ -31,7 +32,8 @@ import {
 import {
   runCamelWorkforcePipeline,
   CamelWorkforceResult,
-  CamelAgentId
+  CamelAgentId,
+  CamelPoolNumberReason
 } from '../utils/camelWorkforce';
 
 interface CamelWorkforceLabProps {
@@ -77,6 +79,14 @@ const AGENT_COLOR_CLASSES: Record<
     text: 'text-rose-300',
     badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
   }
+};
+
+const TAG_COLOR_BADGE: Record<CamelPoolNumberReason['tagColor'], string> = {
+  emerald: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  sky: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+  amber: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  purple: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
+  rose: 'bg-rose-500/15 text-rose-300 border-rose-500/30'
 };
 
 export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
@@ -475,7 +485,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                     </h3>
                   </div>
                   <span className="text-xs text-slate-400">
-                    Clicca una strategia per ispezionare le sestine
+                    Clicca una strategia per vedere perché sono stati scelti i numeri
                   </span>
                 </div>
 
@@ -483,69 +493,67 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                   {workforceResult.candidates.map((cand, idx) => {
                     const isWinner = cand.id === workforceResult.winnerCandidate.id;
                     const isSelected = cand.id === activeCandidate?.id;
-                    const cov = cand.systemResult.coverageMetrics;
-                    const terniPct = Math.round(
-                      (cov.tripletsCoveredCount / Math.max(1, cov.tripletsTotalInPool)) * 100
-                    );
-                    const ambiPct = Math.round(
-                      (cov.pairsCoveredCount / Math.max(1, cov.pairsTotalInPool)) * 100
-                    );
+                    const sb = cand.scoreBreakdown;
 
                     return (
                       <div
                         key={cand.id}
                         onClick={() => setSelectedCandidateId(cand.id)}
-                        className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2.5 ${
+                        className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2.5 flex flex-col justify-between ${
                           isSelected
                             ? 'bg-slate-950 border-amber-400 ring-2 ring-amber-400/20 shadow-lg'
                             : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-1">
-                          <span
-                            className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                              isWinner
-                                ? 'bg-amber-500 text-slate-950'
-                                : 'bg-slate-800 text-slate-300'
-                            }`}
-                          >
-                            {isWinner ? '★ Vincitore CAMEL' : `Candidato #${idx + 1}`}
-                          </span>
-                          <span className="text-sm font-mono font-extrabold text-emerald-400">
-                            {cand.camelCompositeScore}/100
-                          </span>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-1">
+                            <span
+                              className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                                isWinner
+                                  ? 'bg-amber-500 text-slate-950'
+                                  : 'bg-slate-800 text-slate-300'
+                              }`}
+                            >
+                              {isWinner ? '★ Vincitore CAMEL' : `Candidato #${idx + 1}`}
+                            </span>
+                            <span className="text-sm font-mono font-extrabold text-emerald-400">
+                              {cand.camelCompositeScore}/100
+                            </span>
+                          </div>
+
+                          <div className="text-xs font-bold text-white leading-snug">
+                            {cand.strategyName}
+                          </div>
+
+                          <p className="text-[10px] text-slate-400 leading-relaxed">
+                            {cand.strategyOriginDescription}
+                          </p>
                         </div>
 
-                        <div className="text-xs font-bold text-white leading-snug">
-                          {cand.strategyName}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono pt-1">
+                        {/* Mini 4-Pillar Score Breakdown inside Card */}
+                        <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono pt-2 border-t border-slate-800/80">
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                            <span className="text-slate-400 block">Terni / Ambi</span>
+                            <span className="text-slate-400 block">1. Copertura</span>
                             <span className="text-sky-300 font-bold">
-                              {terniPct}% / {ambiPct}%
+                              {sb.coverageScore} / 35 pt
                             </span>
                           </div>
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                            <span className="text-slate-400 block">Anti-Massa</span>
+                            <span className="text-slate-400 block">2. Anti-Massa</span>
                             <span className="text-amber-300 font-bold">
-                              {cand.antiCrowdScoreMean}x
+                              {sb.antiCrowdScore} / 25 pt ({cand.antiCrowdScoreMean}x)
                             </span>
                           </div>
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                            <span className="text-slate-400 block">Max Overlap</span>
+                            <span className="text-slate-400 block">3. Storico Reale</span>
                             <span className="text-emerald-300 font-bold">
-                              {cov.maxColumnOverlap ?? 3} num (d_H={cov.minHammingDistance ?? 6})
+                              {sb.historicalScore} / 25 pt
                             </span>
                           </div>
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                            <span className="text-slate-400 block">Vincite Storiche</span>
-                            <span className="text-white font-bold">
-                              {cand.historicalBacktest.totalEstimatedGrossWinnings.toLocaleString(
-                                'it-IT'
-                              )}
-                              €
+                            <span className="text-slate-400 block">4. Monte Carlo</span>
+                            <span className="text-purple-300 font-bold">
+                              {sb.monteCarloScore} / 15 pt
                             </span>
                           </div>
                         </div>
@@ -555,9 +563,9 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                 </div>
               </div>
 
-              {/* Active Candidate Detailed Sestine & Actions */}
+              {/* Active Candidate Detailed Sestine, Score Breakdown & Pool Reasons */}
               {activeCandidate && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
                     <div>
                       <div className="flex items-center gap-2">
@@ -611,70 +619,210 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                     </div>
                   </div>
 
-                  {/* Pool Numbers & Weights */}
-                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <span className="font-bold text-slate-300">
-                        Pool Selezionato dagli Agenti ({activeCandidate.poolNumbers.length} Numeri):
+                  {/* NEW SECTION 1: Detailed 4-Pillar Score Breakdown */}
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <Info className="w-4 h-4 text-amber-400" />
+                        Come è stato calcolato il punteggio ({activeCandidate.camelCompositeScore} / 100 pt)
                       </span>
-                      <span className="font-mono text-amber-300 flex items-center gap-1.5">
+                      <span className="text-[11px] font-mono text-slate-400">
+                        Somma di 4 prove matematiche e storiche
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      {/* Pillar 1 */}
+                      <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-sky-300">1. Copertura Ortogonale</span>
+                          <span className="font-mono text-white">
+                            {activeCandidate.scoreBreakdown.coverageScore} / 35 pt
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-sky-400 rounded-full"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (activeCandidate.scoreBreakdown.coverageScore / 35) * 100
+                              )}%`
+                            }}
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-mono">
+                          {activeCandidate.scoreBreakdown.coverageDetail}
+                        </p>
+                      </div>
+
+                      {/* Pillar 2 */}
+                      <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-amber-300">2. Anti-Massa & Filtri</span>
+                          <span className="font-mono text-white">
+                            {activeCandidate.scoreBreakdown.antiCrowdScore} / 25 pt
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-amber-400 rounded-full"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (activeCandidate.scoreBreakdown.antiCrowdScore / 25) * 100
+                              )}%`
+                            }}
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-mono">
+                          {activeCandidate.scoreBreakdown.antiCrowdDetail}
+                        </p>
+                      </div>
+
+                      {/* Pillar 3 */}
+                      <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-emerald-300">3. Backtest Storico (2009–2026)</span>
+                          <span className="font-mono text-white">
+                            {activeCandidate.scoreBreakdown.historicalScore} / 25 pt
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-400 rounded-full"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (activeCandidate.scoreBreakdown.historicalScore / 25) * 100
+                              )}%`
+                            }}
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-mono">
+                          {activeCandidate.scoreBreakdown.historicalDetail}
+                        </p>
+                      </div>
+
+                      {/* Pillar 4 */}
+                      <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-purple-300">4. Tenuta Monte Carlo Futura</span>
+                          <span className="font-mono text-white">
+                            {activeCandidate.scoreBreakdown.monteCarloScore} / 15 pt
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-purple-400 rounded-full"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (activeCandidate.scoreBreakdown.monteCarloScore / 15) * 100
+                              )}%`
+                            }}
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-mono">
+                          {activeCandidate.scoreBreakdown.monteCarloDetail}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* NEW SECTION 2: Why each of the V Pool Numbers was picked */}
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-white uppercase tracking-wider">
+                        Da dove arrivano i {activeCandidate.poolNumbers.length} Numeri di questa Strategia:
+                      </span>
+                      <span className="text-xs font-mono text-amber-300 flex items-center gap-1.5">
                         <Sliders className="w-3.5 h-3.5" />
                         w₁={activeCandidate.weightsUsed.wDelay.toFixed(2)} • w₂=
                         {activeCandidate.weightsUsed.wFrequency.toFixed(2)} • w₃=
                         {activeCandidate.weightsUsed.wAffinity.toFixed(2)}
                       </span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {activeCandidate.poolNumbers.map((num) => (
-                        <span
-                          key={num}
-                          className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-mono font-extrabold text-xs flex items-center justify-center shadow"
+
+                    <p className="text-xs text-slate-400">
+                      {activeCandidate.strategyOriginDescription}
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                      {activeCandidate.poolReasons.map((pr) => (
+                        <div
+                          key={pr.number}
+                          className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/90 flex items-start gap-2.5"
+                          title={pr.explanation}
                         >
-                          {num}
-                        </span>
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-mono font-extrabold text-xs flex items-center justify-center shrink-0 shadow">
+                            {pr.number}
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <span
+                              className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                TAG_COLOR_BADGE[pr.tagColor]
+                              }`}
+                            >
+                              {pr.primaryTag}
+                            </span>
+                            <div className="text-[10px] font-mono text-slate-300 leading-tight">
+                              Freq(36): <strong>{pr.frequencyK}</strong> • Rit:{' '}
+                              <strong>
+                                {pr.currentDelay}/{pr.maxHistoricalDelay}
+                              </strong>{' '}
+                              • Spia: <strong>{Math.round(pr.affinityScore * 100)}%</strong>
+                            </div>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
 
                   {/* Sestine Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                    {activeCandidate.systemResult.columns.map((col) => (
-                      <div
-                        key={col.id}
-                        className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 flex items-center justify-between gap-2"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono font-bold text-slate-400 w-7">
-                            #{String(col.id).padStart(2, '0')}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            {col.numbers.map((n) => (
-                              <span
-                                key={n}
-                                className="w-7 h-7 rounded-lg bg-slate-900 border border-amber-500/30 text-amber-300 font-mono font-extrabold text-xs flex items-center justify-center"
-                              >
-                                {n}
-                              </span>
-                            ))}
-                            {col.superstar !== undefined && (
-                              <span
-                                className="px-1.5 py-1 rounded-lg bg-purple-500/20 border border-purple-500/40 text-purple-300 font-mono font-extrabold text-xs"
-                                title="SuperStar"
-                              >
-                                ★{col.superstar}
-                              </span>
-                            )}
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      Sestine Ridotte Generate ({activeCandidate.systemResult.columns.length} Colonne):
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      {activeCandidate.systemResult.columns.map((col) => (
+                        <div
+                          key={col.id}
+                          className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono font-bold text-slate-400 w-7">
+                              #{String(col.id).padStart(2, '0')}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {col.numbers.map((n) => (
+                                <span
+                                  key={n}
+                                  className="w-7 h-7 rounded-lg bg-slate-900 border border-amber-500/30 text-amber-300 font-mono font-extrabold text-xs flex items-center justify-center"
+                                >
+                                  {n}
+                                </span>
+                              ))}
+                              {col.superstar !== undefined && (
+                                <span
+                                  className="px-1.5 py-1 rounded-lg bg-purple-500/20 border border-purple-500/40 text-purple-300 font-mono font-extrabold text-xs"
+                                  title="SuperStar"
+                                >
+                                  ★{col.superstar}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="text-[10px] font-mono text-slate-400 text-right">
-                          <div>Σ={col.sum}</div>
-                          <div>
-                            P/D {col.evens}/{col.odds}
+                          <div className="text-[10px] font-mono text-slate-400 text-right">
+                            <div>Σ={col.sum}</div>
+                            <div>
+                              P/D {col.evens}/{col.odds}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
 
                   {/* Audit Metrics Footer */}
