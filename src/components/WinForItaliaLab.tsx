@@ -40,6 +40,8 @@ import {
 
 interface WinForItaliaLabProps {
   onSavePlay: (play: SavedPlay) => void;
+  draws?: WinForItaliaDraw[];
+  onUpdateDraws?: (draws: WinForItaliaDraw[]) => void;
 }
 
 const DECADE_LABELS: Record<number, string> = {
@@ -49,8 +51,19 @@ const DECADE_LABELS: Record<number, string> = {
   3: 'Decina 31–40'
 };
 
-export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({ onSavePlay }) => {
-  const [history, setHistory] = useState<WinForItaliaDraw[]>(() => loadWinForItaliaDraws());
+export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
+  onSavePlay,
+  draws: externalDraws,
+  onUpdateDraws
+}) => {
+  const [localHistory, setLocalHistory] = useState<WinForItaliaDraw[]>(() => loadWinForItaliaDraws());
+  const history = externalDraws && externalDraws.length > 0 ? externalDraws : localHistory;
+  const updateHistory = (nextDraws: WinForItaliaDraw[]) => {
+    setLocalHistory(nextDraws);
+    if (onUpdateDraws) {
+      onUpdateDraws(nextDraws);
+    }
+  };
   const [funnelNonce, setFunnelNonce] = useState<number>(0);
   const [simSeed, setSimSeed] = useState<number>(2026040);
 
@@ -106,7 +119,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({ onSavePlay }) 
     setSyncMessage(null);
     try {
       const res = await syncWinForItaliaDrawsFromServer();
-      setHistory(res.draws);
+      updateHistory(res.draws);
       if (res.addedOrUpdated > 0) {
         setSyncMessage(
           `Archivio aggiornato: +${res.addedOrUpdated} nuove estrazioni (ultima: ${res.latestDate} ore 20:00).`
@@ -136,7 +149,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({ onSavePlay }) 
     }
 
     const updated = insertWinForItaliaDraw(parsed.draw);
-    setHistory(updated);
+    updateHistory(updated);
     setManualInput('');
     setManualFeedback({
       type: 'success',

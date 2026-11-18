@@ -12,8 +12,12 @@ import {
   runWinForItaliaFunnel40To12,
   selectSniperSestinaFromTop12,
   parseWinForItaliaManualInput,
-  runWinForItaliaWeeklyMonteCarlo
+  runWinForItaliaWeeklyMonteCarlo,
+  isWinForItaliaPlay,
+  evaluateWinForItaliaPlay,
+  compareSavedPlayAgainstWinForItaliaDraws
 } from './winForItalia';
+import { SavedPlay } from '../types/lottery';
 
 test('calculateWinForItaliaStats uses dynamic window Math.min(history.length, 50)', () => {
   const fullHistory = loadWinForItaliaDraws();
@@ -115,3 +119,51 @@ test('runWinForItaliaWeeklyMonteCarlo simulates 50,000 draws with 40-bit bitmask
   assert.ok(result.expectedPunto2PerWeek > 1.1 && result.expectedPunto2PerWeek < 1.5);
   assert.ok(result.averageWeeklyRecoveryRatePct > 20 && result.averageWeeklyRecoveryRatePct < 80);
 });
+
+test('evaluateWinForItaliaPlay and compareSavedPlayAgainstWinForItaliaDraws evaluate 6/40 prizes accurately', () => {
+  const history = loadWinForItaliaDraws();
+  const sampleDraw = {
+    id: 'WFI-2026-999',
+    contestNumber: 999,
+    year: 2026,
+    date: '2026-04-20',
+    time: '20:00',
+    numbers: [3, 8, 15, 22, 34, 39] as [number, number, number, number, number, number]
+  };
+
+  const mockPlay: SavedPlay = {
+    id: 'play-wfi-test',
+    createdAt: '2026-04-20T12:00:00.000Z',
+    targetContestId: 'WFI-2026-999',
+    mode: 'manual',
+    cost: 2.0,
+    savedAmount: 0,
+    poolNumbers: [3, 8, 15, 22, 34, 39],
+    columns: [
+      {
+        id: 1,
+        numbers: [3, 8, 16, 23, 35, 40], // 2 matches: 3, 8 -> 2.00 €
+        sum: 125,
+        evens: 3,
+        odds: 3,
+        lows: 3,
+        highs: 3
+      }
+    ],
+    status: 'IN_ATTESA',
+    manualNote: 'Win for Italia Team (6/40)'
+  };
+
+  assert.equal(isWinForItaliaPlay(mockPlay), true);
+
+  const evalRes = evaluateWinForItaliaPlay(mockPlay.columns, sampleDraw, mockPlay.cost);
+  assert.equal(evalRes.bestMatch, 2);
+  assert.equal(evalRes.totalWinning, 2.0);
+  assert.equal(evalRes.netReturn, 0.0);
+
+  const compRes = compareSavedPlayAgainstWinForItaliaDraws(mockPlay, history, 25);
+  assert.equal(compRes.drawsEvaluatedCount, 25);
+  assert.equal(compRes.costPerDraw, 2.0);
+  assert.equal(compRes.totalSpent, 50.0);
+});
+

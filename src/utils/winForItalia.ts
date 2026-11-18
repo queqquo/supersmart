@@ -4,6 +4,17 @@
  */
 
 import seedWinForItaliaData from '../data/winforitalia.json';
+import {
+  SavedPlay,
+  GeneratedColumn,
+  PlayResult,
+  ColumnMatchResult
+} from '../types/lottery';
+import {
+  SavedPlayArchiveComparisonSummary,
+  ArchiveDrawPlayComparisonRow,
+  clampArchiveComparisonDrawsCount
+} from './combinatorics';
 
 export interface WinForItaliaDraw {
   id: string;
@@ -248,14 +259,15 @@ export function parseWinForItaliaManualInput(
       ? customDate
       : new Date().toISOString().slice(0, 10);
   const year = parseInt(dateStr.slice(0, 4), 10);
+  const existingForDate = existingHistory.find((d) => d.date === dateStr);
   const maxContestInYear = existingHistory
     .filter((d) => d.year === year)
     .reduce((max, d) => Math.max(max, d.contestNumber), 0);
-  const nextContest = maxContestInYear + 1;
+  const targetContest = existingForDate ? existingForDate.contestNumber : maxContestInYear + 1;
 
   const draw: WinForItaliaDraw = {
-    id: `WFI-${year}-${String(nextContest).padStart(3, '0')}`,
-    contestNumber: nextContest,
+    id: existingForDate ? existingForDate.id : `WFI-${year}-${String(targetContest).padStart(3, '0')}`,
+    contestNumber: targetContest,
     year,
     date: dateStr,
     time: '20:00',
@@ -266,11 +278,11 @@ export function parseWinForItaliaManualInput(
 }
 
 /**
- * Insert a new manual or synced Win for Italia Team draw into history and persist to localStorage
+ * Insert a new manual or synced Win for Italia Team draw into history and persist to localStorage and server
  */
 export function insertWinForItaliaDraw(newDraw: WinForItaliaDraw): WinForItaliaDraw[] {
   const current = loadWinForItaliaDraws();
-  const idx = current.findIndex((d) => d.id === newDraw.id || d.date === newDraw.date && d.numbers.join(',') === newDraw.numbers.join(','));
+  const idx = current.findIndex((d) => d.id === newDraw.id || d.date === newDraw.date);
   if (idx >= 0) {
     current[idx] = newDraw;
   } else {
@@ -282,6 +294,15 @@ export function insertWinForItaliaDraw(newDraw: WinForItaliaDraw): WinForItaliaD
     return b.contestNumber - a.contestNumber;
   });
   saveWinForItaliaDraws(current);
+  if (typeof fetch !== 'undefined') {
+    fetch('/api/winforitalia/draws', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draw: newDraw })
+    }).catch(() => {
+      // Ignore if offline or in unit test environment
+    });
+  }
   return current;
 }
 
@@ -914,3 +935,235 @@ export function runWinForItaliaWeeklyMonteCarlo(
     payoutByCategory
   };
 }
+
+/**
+ * Rileva se una giocata salvata appartiene a Win for Italia Team / Win for Life (6/40)
+ */
+export function isWinForItaliaPlay(play: SavedPlay | null | undefined): boolean {
+  if (!play) return false;
+  const cid = String(play.targetContestId || '').toUpperCase().trim();
+  const note = String(play.manualNote || '').toLowerCase();
+  const pid = String(play.id || '').toLowerCase();
+  return (
+    cid.startsWith('WFI') ||
+    cid.startsWith('WFL') ||
+    pid.startsWith('play-wfi-') ||
+    note.includes('win for') ||
+    note.includes('6/40')
+  );
+}
+
+/**
+ * Valuta una giocata (1 o più sestine) contro un'estrazione Win for Italia Team / Win for Life (6/40)
+ * usando la tabella premi ufficiale:
+ * - Punto 2 = 2,00 €
+ * - Punto 3 = 8,00 €
+ * - Punto 4 = 50,00 €
+ * - Punto 5 = 440,00 €
+ * - Punto 6 = 10.000,00 €
+ */
+export function evaluateWinForItaliaPlay(
+  columns: GeneratedColumn[],
+  targetDraw: WinForItaliaDraw,
+  cost: number
+): PlayResult {
+  const winningSet = new Set(targetDraw.numbers);
+  const matchesPerColumn: ColumnMatchResult[] = [];
+  let totalWinning = 0;
+  let bestMatch = 0;
+
+  for (const col of columns) {
+    const matchedNumbers = col.numbers.filter((n) => winningSet.has(n));
+    const matchCount = matchedNumbers.length;
+    if (matchCount > bestMatch) {
+      bestMatch = matchCount;
+    }
+
+    let prizeTier = 'Nessun Punto';
+    let estimatedPrize = 0;
+
+    if (matchCount === 6) {
+      prizeTier = 'Punti 6 (Win for Italia 6/40)';
+      estimatedPrize = WIN_FOR_ITALIA_PRIZES.PUNTO_6;
+    } else if (matchCount === 5) {
+      prizeTier = 'Punti 5 (Win for Italia 6/40)';
+      estimatedPrize = WIN_FOR_ITALIA_PRIZES.PUNTO_5;
+    } else if (matchCount === 4) {
+      prizeTier = 'Punti 4 (Win for Italia 6/40)';
+      estimatedPrize = WIN_FOR_ITALIA_PRIZES.PUNTO_4;
+    } else if (matchCount === 3) {
+      prizeTier = 'Punti 3 (Win for Italia 6/40)';
+      estimatedPrize = WIN_FOR_ITALIA_PRIZES.PUNTO_3;
+    } else if (matchCount === 2) {
+      prizeTier = 'Punti 2 (Rimborso 2,00 €)';
+      estimatedPrize = WIN_FOR_ITALIA_PRIZES.PUNTO_2;
+    } else if (matchCount === 1) {
+      prizeTier = '1 Punto';
+      estimatedPrize = 0;
+    }
+
+    totalWinning += estimatedPrize;
+
+    matchesPerColumn.push({
+      columnId: col.id,
+      numbers: col.numbers,
+      matchedNumbers,
+      matchCount,
+      hasJolly: false,
+      hasSuperstar: false,
+      prizeTier,
+      estimatedPrize
+    });
+  }
+
+  const roundedWin = Number(totalWinning.toFixed(2));
+  const netReturn = Number((roundedWin - cost).toFixed(2));
+
+  return {
+    matchesPerColumn,
+    totalWinning: roundedWin,
+    netReturn,
+    bestMatch,
+    hasWin: roundedWin > 0,
+    verifiedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Confronta una giocata con le ultime N estrazioni (10..200) dell'archivio Win for Italia Team / Win for Life (6/40).
+ */
+export function compareSavedPlayAgainstWinForItaliaDraws(
+  play: SavedPlay,
+  allWfiDraws: WinForItaliaDraw[],
+  requestedDrawsCount: number
+): SavedPlayArchiveComparisonSummary {
+  const clampedCount = clampArchiveComparisonDrawsCount(requestedDrawsCount);
+  const sortedDraws = [...allWfiDraws].sort((a, b) => {
+    const cmp = b.date.localeCompare(a.date);
+    if (cmp !== 0) return cmp;
+    return b.contestNumber - a.contestNumber;
+  });
+  const recentDraws = sortedDraws.slice(0, clampedCount);
+
+  const playNumsSet = new Set<number>();
+  const numberHitCounts: Record<number, number> = {};
+
+  for (const col of play.columns) {
+    for (const n of col.numbers) {
+      playNumsSet.add(n);
+      numberHitCounts[n] = 0;
+    }
+  }
+  for (const n of play.poolNumbers || []) {
+    playNumsSet.add(n);
+    if (numberHitCounts[n] === undefined) numberHitCounts[n] = 0;
+  }
+
+  const costPerDraw =
+    typeof play.cost === 'number' && play.cost > 0
+      ? Number(play.cost.toFixed(2))
+      : Number((play.columns.length * 2.0).toFixed(2));
+
+  let totalSpent = 0;
+  let grossWinnings = 0;
+  let winningDrawsCount = 0;
+  let totalMatchedNumbersCount = 0;
+
+  const tierBreakdown = {
+    points2: 0,
+    points3: 0,
+    points4: 0,
+    points5: 0,
+    points5plus1: 0,
+    points6: 0,
+    superstarHits: 0
+  };
+
+  const rows: ArchiveDrawPlayComparisonRow[] = [];
+
+  for (const wfiDraw of recentDraws) {
+    const evalRes = evaluateWinForItaliaPlay(play.columns, wfiDraw, costPerDraw);
+    const matchedNumbersInPlay = wfiDraw.numbers.filter((n) => playNumsSet.has(n));
+    for (const m of matchedNumbersInPlay) {
+      numberHitCounts[m] = (numberHitCounts[m] || 0) + 1;
+    }
+    totalMatchedNumbersCount += matchedNumbersInPlay.length;
+
+    let winningColumnsCount = 0;
+    let bestColumnId: number | null = null;
+    let bestPrizeTier = 'Nessun Punto';
+    let highestColPrize = -1;
+
+    for (const colMatch of evalRes.matchesPerColumn) {
+      if (colMatch.estimatedPrize > 0) {
+        winningColumnsCount++;
+      }
+      if (colMatch.estimatedPrize > highestColPrize && colMatch.estimatedPrize > 0) {
+        highestColPrize = colMatch.estimatedPrize;
+        bestColumnId = colMatch.columnId;
+        bestPrizeTier = colMatch.prizeTier;
+      } else if (bestColumnId === null && colMatch.matchCount > 0) {
+        bestColumnId = colMatch.columnId;
+      }
+
+      if (colMatch.matchCount === 6) tierBreakdown.points6++;
+      else if (colMatch.matchCount === 5) tierBreakdown.points5++;
+      else if (colMatch.matchCount === 4) tierBreakdown.points4++;
+      else if (colMatch.matchCount === 3) tierBreakdown.points3++;
+      else if (colMatch.matchCount === 2) tierBreakdown.points2++;
+    }
+
+    const grossWinForDraw = Number(evalRes.totalWinning.toFixed(2));
+    const netReturnForDraw = Number((grossWinForDraw - costPerDraw).toFixed(2));
+
+    totalSpent = Number((totalSpent + costPerDraw).toFixed(2));
+    grossWinnings = Number((grossWinnings + grossWinForDraw).toFixed(2));
+    if (grossWinForDraw > 0) {
+      winningDrawsCount++;
+    }
+
+    rows.push({
+      draw: {
+        id: wfiDraw.id,
+        contestNumber: wfiDraw.contestNumber,
+        year: wfiDraw.year,
+        date: wfiDraw.date,
+        numbers: wfiDraw.numbers,
+        jolly: 0
+      },
+      matchedNumbersInPlay,
+      jollyMatchedInPlay: false,
+      superstarMatchedInPlay: false,
+      playResult: evalRes,
+      winningColumnsCount,
+      bestColumnId,
+      bestPrizeTier,
+      costForDraw: costPerDraw,
+      grossWinForDraw,
+      netReturnForDraw
+    });
+  }
+
+  const netProfitLoss = Number((grossWinnings - totalSpent).toFixed(2));
+  const roiPercentage =
+    totalSpent > 0 ? Number(((netProfitLoss / totalSpent) * 100).toFixed(2)) : 0;
+
+  return {
+    playId: play.id,
+    drawsRequested: clampedCount,
+    drawsEvaluatedCount: recentDraws.length,
+    costPerDraw,
+    totalSpent,
+    grossWinnings,
+    netProfitLoss,
+    roiPercentage,
+    winningDrawsCount,
+    totalMatchedNumbersCount,
+    tierBreakdown,
+    numberHitCounts,
+    playNumbersSet: Array.from(playNumsSet).sort((a, b) => a - b),
+    playSuperstarsSet: [],
+    rows
+  };
+}
+

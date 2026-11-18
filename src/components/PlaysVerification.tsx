@@ -19,7 +19,8 @@ import {
   Euro,
   Save,
   X,
-  Edit3
+  Edit3,
+  Crosshair
 } from 'lucide-react';
 import { SavedPlay, Draw, PlayResult, GeneratedColumn } from '../types/lottery';
 import {
@@ -29,10 +30,17 @@ import {
   createManualSavedPlay,
   applyManualCostAndWinning
 } from '../utils/combinatorics';
+import {
+  WinForItaliaDraw,
+  loadWinForItaliaDraws,
+  isWinForItaliaPlay,
+  evaluateWinForItaliaPlay
+} from '../utils/winForItalia';
 
 interface PlaysVerificationProps {
   plays: SavedPlay[];
   draws: Draw[];
+  winForItaliaDraws?: WinForItaliaDraw[];
   onSavePlay: (play: SavedPlay) => void;
   onUpdatePlay: (play: SavedPlay) => void;
   onDeletePlay: (id: string) => void;
@@ -52,10 +60,10 @@ function createEmptyManualRow(index: number): ManualRowInput {
   };
 }
 
-function createRandomManualRow(index: number): ManualRowInput {
+function createRandomManualRow(index: number, maxNum: number = 90): ManualRowInput {
   const chosen: number[] = [];
   while (chosen.length < 6) {
-    const r = Math.floor(Math.random() * 90) + 1;
+    const r = Math.floor(Math.random() * maxNum) + 1;
     if (!chosen.includes(r)) chosen.push(r);
   }
   chosen.sort((a, b) => a - b);
@@ -76,23 +84,45 @@ function createRandomManualRow(index: number): ManualRowInput {
 export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
   plays,
   draws,
+  winForItaliaDraws: externalWfiDraws,
   onSavePlay,
   onUpdatePlay,
   onDeletePlay
 }) => {
+  const wfiDraws = useMemo<WinForItaliaDraw[]>(() => {
+    return externalWfiDraws && externalWfiDraws.length > 0
+      ? externalWfiDraws
+      : loadWinForItaliaDraws();
+  }, [externalWfiDraws]);
+
   const [selectedPlayId, setSelectedPlayId] = useState<string | null>(
     plays.length > 0 ? plays[0].id : null
   );
 
   // Manual Registration Panel state
   const [isManualFormOpen, setIsManualFormOpen] = useState(false);
-  const defaultNextContest = useMemo(() => {
+  const [manualGameType, setManualGameType] = useState<'superenalotto' | 'winforitalia'>(
+    'superenalotto'
+  );
+
+  const defaultNextSuperEnalottoContest = useMemo(() => {
     const latest = draws[0];
     if (!latest) return `${new Date().getFullYear()}-001`;
     return `${latest.year}-${String(latest.contestNumber + 1).padStart(3, '0')}`;
   }, [draws]);
 
-  const [manualContestId, setManualContestId] = useState<string>(defaultNextContest);
+  const defaultNextWfiContest = useMemo(() => {
+    const latest = wfiDraws[0];
+    if (!latest) return `WFI-${new Date().getFullYear()}-001`;
+    return `WFI-${latest.year}-${String(latest.contestNumber + 1).padStart(3, '0')}`;
+  }, [wfiDraws]);
+
+  const defaultNextContest =
+    manualGameType === 'winforitalia'
+      ? defaultNextWfiContest
+      : defaultNextSuperEnalottoContest;
+
+  const [manualContestId, setManualContestId] = useState<string>(defaultNextSuperEnalottoContest);
   const [manualRows, setManualRows] = useState<ManualRowInput[]>(() => [createEmptyManualRow(1)]);
   const [manualCost, setManualCost] = useState<string>('1.00');
   const [costManuallyEdited, setCostManuallyEdited] = useState<boolean>(false);
@@ -104,6 +134,14 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
   const [showQuickPaste, setShowQuickPaste] = useState<boolean>(false);
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualSuccessBanner, setManualSuccessBanner] = useState<string | null>(null);
+
+  // Verification target game and target draw ID state
+  const [verifyGameType, setVerifyGameType] = useState<'superenalotto' | 'winforitalia'>(
+    'superenalotto'
+  );
+  const [selectedTargetDrawId, setSelectedTargetDrawId] = useState<string>(
+    draws[0]?.id || ''
+  );
 
   // Inline edit state for existing selected play
   const [editCostInput, setEditCostInput] = useState<string>('');
@@ -145,19 +183,44 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
     return plays.find((p) => p.id === selectedPlayId) || plays[0] || null;
   }, [plays, selectedPlayId]);
 
-  // Sync inline edit inputs when activePlay changes
+  // Sync inline edit inputs and verification game type when activePlay changes
   useEffect(() => {
     if (activePlay) {
       setEditCostInput(activePlay.cost.toFixed(2));
       setEditWinInput((activePlay.result?.totalWinning ?? 0).toFixed(2));
+      const isWfi = isWinForItaliaPlay(activePlay);
+      if (isWfi) {
+        setVerifyGameType('winforitalia');
+        const matchingWfi = wfiDraws.find((d) => d.id === activePlay.targetContestId);
+        setSelectedTargetDrawId(matchingWfi?.id || wfiDraws[0]?.id || '');
+      } else {
+        setVerifyGameType('superenalotto');
+        const matchingSe = draws.find((d) => d.id === activePlay.targetContestId);
+        setSelectedTargetDrawId(matchingSe?.id || draws[0]?.id || '');
+      }
     }
-  }, [activePlay?.id, activePlay?.cost, activePlay?.result?.totalWinning]);
+  }, [activePlay?.id, activePlay?.cost, activePlay?.result?.totalWinning, activePlay?.targetContestId, draws, wfiDraws]);
+
+  const unitCostPerColumn = manualGameType === 'winforitalia' ? 2.0 : 1.0;
+  const maxNumberForManualGame = manualGameType === 'winforitalia' ? 40 : 90;
+
+  const handleSwitchManualGameType = (nextGame: 'superenalotto' | 'winforitalia') => {
+    setManualGameType(nextGame);
+    setManualError(null);
+    const nextUnitCost = nextGame === 'winforitalia' ? 2.0 : 1.0;
+    if (!costManuallyEdited) {
+      setManualCost((manualRows.length * nextUnitCost).toFixed(2));
+    }
+    setManualContestId(
+      nextGame === 'winforitalia' ? defaultNextWfiContest : defaultNextSuperEnalottoContest
+    );
+  };
 
   // Update auto cost when adding/removing rows unless user edited cost manually
   const updateRowsAndAutoCost = (nextRows: ManualRowInput[]) => {
     setManualRows(nextRows);
     if (!costManuallyEdited) {
-      setManualCost((nextRows.length * 1.0).toFixed(2));
+      setManualCost((nextRows.length * unitCostPerColumn).toFixed(2));
     }
   };
 
@@ -168,15 +231,17 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
 
   const handleAddRandomRow = () => {
     setManualError(null);
-    // If there is only 1 empty row, fill it; otherwise append a new random row
     if (
       manualRows.length === 1 &&
       manualRows[0].numbers.every((n) => n.trim() === '')
     ) {
-      setManualRows([createRandomManualRow(1)]);
+      setManualRows([createRandomManualRow(1, maxNumberForManualGame)]);
       return;
     }
-    updateRowsAndAutoCost([...manualRows, createRandomManualRow(manualRows.length + 1)]);
+    updateRowsAndAutoCost([
+      ...manualRows,
+      createRandomManualRow(manualRows.length + 1, maxNumberForManualGame)
+    ]);
   };
 
   const handleRemoveRow = (rowId: string) => {
@@ -211,7 +276,17 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
     const parsedCols = parseManualSestineText(quickPasteText);
     if (parsedCols.length === 0) {
       setManualError(
-        'Nessuna sestina valida trovata nel testo. Inserisci 6 numeri distinti tra 1 e 90 per riga (es. "5 14 28 42 67 89").'
+        `Nessuna sestina valida trovata nel testo. Inserisci 6 numeri distinti tra 1 e ${maxNumberForManualGame} per riga.`
+      );
+      return;
+    }
+
+    if (
+      manualGameType === 'winforitalia' &&
+      parsedCols.some((c) => c.numbers.some((n) => n < 1 || n > 40))
+    ) {
+      setManualError(
+        'Win for Italia Team / Win for Life (6/40) accetta solo numeri compresi tra 1 e 40.'
       );
       return;
     }
@@ -226,7 +301,7 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
         String(col.numbers[4]),
         String(col.numbers[5])
       ],
-      superstar: col.superstar ? String(col.superstar) : ''
+      superstar: manualGameType === 'superenalotto' && col.superstar ? String(col.superstar) : ''
     }));
 
     updateRowsAndAutoCost(importedRows);
@@ -242,9 +317,9 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
     for (let i = 0; i < manualRows.length; i++) {
       const row = manualRows[i];
       const rawNums = row.numbers.map((s) => parseInt(s.trim(), 10));
-      if (rawNums.some((n) => Number.isNaN(n) || n < 1 || n > 90)) {
+      if (rawNums.some((n) => Number.isNaN(n) || n < 1 || n > maxNumberForManualGame)) {
         setManualError(
-          `Sestina #${i + 1} incompleta o non valida: inserisci 6 numeri interi compresi tra 1 e 90.`
+          `Sestina #${i + 1} incompleta o non valida: inserisci 6 numeri interi compresi tra 1 e ${maxNumberForManualGame}.`
         );
         return;
       }
@@ -252,13 +327,13 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
       const uniqueCheck = new Set(rawNums);
       if (uniqueCheck.size !== 6) {
         setManualError(
-          `Sestina #${i + 1} contiene numeri duplicati: ogni sestina deve avere 6 numeri tutti diversi (1-90).`
+          `Sestina #${i + 1} contiene numeri duplicati: ogni sestina deve avere 6 numeri tutti diversi (1-${maxNumberForManualGame}).`
         );
         return;
       }
 
       let starVal: number | undefined = undefined;
-      if (row.superstar.trim() !== '') {
+      if (manualGameType === 'superenalotto' && row.superstar.trim() !== '') {
         const parsedStar = parseInt(row.superstar.trim(), 10);
         if (Number.isNaN(parsedStar) || parsedStar < 1 || parsedStar > 90) {
           setManualError(
@@ -291,14 +366,29 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
 
     const parsedSaved = parseFloat(manualSavedAmount.replace(',', '.')) || 0;
 
+    const rawContestId = manualContestId.trim() || defaultNextContest;
+    const finalContestId =
+      manualGameType === 'winforitalia' &&
+      !rawContestId.toUpperCase().startsWith('WFI') &&
+      !rawContestId.toUpperCase().startsWith('WFL')
+        ? `WFI-${rawContestId}`
+        : rawContestId;
+
+    const finalNote =
+      manualGameType === 'winforitalia'
+        ? manualNote.trim()
+          ? `Win for Italia Team (6/40) — ${manualNote.trim()}`
+          : 'Win for Italia Team / Win for Life (6/40)'
+        : manualNote.trim() || undefined;
+
     const newPlay = createManualSavedPlay({
-      targetContestId: manualContestId.trim() || defaultNextContest,
+      targetContestId: finalContestId,
       columns: validatedColumns,
       cost: parsedCost,
       winningAmount: parsedWin,
       savedAmount: Math.max(0, parsedSaved),
       status: parsedWin > 0 ? 'VERIFICATA' : manualStatus,
-      manualNote: manualNote.trim() || undefined
+      manualNote: finalNote
     });
 
     onSavePlay(newPlay);
@@ -307,13 +397,15 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
 
     // Reset form for next time
     setManualRows([createEmptyManualRow(1)]);
-    setManualCost('1.00');
+    setManualCost((1 * unitCostPerColumn).toFixed(2));
     setCostManuallyEdited(false);
     setManualWinning('0.00');
     setManualSavedAmount('0.00');
     setManualNote('');
     setManualSuccessBanner(
-      `Giocata manuale (${validatedColumns.length} ${
+      `Giocata manuale ${
+        manualGameType === 'winforitalia' ? 'Win for Italia / Win for Life (6/40)' : 'SuperEnalotto (6/90)'
+      } (${validatedColumns.length} ${
         validatedColumns.length === 1 ? 'sestina' : 'sestine'
       }, Costo ${newPlay.cost.toFixed(2)} €, Vincita ${(newPlay.result?.totalWinning ?? 0).toFixed(
         2
@@ -322,9 +414,20 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
     setTimeout(() => setManualSuccessBanner(null), 5000);
   };
 
-  // Handler to verify a play against an extraction
+  // Handler to verify a play against a SuperEnalotto (6/90) extraction
   const handleVerifyPlay = (play: SavedPlay, targetDraw: Draw) => {
     const result: PlayResult = evaluatePlayedSystem(play.columns, targetDraw, play.cost);
+    const updatedPlay: SavedPlay = {
+      ...play,
+      status: 'VERIFICATA',
+      result
+    };
+    onUpdatePlay(updatedPlay);
+  };
+
+  // Handler to verify a play against a Win for Italia Team / Win for Life (6/40) extraction
+  const handleVerifyWinForItaliaPlay = (play: SavedPlay, targetWfiDraw: WinForItaliaDraw) => {
+    const result: PlayResult = evaluateWinForItaliaPlay(play.columns, targetWfiDraw, play.cost);
     const updatedPlay: SavedPlay = {
       ...play,
       status: 'VERIFICATA',
@@ -471,17 +574,17 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
           onSubmit={handleSaveManualPlay}
           className="bg-slate-900 border-2 border-amber-500/40 rounded-2xl p-5 shadow-2xl space-y-5"
         >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-base font-extrabold text-white flex items-center gap-2">
                 <PlusCircle className="w-5 h-5 text-amber-400" />
                 <span>Registrazione Manuale delle Giocate</span>
               </h3>
               <p className="text-xs text-slate-400">
-                Inserisci manualmente una o più sestine giocate, il costo sostenuto (€) e l&apos;eventuale vincita conseguita (€).
+                Inserisci manualmente una o più sestine giocate per SuperEnalotto (6/90) o Win for Italia Team / Win for Life (6/40).
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowQuickPaste((prev) => !prev)}
@@ -496,7 +599,40 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
               >
                 <Dices className="w-3.5 h-3.5 text-emerald-400" />
-                <span>+ Sestina Casuale</span>
+                <span>+ Sestina Casuale (1–{maxNumberForManualGame})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Game Type Switcher: SuperEnalotto (6/90) vs Win for Italia Team / Win for Life (6/40) */}
+          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+              Seleziona Gioco della Schedina:
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleSwitchManualGameType('superenalotto')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  manualGameType === 'superenalotto'
+                    ? 'bg-amber-500 text-slate-950 border-amber-300 shadow'
+                    : 'bg-slate-900 text-slate-300 border-slate-800 hover:text-white'
+                }`}
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                <span>SuperEnalotto (6/90 • 1,00 €/col.)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSwitchManualGameType('winforitalia')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  manualGameType === 'winforitalia'
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow'
+                    : 'bg-slate-900 text-slate-300 border-slate-800 hover:text-white'
+                }`}
+              >
+                <Crosshair className="w-3.5 h-3.5" />
+                <span>Win for Italia Team / Win for Life (6/40 • 2,00 €/col.)</span>
               </button>
             </div>
           </div>
@@ -509,7 +645,8 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                   htmlFor="manual-quick-paste"
                   className="text-xs font-bold text-slate-300 uppercase tracking-wider"
                 >
-                  Incolla una o più sestine (una per riga, 6 numeri da 1 a 90, opz. *SuperStar)
+                  Incolla una o più sestine (una per riga, 6 numeri da 1 a {maxNumberForManualGame}
+                  {manualGameType === 'superenalotto' ? ', opz. *SuperStar' : ''})
                 </label>
               </div>
               <textarea
@@ -517,7 +654,11 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                 rows={3}
                 value={quickPasteText}
                 onChange={(e) => setQuickPasteText(e.target.value)}
-                placeholder={'Esempio:\n05 14 28 42 67 89 *45\n12, 23, 34, 56, 78, 90'}
+                placeholder={
+                  manualGameType === 'winforitalia'
+                    ? 'Esempio Win for Italia 6/40:\n04 11 18 25 34 39'
+                    : 'Esempio SuperEnalotto 6/90:\n05 14 28 42 67 89 *45\n12, 23, 34, 56, 78, 90'
+                }
                 className="w-full rounded-xl bg-slate-900 border border-slate-700 p-3 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
               <div className="flex justify-end gap-2">
@@ -537,7 +678,8 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
                 1. Sestine Giocate ({manualRows.length}{' '}
-                {manualRows.length === 1 ? 'colonna' : 'colonne'})
+                {manualRows.length === 1 ? 'colonna' : 'colonne'} &bull; Range 1–
+                {maxNumberForManualGame})
               </span>
               <button
                 type="button"
@@ -566,7 +708,7 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                           key={nIdx}
                           type="number"
                           min={1}
-                          max={90}
+                          max={maxNumberForManualGame}
                           required
                           value={numStr}
                           onChange={(e) =>
@@ -579,28 +721,30 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                       ))}
                     </div>
 
-                    {/* Optional SuperStar input */}
-                    <div className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
-                      <span className="text-[11px] font-bold text-purple-300 font-mono">★</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={90}
-                        value={row.superstar}
-                        onChange={(e) => handleSuperstarInputChange(row.rowId, e.target.value)}
-                        placeholder="SS"
-                        aria-label={`Sestina ${rIdx + 1} SuperStar opzionale`}
-                        title="Numero SuperStar opzionale (1-90)"
-                        className="w-12 h-10 rounded-lg bg-slate-900 border border-purple-500/40 text-center font-mono font-bold text-sm text-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      />
-                    </div>
+                    {/* Optional SuperStar input (SuperEnalotto only) */}
+                    {manualGameType === 'superenalotto' && (
+                      <div className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
+                        <span className="text-[11px] font-bold text-purple-300 font-mono">★</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={90}
+                          value={row.superstar}
+                          onChange={(e) => handleSuperstarInputChange(row.rowId, e.target.value)}
+                          placeholder="SS"
+                          aria-label={`Sestina ${rIdx + 1} SuperStar opzionale`}
+                          title="Numero SuperStar opzionale (1-90)"
+                          className="w-12 h-10 rounded-lg bg-slate-900 border border-purple-500/40 text-center font-mono font-bold text-sm text-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => {
-                        const rand = createRandomManualRow(rIdx + 1);
+                        const rand = createRandomManualRow(rIdx + 1, maxNumberForManualGame);
                         setManualRows((prev) =>
                           prev.map((item) =>
                             item.rowId === row.rowId
@@ -610,7 +754,7 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                         );
                       }}
                       className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-mono cursor-pointer"
-                      title="Riempi questa sestina con 6 numeri casuali"
+                      title={`Riempi questa sestina con 6 numeri casuali (1-${maxNumberForManualGame})`}
                     >
                       Casuale
                     </button>
@@ -647,11 +791,11 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                   type="button"
                   onClick={() => {
                     setCostManuallyEdited(false);
-                    setManualCost((manualRows.length * 1.0).toFixed(2));
+                    setManualCost((manualRows.length * unitCostPerColumn).toFixed(2));
                   }}
                   className="text-[10px] text-amber-400 hover:underline font-mono cursor-pointer"
                 >
-                  Auto (1€×{manualRows.length})
+                  Auto ({unitCostPerColumn}€×{manualRows.length})
                 </button>
               </div>
               <input
@@ -711,22 +855,42 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                 >
                   Concorso Riferimento
                 </label>
-                {draws.length > 0 && (
-                  <select
-                    aria-label="Seleziona concorso da archivio"
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) setManualContestId(e.target.value);
-                    }}
-                    className="bg-slate-900 text-[10px] text-slate-400 border border-slate-800 rounded px-1.5 py-0.5 font-mono"
-                  >
-                    <option value="">Da archivio...</option>
-                    {draws.slice(0, 15).map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.id} ({d.date})
-                      </option>
-                    ))}
-                  </select>
+                {manualGameType === 'winforitalia' ? (
+                  wfiDraws.length > 0 && (
+                    <select
+                      aria-label="Seleziona concorso Win for Italia da archivio"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) setManualContestId(e.target.value);
+                      }}
+                      className="bg-slate-900 text-[10px] text-emerald-300 border border-emerald-500/30 rounded px-1.5 py-0.5 font-mono"
+                    >
+                      <option value="">Da archivio 6/40...</option>
+                      {wfiDraws.slice(0, 20).map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.id} ({d.date})
+                        </option>
+                      ))}
+                    </select>
+                  )
+                ) : (
+                  draws.length > 0 && (
+                    <select
+                      aria-label="Seleziona concorso da archivio"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) setManualContestId(e.target.value);
+                      }}
+                      className="bg-slate-900 text-[10px] text-slate-400 border border-slate-800 rounded px-1.5 py-0.5 font-mono"
+                    >
+                      <option value="">Da archivio 6/90...</option>
+                      {draws.slice(0, 15).map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.id} ({d.date})
+                        </option>
+                      ))}
+                    </select>
+                  )
                 )}
               </div>
               <input
@@ -735,7 +899,9 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                 required
                 value={manualContestId}
                 onChange={(e) => setManualContestId(e.target.value)}
-                placeholder="es. 2026-175"
+                placeholder={
+                  manualGameType === 'winforitalia' ? 'es. WFI-2026-061' : 'es. 2026-175'
+                }
                 className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm font-mono font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
               <span className="text-[10px] text-slate-500 block">
@@ -783,6 +949,18 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
           {/* Footer Summary & Submit */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-800">
             <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
+              <span className="text-slate-400">
+                Gioco:{' '}
+                <strong
+                  className={
+                    manualGameType === 'winforitalia' ? 'text-emerald-300' : 'text-amber-300'
+                  }
+                >
+                  {manualGameType === 'winforitalia'
+                    ? 'Win for Italia / Win for Life (6/40)'
+                    : 'SuperEnalotto (6/90)'}
+                </strong>
+              </span>
               <span className="text-slate-400">
                 Sestine: <strong className="text-white">{manualRows.length}</strong>
               </span>
@@ -839,6 +1017,7 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                 const isSelected = activePlay?.id === play.id;
                 const isVerified = play.status === 'VERIFICATA';
                 const hasWin = play.result && play.result.totalWinning > 0;
+                const isWfiPlay = isWinForItaliaPlay(play);
 
                 return (
                   <div
@@ -851,15 +1030,19 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-mono font-bold text-sm text-white">
                           Concorso {play.targetContestId}
                         </span>
-                        {play.mode === 'manual' && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold uppercase">
-                            Manuale
-                          </span>
-                        )}
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                            isWfiPlay
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                          }`}
+                        >
+                          {isWfiPlay ? 'Win for Italia 6/40' : 'SuperEnalotto 6/90'}
+                        </span>
                       </div>
                       <span
                         className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
@@ -909,9 +1092,20 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                       <h3 className="text-lg font-extrabold text-white">
                         Giocata Concorso {activePlay.targetContestId}
                       </h3>
+                      <span
+                        className={`text-xs px-2.5 py-0.5 rounded-full font-mono font-bold border ${
+                          isWinForItaliaPlay(activePlay)
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                        }`}
+                      >
+                        {isWinForItaliaPlay(activePlay)
+                          ? 'Win for Italia Team / Win for Life (6/40)'
+                          : 'SuperEnalotto (6/90)'}
+                      </span>
                       <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-950 text-slate-300 border border-slate-800 font-mono">
                         {activePlay.mode === 'manual'
-                          ? `Registrazione Manuale (${activePlay.cost.toFixed(2)}€)`
+                          ? `Registrazione (${activePlay.cost.toFixed(2)}€)`
                           : activePlay.mode === 'pure_coverage'
                           ? `Copertura Pura (${activePlay.cost.toFixed(2)}€)`
                           : `SuperStar (${activePlay.cost.toFixed(2)}€)`}
@@ -996,41 +1190,107 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                   </div>
                 </div>
 
-                {/* Verification Trigger Bar */}
-                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-400">Verifica contro estrazione:</span>
-                    <select
-                      id="select-target-draw"
-                      defaultValue={draws[0]?.id || ''}
-                      className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    >
-                      {draws.slice(0, 15).map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.id} ({d.date}) - {d.numbers.join(', ')}
-                        </option>
-                      ))}
-                    </select>
+                {/* Verification Trigger Bar (Supports both SuperEnalotto 6/90 and Win for Italia Team / Win for Life 6/40) */}
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-300">
+                      Archivio Estrazioni di Verifica:
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        data-testid="verify-switch-superenalotto"
+                        onClick={() => {
+                          setVerifyGameType('superenalotto');
+                          setSelectedTargetDrawId(draws[0]?.id || '');
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border flex items-center gap-1 ${
+                          verifyGameType === 'superenalotto'
+                            ? 'bg-amber-500 text-slate-950 border-amber-300 shadow'
+                            : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                        }`}
+                      >
+                        <Trophy className="w-3.5 h-3.5" />
+                        <span>SuperEnalotto (6/90)</span>
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="verify-switch-winforitalia"
+                        onClick={() => {
+                          setVerifyGameType('winforitalia');
+                          const matchingWfi = wfiDraws.find(
+                            (d) => d.id === activePlay.targetContestId
+                          );
+                          setSelectedTargetDrawId(matchingWfi?.id || wfiDraws[0]?.id || '');
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border flex items-center gap-1 ${
+                          verifyGameType === 'winforitalia'
+                            ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow'
+                            : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                        }`}
+                      >
+                        <Crosshair className="w-3.5 h-3.5" />
+                        <span>Win for Italia Team / Win for Life (6/40)</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const sel = document.getElementById(
-                        'select-target-draw'
-                      ) as HTMLSelectElement;
-                      const chosenId = sel ? sel.value : draws[0]?.id;
-                      const drawToMatch =
-                        draws.find((d) => d.id === chosenId) || draws[0];
-                      if (drawToMatch) {
-                        handleVerifyPlay(activePlay, drawToMatch);
-                      }
-                    }}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs shadow-md hover:from-amber-400 hover:to-amber-500 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Confronta ed Evidenzia Vincite</span>
-                  </button>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-xs flex-1">
+                      <span className="text-slate-400 shrink-0">Verifica contro estrazione:</span>
+                      <select
+                        id="select-target-draw"
+                        data-testid="select-target-draw"
+                        value={selectedTargetDrawId}
+                        onChange={(e) => setSelectedTargetDrawId(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      >
+                        {verifyGameType === 'winforitalia'
+                          ? wfiDraws.slice(0, 30).map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.id} ({d.date} ore {d.time || '20:00'}) - [{d.numbers.join(', ')}]
+                              </option>
+                            ))
+                          : draws.slice(0, 30).map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.id} ({d.date}) - {d.numbers.join(', ')} (J:{d.jolly}
+                                {d.superstar ? ` ★:${d.superstar}` : ''})
+                              </option>
+                            ))}
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      data-testid="verify-play-submit-btn"
+                      onClick={() => {
+                        if (verifyGameType === 'winforitalia') {
+                          const wfiToMatch =
+                            wfiDraws.find((d) => d.id === selectedTargetDrawId) || wfiDraws[0];
+                          if (wfiToMatch) {
+                            handleVerifyWinForItaliaPlay(activePlay, wfiToMatch);
+                          }
+                        } else {
+                          const drawToMatch =
+                            draws.find((d) => d.id === selectedTargetDrawId) || draws[0];
+                          if (drawToMatch) {
+                            handleVerifyPlay(activePlay, drawToMatch);
+                          }
+                        }
+                      }}
+                      className={`px-4 py-2 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shrink-0 ${
+                        verifyGameType === 'winforitalia'
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 hover:from-emerald-400 hover:to-teal-500'
+                          : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 hover:from-amber-400 hover:to-amber-500'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>
+                        Confronta ed Evidenzia Vincite (
+                        {verifyGameType === 'winforitalia' ? '6/40' : '6/90'})
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Columns Match Breakdown */}

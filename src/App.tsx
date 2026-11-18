@@ -76,10 +76,19 @@ import {
   subscribeCloudDeletedPlayIds,
   subscribeCloudACL
 } from './utils/firebase';
+import {
+  WinForItaliaDraw,
+  loadWinForItaliaDraws,
+  saveWinForItaliaDraws,
+  syncWinForItaliaDrawsFromServer
+} from './utils/winForItalia';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('generator');
   const [draws, setDraws] = useState<Draw[]>(() => loadDraws());
+  const [winForItaliaDraws, setWinForItaliaDraws] = useState<WinForItaliaDraw[]>(() =>
+    loadWinForItaliaDraws()
+  );
   const [weights, setWeights] = useState<ScoringWeights>(() => loadWeights());
   const [filters, setFilters] = useState<FilterOptions>(() => loadFilters());
   const [savedPlays, setSavedPlays] = useState<SavedPlay[]>(() => loadSavedPlays());
@@ -109,6 +118,15 @@ export default function App() {
       .then((res) => {
         if (res.draws.length > 0) {
           setDraws(res.draws);
+        }
+      })
+      .catch(() => {
+        // Ignore if offline
+      });
+    syncWinForItaliaDrawsFromServer()
+      .then((res) => {
+        if (res.draws.length > 0) {
+          setWinForItaliaDraws(res.draws);
         }
       })
       .catch(() => {
@@ -390,6 +408,12 @@ export default function App() {
     saveDraws(newDraws);
   };
 
+  // Update all Win for Italia Team (6/40) draws
+  const handleUpdateWinForItaliaDraws = (newWfiDraws: WinForItaliaDraw[]) => {
+    setWinForItaliaDraws(newWfiDraws);
+    saveWinForItaliaDraws(newWfiDraws);
+  };
+
   // Add Play to ledger (tagged with the current user's email)
   const handleSavePlay = (newPlay: SavedPlay) => {
     const playWithOwner: SavedPlay = {
@@ -481,7 +505,11 @@ export default function App() {
         )}
 
         {activeTab === 'winforitalia' && (
-          <WinForItaliaLab onSavePlay={handleSavePlay} />
+          <WinForItaliaLab
+            onSavePlay={handleSavePlay}
+            draws={winForItaliaDraws}
+            onUpdateDraws={handleUpdateWinForItaliaDraws}
+          />
         )}
 
         {activeTab === 'simulation' && (
@@ -501,6 +529,8 @@ export default function App() {
           <HistoricalArchive
             draws={draws}
             onUpdateDraws={handleUpdateDraws}
+            winForItaliaDraws={winForItaliaDraws}
+            onUpdateWinForItaliaDraws={handleUpdateWinForItaliaDraws}
             onOpenSmartPaste={() => setIsSmartPasteOpen(true)}
             savedPlays={userSavedPlays}
             weeklyColumns={weeklyColumns.length > 0 ? weeklyColumns : defaultWeeklyColumns}
@@ -513,6 +543,7 @@ export default function App() {
           <PlaysVerification
             plays={userSavedPlays}
             draws={draws}
+            winForItaliaDraws={winForItaliaDraws}
             onSavePlay={handleSavePlay}
             onUpdatePlay={handleUpdatePlay}
             onDeletePlay={handleDeletePlay}

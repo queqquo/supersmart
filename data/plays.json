@@ -1,5 +1,79 @@
 [
   {
+    "status": "VERIFICATA",
+    "manualNote": "Win for Italia Team (6/40) — Sestina Cecchino #1 (2,00 €)",
+    "savedAmount": 0,
+    "id": "play-wfi-1795036570889",
+    "cost": 2,
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "updatedAt": "2026-11-18T21:16:10.892Z",
+    "poolNumbers": [
+      1,
+      3,
+      6,
+      14,
+      15,
+      16,
+      26,
+      28,
+      30,
+      34,
+      35,
+      38
+    ],
+    "targetContestId": "WFI-2026-304",
+    "columns": [
+      {
+        "odds": 3,
+        "id": 1,
+        "sum": 123,
+        "numbers": [
+          3,
+          14,
+          15,
+          26,
+          30,
+          35
+        ],
+        "highs": 3,
+        "lows": 3,
+        "evens": 3
+      }
+    ],
+    "createdAt": "2026-11-18T21:16:10.889Z",
+    "mode": "manual",
+    "result": {
+      "matchesPerColumn": [
+        {
+          "columnId": 1,
+          "numbers": [
+            3,
+            14,
+            15,
+            26,
+            30,
+            35
+          ],
+          "matchedNumbers": [
+            3,
+            14,
+            35
+          ],
+          "matchCount": 3,
+          "hasJolly": false,
+          "hasSuperstar": false,
+          "prizeTier": "Punti 3 (Win for Italia 6/40)",
+          "estimatedPrize": 8
+        }
+      ],
+      "totalWinning": 8,
+      "netReturn": 6,
+      "bestMatch": 3,
+      "hasWin": true,
+      "verifiedAt": "2026-11-18T21:16:19.774Z"
+    }
+  },
+  {
     "id": "play-wfi-1795034983423",
     "createdAt": "2026-11-18T20:49:43.423Z",
     "targetContestId": "WFI-2026-304",
