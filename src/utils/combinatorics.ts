@@ -785,8 +785,166 @@ export function scoreAllNumbers(
   return scoredList;
 }
 
+export interface FunnelCandidateScore {
+  num: number;
+  score: number;
+  sameDecadeCount: number;
+  sameCadenceCount: number;
+  adjacentCount: number;
+  isPolarized: boolean;
+  dispersionPenalty: number;
+}
+
+export interface FunnelPoolSelectionResult {
+  geneticCandidates: number[];
+  chaosNumbers: number[];
+  pool30: number[];
+  scoredPool: FunnelCandidateScore[];
+  top12Numbers: number[];
+}
+
 /**
- * Full Pipeline: Generates the optimized SuperEnalotto system using Soft-Penalty Orthogonal Reduction
+ * Extracts the top N (default 25) numbers from a scored number ranking.
+ */
+export function generateGeneticTopNumbers(
+  scoredNumbers: Array<NumberStat | { number: number; score?: number; compositeScore?: number } | number>,
+  count: number = 25
+): number[] {
+  const result: number[] = [];
+  for (const item of scoredNumbers) {
+    const num = typeof item === 'number' ? item : item.number;
+    if (num >= 1 && num <= 90 && !result.includes(num)) {
+      result.push(num);
+      if (result.length === count) break;
+    }
+  }
+  for (let n = 1; n <= 90 && result.length < count; n++) {
+    if (!result.includes(n)) result.push(n);
+  }
+  return result;
+}
+
+/**
+ * Scores a 30-number candidate pool in Pure Competition (Opzione 1):
+ * - Bonus Clustering: +20 per same decade mate, +15 per same cadence mate, +30 per adjacent (±1 / ±2) mate
+ * - Bonus Polarizzazione: +35 for extreme ranges (1–15 and 76–90)
+ * - Penalità Dispersione: -60 for completely isolated numbers (0 decade mates & 0 adjacent),
+ *   -25 for single-decade without decade mates, and -20 for isolated middle-board numbers (31–60 with 0 adjacent)
+ */
+export function scorePool30InPureCompetition(pool30: number[]): FunnelCandidateScore[] {
+  return pool30.map((num) => {
+    let score = 0;
+
+    const decade = Math.floor((num - 1) / 10);
+    const cadence = num % 10;
+
+    // Conta i compagni nel pool dei 30
+    const sameDecadeCount = pool30.filter(
+      (n) => n !== num && Math.floor((n - 1) / 10) === decade
+    ).length;
+    const sameCadenceCount = pool30.filter(
+      (n) => n !== num && n % 10 === cadence
+    ).length;
+    const adjacentCount = pool30.filter(
+      (n) => n !== num && Math.abs(n - num) <= 2
+    ).length;
+
+    // BONUS CLUSTERING
+    score += sameDecadeCount * 20;
+    score += sameCadenceCount * 15;
+    score += adjacentCount * 30;
+
+    // BONUS POLARIZZAZIONE (Estremi del tabellone)
+    const isPolarized = num <= 15 || num >= 76;
+    if (isPolarized) {
+      score += 35;
+    }
+
+    // PENALITÀ DISPERSIONE (Isolati e fascia centrale senza cluster)
+    let dispersionPenalty = 0;
+    if (sameDecadeCount === 0 && adjacentCount === 0) {
+      score -= 60; // Penalità pesante per numeri completamente isolati
+      dispersionPenalty += 60;
+    } else if (sameDecadeCount === 0) {
+      score -= 25; // Penalità media per decina singola
+      dispersionPenalty += 25;
+    }
+
+    if (num >= 31 && num <= 60 && adjacentCount === 0) {
+      score -= 20; // Penalizza la "pancia" dispersa del tabellone
+      dispersionPenalty += 20;
+    }
+
+    return {
+      num,
+      score,
+      sameDecadeCount,
+      sameCadenceCount,
+      adjacentCount,
+      isPolarized,
+      dispersionPenalty
+    };
+  });
+}
+
+/**
+ * Pipeline a Imbuto (90 -> 30 -> 12) in Competizione Pura con Polarizzazione e Penalità Dispersione:
+ * 1. Estrae i 25 migliori candidati dal motore genetico/statistico esistente
+ * 2. Inietta 5 numeri casuali (Math.random() univoci tra 1 e 90) per formare un pool di 30 candidati
+ * 3. Valuta tutti e 30 i candidati alla pari con scorePool30InPureCompetition (Clustering + Polarizzazione - Dispersione)
+ * 4. Seleziona i Top 12 (o targetSize) ordinati in modo crescente da passare alla matrice ortogonale C(12,6,3)
+ */
+export function selectFunnelPool30To12(
+  scoredOrRankedInput: Array<NumberStat | { number: number; score?: number; compositeScore?: number } | number>,
+  targetSize: number = 12,
+  rng: () => number = Math.random
+): FunnelPoolSelectionResult {
+  // 1. Genera i 25 candidati dal motore genetico esistente
+  const geneticCandidates: number[] = generateGeneticTopNumbers(scoredOrRankedInput, 25);
+
+  // 2. Inietta 5 numeri di puro caos (senza duplicati) per arrivare a 30
+  const pool30: number[] = [...geneticCandidates];
+  const chaosNumbers: number[] = [];
+  let safetyCounter = 0;
+  while (pool30.length < 30 && safetyCounter < 1000) {
+    safetyCounter++;
+    const randomNum = Math.floor(rng() * 90) + 1;
+    if (!pool30.includes(randomNum)) {
+      pool30.push(randomNum);
+      chaosNumbers.push(randomNum);
+    }
+  }
+  for (let n = 1; n <= 90 && pool30.length < 30; n++) {
+    if (!pool30.includes(n)) {
+      pool30.push(n);
+      chaosNumbers.push(n);
+    }
+  }
+
+  // 3. Scoring in Competizione Pura (Clustering + Polarizzazione + Penalità Dispersione)
+  const scoredPool = scorePool30InPureCompetition(pool30);
+
+  // 4. Estrazione Top 12 (o targetSize) finali per la matrice C(12,6,3)
+  const clampedTargetSize = Math.min(30, Math.max(6, Math.round(targetSize || 12)));
+  const top12Numbers: number[] = [...scoredPool]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, clampedTargetSize)
+    .map((item) => item.num)
+    .sort((a, b) => a - b);
+
+  return {
+    geneticCandidates,
+    chaosNumbers,
+    pool30,
+    scoredPool,
+    top12Numbers
+  };
+}
+
+/**
+ * Full Pipeline: Generates the optimized SuperEnalotto system using Soft-Penalty Orthogonal Reduction.
+ * Disables the legacy Dispersione Decine filter weight in the final reduction phase so that
+ * clustered/polarized pairs from the 30->12 funnel can form optimal triplets in C(12,6,3).
  */
 export function generateOptimizedSystem(
   poolNumbers: number[],
@@ -798,6 +956,12 @@ export function generateOptimizedSystem(
   const startTime = performance.now();
   const sortedPool = [...poolNumbers].sort((a, b) => a - b);
 
+  // Disable legacy decade dispersion filter during final reduction (Fase 2 specification)
+  const effectiveFilters: FilterOptions = {
+    ...filters,
+    decades: false
+  };
+
   // 1. Generate all C(v, 6) integral combinations
   const allCombos = generateCombinations(sortedPool, 6);
 
@@ -805,7 +969,7 @@ export function generateOptimizedSystem(
   // to greedyCoveringReduction with soft-penalty scoring so the mathematical covering matrix is never broken
   let zeroPenaltyCount = 0;
   for (let i = 0; i < allCombos.length; i++) {
-    if (computeFilterPenalty(allCombos[i], filters) === 0) {
+    if (computeFilterPenalty(allCombos[i], effectiveFilters) === 0) {
       zeroPenaltyCount++;
     }
   }
@@ -816,7 +980,7 @@ export function generateOptimizedSystem(
     sortedPool,
     targetColumnsCount,
     coverageTarget,
-    filters
+    effectiveFilters
   );
 
   // 4. Form columns with metrics and SuperStar if requested

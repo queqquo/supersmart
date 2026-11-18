@@ -24,6 +24,7 @@ import {
 import {
   calculateNumberStatistics,
   scoreAllNumbers,
+  selectFunnelPool30To12,
   generateOptimizedSystem,
   calculateBudgetSystemAllocation,
   computeFilterPenalty
@@ -192,78 +193,38 @@ export const CAMEL_AGENTS_ROSTER: CamelAgentProfile[] = [
 
 /**
  * Helper: Select a proportional Low/High pool of size V from an honest statistical ranking:
- * - Takes the top `Math.round(V / 3)` strongest numbers in [1..31] (4 numbers when V=12)
- * - Takes the top `V - Math.round(V / 3)` strongest numbers in [32..90] (8 numbers when V=12)
- * Never adds artificial score bonuses to numbers > 31, while respecting decade and cadence caps.
+/**
+ * Helper: Select a pool of size V (default 12) via the 90 -> 30 (25 Top + 5 Chaos) -> 12 Funnel Pipeline
+ * in Pure Competition (Clustering + Polarization - Dispersion Penalty).
  */
 export function selectProportionalLowHighPool(
   rankedNumbers: number[],
-  poolSizeV: number,
-  maxPerDecade: number = 2,
-  maxPerCadence: number = 2
+  poolSizeV: number
 ): number[] {
-  const targetLowCount = Math.round(poolSizeV / 3); // 4 when V=12
-  const targetHighCount = poolSizeV - targetLowCount; // 8 when V=12
-
-  const decCounts = new Uint8Array(10);
-  const cadCounts = new Uint8Array(10);
-  const pickedSet = new Set<number>();
-
-  const pickZone = (minBall: number, maxBall: number, targetCount: number) => {
-    let count = 0;
-    // Pass 1: Respect decade and cadence dispersion caps
-    for (const num of rankedNumbers) {
-      if (count >= targetCount) break;
-      if (num < minBall || num > maxBall || pickedSet.has(num)) continue;
-      const dec = num >= 90 ? 9 : (num / 10) | 0;
-      const cad = num % 10;
-      if (decCounts[dec] >= maxPerDecade || cadCounts[cad] >= maxPerCadence) continue;
-      pickedSet.add(num);
-      decCounts[dec]++;
-      cadCounts[cad]++;
-      count++;
-    }
-    // Pass 2: Fallback to pure statistical rank within this zone if cap was reached
-    for (const num of rankedNumbers) {
-      if (count >= targetCount) break;
-      if (num < minBall || num > maxBall || pickedSet.has(num)) continue;
-      pickedSet.add(num);
-      const dec = num >= 90 ? 9 : (num / 10) | 0;
-      const cad = num % 10;
-      decCounts[dec]++;
-      cadCounts[cad]++;
-      count++;
-    }
-  };
-
-  // 1. Pick the 4 strongest numbers from 1..31 (for V=12)
-  pickZone(1, 31, targetLowCount);
-  // 2. Pick the 8 strongest numbers from 32..90 (for V=12)
-  pickZone(32, 90, targetHighCount);
-
-  return Array.from(pickedSet).sort((a, b) => a - b);
+  return selectFunnelPool30To12(rankedNumbers, poolSizeV).top12Numbers;
 }
 
 /**
- * Helper: Build a high-dispersion Genetic Pool of size V using pure statistical scores S(x)
- * without falsifying >31 scores: takes the 4 strongest in 1..31 + 8 strongest in 32..90 (for V=12)
- * with ultra-wide decade dispersion (max 1 per decade on first pass, max 2 per cadence).
+ * Helper: Build a Polarized & Clustered Genetic Pool of size V via the 30->12 Funnel Pipeline:
+ * 1. Extracts the top 25 numbers from the genetic engine (`scoredNumbers`)
+ * 2. Injects 5 unique random chaos numbers (`Math.random()`) to reach 30 candidates
+ * 3. Scores all 30 in Pure Competition (Clustering +20/+15/+30, Polarization 1–15/76–90 +35, Dispersion Penalty -60/-25/-20)
+ * 4. Returns the Top 12 (or poolSizeV) sorted ascending for C(12,6,3).
  */
 function buildAntiCrowdResonancePool(
   scoredNumbers: ReturnType<typeof scoreAllNumbers>,
   poolSizeV: number
 ): number[] {
-  // Pure statistical ranking by compositeScore (zero artificial bonus on >31)
   const pureRankedNumbers = [...scoredNumbers]
     .sort((a, b) => b.compositeScore - a.compositeScore || a.number - b.number)
     .map((s) => s.number);
 
-  return selectProportionalLowHighPool(pureRankedNumbers, poolSizeV, 1, 2);
+  return selectFunnelPool30To12(pureRankedNumbers, poolSizeV).top12Numbers;
 }
 
 /**
  * Helper: Build a Consensus Hybrid Pool combining Walk-Forward Pool and Genetic Top Numbers,
- * strictly selecting the 4 strongest in 1..31 and 8 strongest in 32..90 (when V=12) without >31 bias.
+ * passing the merged top 25 + 5 chaos candidates through the 30->12 Pure Competition Funnel.
  */
 function buildConsensusHybridPool(
   wfPool: number[],
@@ -287,8 +248,7 @@ function buildConsensusHybridPool(
     .sort((a, b) => b[1] - a[1])
     .map((e) => e[0]);
 
-  const maxPerBucket = poolSizeV <= 13 ? 2 : 3;
-  return selectProportionalLowHighPool(mergedRanked, poolSizeV, maxPerBucket, maxPerBucket);
+  return selectFunnelPool30To12(mergedRanked, poolSizeV).top12Numbers;
 }
 
 /**
@@ -428,13 +388,16 @@ export function runCamelWorkforcePipeline(params: {
   // --- STEP 2: Walk-Forward Scout runs rolling window validation on clampedWindow draws ---
   const tWf0 = performance.now();
   const wfRes = generateSmartPoolRecommendation(draws, clampedV, clampedWindow);
-  // Ensure strict proportional split (4 low + 8 high for V=12) on the Walk-Forward pool
-  const wfProportionalPool = selectProportionalLowHighPool(
-    wfRes.recommendedPool,
-    clampedV,
-    clampedV <= 13 ? 2 : 3,
-    clampedV <= 13 ? 2 : 3
+  const wfScoredForWindow = scoreAllNumbers(
+    calculateNumberStatistics(windowedDraws, Math.min(36, Math.max(1, clampedWindow))),
+    wfRes.mappedScoringWeights,
+    36
   );
+  const wfRanked25 = [
+    ...wfRes.recommendedPool,
+    ...wfScoredForWindow.map((s) => s.number).filter((n) => !wfRes.recommendedPool.includes(n))
+  ];
+  const wfProportionalPool = selectProportionalLowHighPool(wfRanked25, clampedV);
   const wfMs = Math.max(1, Math.round(performance.now() - tWf0));
 
   dialogueTranscript.push({
@@ -445,17 +408,17 @@ export function runCamelWorkforcePipeline(params: {
     phase: 'exploration',
     content: `Ho testato 6 vettori statistici puri in validazione Walk-Forward su ${
       wfRes.walkForwardWindowSize
-    } estrazioni storiche (zero bonus artificiali >31). La strategia dominante è "${
+    } estrazioni storiche. La strategia dominante è "${
       wfRes.bestStrategy.label
     }" con ${wfRes.bestStrategy.terniHitCount} terni e ${
       wfRes.bestStrategy.ambiHitCount
-    } ambi colpiti out-of-sample. Ho estratto i ${lowTargetCount} migliori in [1–31] e gli ${highTargetCount} migliori in [32–90]: Pool [${wfProportionalPool.join(
+    } ambi colpiti out-of-sample. Applicando l'Imbuto 30→${clampedV} (25 Candidati + 5 Caos in Competizione Pura: Clustering + Polarizzazione − Penalità Dispersione): Pool [${wfProportionalPool.join(
       ', '
     )}]. Passo al @Genetista Storico.`,
     toolCall: {
-      toolName: 'generateSmartPoolRecommendation',
+      toolName: 'generateSmartPoolRecommendation + selectFunnelPool30To12',
       executionMs: wfMs,
-      inputSummary: `draws=${draws.length}, poolSize=${clampedV} (${lowTargetCount} bassi + ${highTargetCount} alti), window=${clampedWindow}`,
+      inputSummary: `draws=${draws.length}, funnel=30->${clampedV} (25 Top + 5 Chaos), window=${clampedWindow}`,
       outputSummary: `Best="${wfRes.bestStrategy.id}", Score=${wfRes.bestStrategy.compositeYieldScore.toFixed(
         1
       )}, Pool=[${wfProportionalPool.join(',')}]`
@@ -498,7 +461,7 @@ export function runCamelWorkforcePipeline(params: {
   const genMs = Math.max(1, Math.round(performance.now() - tGen0));
 
   const wfPoolSet = new Set(wfProportionalPool);
-  const geneticTopSet = new Set(geneticScored.slice(0, clampedV + 6).map((s) => s.number));
+  const geneticTopSet = new Set(geneticScored.slice(0, 25).map((s) => s.number));
 
   dialogueTranscript.push({
     id: `msg-${stepCounter}`,
@@ -516,18 +479,18 @@ export function runCamelWorkforcePipeline(params: {
       bestTriplet.rawHistoricalGrossWin ?? bestTriplet.totalGrossGain
     ).toLocaleString(
       'it-IT'
-    )}€. Rispettando la regola onesta (${lowTargetCount} più forti 1–31 + ${highTargetCount} più forti 32–90), ho generato il Pool Consensus [${consensusPool.join(
+    )}€. Tramite l'Imbuto 30→${clampedV} (25 Genetici + 5 Caos in Competizione Pura con Bonus Clustering, Polarizzazione 1–15/76–90 e Penalità Dispersione), ho generato il Pool Consensus [${consensusPool.join(
       ', '
-    )}] e il Pool Genetico Puro Dispersione [${antiCrowdPool.join(
+    )}] e il Pool Imbuto 30→${clampedV} Competizione Pura [${antiCrowdPool.join(
       ', '
     )}]. @Architetto Ortogonale: procedi con la riduzione 2-Opt Kempe.`,
     toolCall: {
-      toolName: 'runEvolutionarySliderTraining',
+      toolName: 'runEvolutionarySliderTraining + selectFunnelPool30To12',
       executionMs: genMs,
-      inputSummary: `n1=16, windowDraws=${clampedWindow}, generations=6, split=${lowTargetCount}+${highTargetCount}`,
+      inputSummary: `n1=16, windowDraws=${clampedWindow}, generations=6, funnel=30->${clampedV} (25+5)`,
       outputSummary: `w1=${bestTriplet.w1.toFixed(2)}, w2=${bestTriplet.w2.toFixed(
         2
-      )}, w3=${bestTriplet.w3.toFixed(2)} -> Consensus=[${consensusPool.join(',')}]`
+      )}, w3=${bestTriplet.w3.toFixed(2)} -> FunnelTop12=[${antiCrowdPool.join(',')}]`
     },
     metricsBadge: `Pesi Genetici: (${bestTriplet.w1.toFixed(2)}, ${bestTriplet.w2.toFixed(
       2
@@ -536,13 +499,14 @@ export function runCamelWorkforcePipeline(params: {
 
   // --- STEP 4: Orthogonal Architect builds the 3 Reduced Systems using Greedy + 2-Opt Kempe Local Search ---
   const tArch0 = performance.now();
+  // Fase 2 specification: Disattivazione Filtro Dispersione Decine nella fase di scrematura finale (decades: false)
   const strictFilters: FilterOptions = {
     ...baseFilters,
     evenOdd: true,
     highLow: true,
     sumRange: true,
     consecutive: true,
-    decades: true,
+    decades: false,
     cadences: true
   };
 
@@ -559,24 +523,24 @@ export function runCamelWorkforcePipeline(params: {
   }> = [
     {
       id: 'cand-wf',
-      strategyName: `Strategia A — Walk-Forward (${clampedWindow} Estrazioni, ${lowTargetCount} Bassi + ${highTargetCount} Alti)`,
-      strategyOriginDescription: `Prende i ${lowTargetCount} numeri più forti in fascia 1–31 e gli ${highTargetCount} numeri più forti in fascia 32–90 validati sulle ultime ${clampedWindow} estrazioni reali (senza bonus artificiali ai numeri >31).`,
+      strategyName: `Strategia A — Walk-Forward + Imbuto 30→${clampedV} (${clampedWindow} Estrazioni)`,
+      strategyOriginDescription: `Estrae i 25 migliori numeri Walk-Forward sulle ultime ${clampedWindow} estrazioni + 5 numeri Caos e seleziona i Top ${clampedV} in Competizione Pura (Clustering + Polarizzazione − Dispersione).`,
       proposedByAgent: 'walk_forward_scout',
       pool: wfProportionalPool,
       weights: wfRes.mappedScoringWeights
     },
     {
       id: 'cand-consensus',
-      strategyName: `Strategia B — Consensus Ibrido WF + Genetico (${lowTargetCount} Bassi + ${highTargetCount} Alti)`,
-      strategyOriginDescription: `Unisce la classifica Walk-Forward (${clampedWindow} estrazioni) e la classifica dell'Algoritmo Genetico, estraendo onestamente i ${lowTargetCount} migliori in [1–31] e gli ${highTargetCount} migliori in [32–90].`,
+      strategyName: `Strategia B — Consensus Ibrido WF + Genetico (Imbuto 30→${clampedV})`,
+      strategyOriginDescription: `Unisce la classifica Walk-Forward (${clampedWindow} estrazioni) e l'Algoritmo Genetico in una rosa di 25 + 5 Caos = 30 candidati, premiando cluster ed estremi (1–15 / 76–90).`,
       proposedByAgent: 'genetic_strategist',
       pool: consensusPool,
       weights: geneticWeights
     },
     {
       id: 'cand-anticrowd',
-      strategyName: `Strategia C — Genetico Puro & Dispersione Decine (${lowTargetCount} Bassi + ${highTargetCount} Alti)`,
-      strategyOriginDescription: `Usa la classifica genetica pura (w₁, w₂, w₃ su ${clampedWindow} concorsi, zero punti finti ai >31) e seleziona i ${lowTargetCount} più forti in [1–31] e gli ${highTargetCount} più forti in [32–90] con massima dispersione tra le decine.`,
+      strategyName: `Strategia C — Imbuto 30→${clampedV} Competizione Pura (Clustering & Penalità Dispersione)`,
+      strategyOriginDescription: `Estrae i 25 migliori numeri genetici (w₁, w₂, w₃) + 5 numeri Caos (totale 30) e li valuta in Competizione Pura: Bonus Clustering (+20 decina, +15 cadenza, +30 contigui ±2), Polarizzazione (+35) e Penalità Dispersione (−60/−25/−20).`,
       proposedByAgent: 'anti_crowd_critic',
       pool: antiCrowdPool,
       weights: geneticWeights

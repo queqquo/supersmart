@@ -26,6 +26,7 @@ import {
 import {
   calculateNumberStatistics,
   scoreAllNumbers,
+  selectFunnelPool30To12,
   generateOptimizedSystem
 } from './utils/combinatorics';
 import {
@@ -89,7 +90,7 @@ export default function App() {
   const defaultWeeklyColumns = useMemo<GeneratedColumn[]>(() => {
     const stats = calculateNumberStatistics(draws, 36);
     const scored = scoreAllNumbers(stats, weights, 36);
-    const pool = scored.slice(0, 12).map((s) => s.number).sort((a, b) => a - b);
+    const pool = selectFunnelPool30To12(scored, 12).top12Numbers;
     return generateOptimizedSystem(pool, filters, 10, undefined, coverageTarget).columns;
   }, [draws, weights, filters, coverageTarget]);
 

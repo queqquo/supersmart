@@ -352,7 +352,39 @@ test('compareSavedPlayAgainstRecentDraws clamps range [10..200], highlights draw
   assert.ok(summary.grossWinnings > 0);
 });
 
-test('runCamelWorkforcePipeline coordinates 5 agents, enforces 4 low (1..31) + 8 high (32..90) split, and supports window from 1 to max draws (default 200)', async () => {
+test('selectFunnelPool30To12 implements 90->30 (25 Genetic + 5 Chaos)->12 Pure Competition with Clustering, Polarization, and Dispersion Penalty', async () => {
+  const { selectFunnelPool30To12, scorePool30InPureCompetition } = await import('./combinatorics');
+
+  // Verify Pure Competition scoring math:
+  // Cluster in extreme decade [1, 2, 11] vs isolated middle number [45]
+  const testPool = [1, 2, 11, 45];
+  const scored = scorePool30InPureCompetition(testPool);
+  const s1 = scored.find((s) => s.num === 1)!;
+  const s45 = scored.find((s) => s.num === 45)!;
+  // Number 1: sameDecade=1 (2), sameCadence=1 (11), adjacent=1 (2), polarized=true (<=15) -> 20 + 15 + 30 + 35 = +100
+  assert.equal(s1.score, 100);
+  // Number 45: sameDecade=0, sameCadence=0, adjacent=0, in [31..60] -> -60 (isolated) - 20 (middle belly) = -80
+  assert.equal(s45.score, -80);
+
+  // Full 25 + 5 -> 30 -> 12 funnel check
+  const rankedInput = Array.from({ length: 90 }, (_, i) => i + 1);
+  const funnelRes = selectFunnelPool30To12(rankedInput, 12);
+  assert.equal(funnelRes.geneticCandidates.length, 25);
+  assert.equal(funnelRes.chaosNumbers.length, 5);
+  assert.equal(funnelRes.pool30.length, 30);
+  assert.equal(new Set(funnelRes.pool30).size, 30, 'All 30 candidates (25 + 5 chaos) must be unique');
+  assert.equal(funnelRes.top12Numbers.length, 12);
+  assert.equal(new Set(funnelRes.top12Numbers).size, 12, 'Top 12 must be 12 unique integers');
+  for (let i = 0; i < funnelRes.top12Numbers.length; i++) {
+    const n = funnelRes.top12Numbers[i];
+    assert.ok(n >= 1 && n <= 90, `Number ${n} must be between 1 and 90`);
+    if (i > 0) {
+      assert.ok(n > funnelRes.top12Numbers[i - 1], 'Top 12 must be sorted ascending');
+    }
+  }
+});
+
+test('runCamelWorkforcePipeline coordinates 5 agents, uses 30->12 Funnel Pipeline with decades dispersion filter disabled, and supports window from 1 to max draws (default 200)', async () => {
   const { generateFullHistoricalDataset } = await import('../data/seedDraws');
   const { runCamelWorkforcePipeline } = await import('./camelWorkforce');
   const full = generateFullHistoricalDataset();
@@ -379,15 +411,15 @@ test('runCamelWorkforcePipeline coordinates 5 agents, enforces 4 low (1..31) + 8
   });
 
   assert.equal(res.historicalDrawsWindow, 200);
-  assert.equal(res.lowNumbersCount, 4);
-  assert.equal(res.highNumbersCount, 8);
   assert.equal(res.agents.length, 5);
   assert.equal(res.candidates.length, 3);
   for (const cand of res.candidates) {
-    const lowCount = cand.poolNumbers.filter((n) => n >= 1 && n <= 31).length;
-    const highCount = cand.poolNumbers.filter((n) => n >= 32 && n <= 90).length;
-    assert.equal(lowCount, 4, `Candidate ${cand.id} must have 4 numbers in 1..31`);
-    assert.equal(highCount, 8, `Candidate ${cand.id} must have 8 numbers in 32..90`);
+    assert.equal(cand.poolNumbers.length, 12);
+    assert.equal(new Set(cand.poolNumbers).size, 12);
+    assert.equal(cand.filtersUsed.decades, false, 'Legacy decades dispersion filter must be disabled');
+    for (const n of cand.poolNumbers) {
+      assert.ok(n >= 1 && n <= 90);
+    }
   }
   assert.equal(res.winnerCandidate.systemResult.columns.length, 10);
   assert.ok(res.dialogueTranscript.length >= 5);
@@ -408,9 +440,10 @@ test('runCamelWorkforcePipeline coordinates 5 agents, enforces 4 low (1..31) + 8
     baseFilters: filters
   });
   assert.equal(res1.historicalDrawsWindow, 1);
-  assert.equal(res1.winnerCandidate.poolNumbers.filter((n) => n <= 31).length, 4);
-  assert.equal(res1.winnerCandidate.poolNumbers.filter((n) => n > 31).length, 8);
+  assert.equal(res1.winnerCandidate.poolNumbers.length, 12);
+  assert.equal(new Set(res1.winnerCandidate.poolNumbers).size, 12);
 });
+
 
 
 

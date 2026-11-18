@@ -43,6 +43,8 @@ import {
 import {
   calculateNumberStatistics,
   scoreAllNumbers,
+  selectFunnelPool30To12,
+  FunnelPoolSelectionResult,
   generateOptimizedSystem,
   calculateBudgetSystemAllocation,
   MAX_REDUCED_SYSTEM_BUDGET,
@@ -253,10 +255,14 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     return map;
   }, [scoredNumbers]);
 
-  // Derive default top V pool
+  // Funnel 90 -> 30 (25 Genetic + 5 Chaos) -> 12 (or poolSizeV) in Pure Competition
+  const [funnelSelection, setFunnelSelection] = useState<FunnelPoolSelectionResult>(() =>
+    selectFunnelPool30To12(scoredNumbers, poolSizeV)
+  );
+
   const defaultTopVNumbers = useMemo(() => {
-    return scoredNumbers.slice(0, poolSizeV).map((s) => s.number).sort((a, b) => a - b);
-  }, [scoredNumbers, poolSizeV]);
+    return funnelSelection.top12Numbers;
+  }, [funnelSelection]);
 
   // Initialize selectedPool only if it is currently empty
   useEffect(() => {
@@ -265,19 +271,16 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     }
   }, [defaultTopVNumbers, selectedPool.length]);
 
-  // Slider handlers: update weights and Pool Base preview, but DO NOT change sestine until user clicks "Calcola Sistema Ottimizzato"
+  // Slider handlers: update weights and Pool Base preview via 30->12 Funnel, but DO NOT change sestine until user clicks "Calcola Sistema Ottimizzato"
   const handleWeightChange = (key: keyof ScoringWeights, val: number) => {
     const updated = { ...weights, [key]: Number(val.toFixed(2)) };
     setManualPoolEdit(false);
     onUpdateWeights(updated);
     saveWeights(updated);
     const freshScored = scoreAllNumbers(numberStatsMap, updated, 36);
-    setSelectedPool(
-      freshScored
-        .slice(0, poolSizeV)
-        .map((s) => s.number)
-        .sort((a, b) => a - b)
-    );
+    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV);
+    setFunnelSelection(freshFunnel);
+    setSelectedPool(freshFunnel.top12Numbers);
     setHasPendingChanges(true);
   };
 
@@ -286,12 +289,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     onUpdateWeights(DEFAULT_WEIGHTS);
     saveWeights(DEFAULT_WEIGHTS);
     const freshScored = scoreAllNumbers(numberStatsMap, DEFAULT_WEIGHTS, 36);
-    setSelectedPool(
-      freshScored
-        .slice(0, poolSizeV)
-        .map((s) => s.number)
-        .sort((a, b) => a - b)
-    );
+    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV);
+    setFunnelSelection(freshFunnel);
+    setSelectedPool(freshFunnel.top12Numbers);
     setHasPendingChanges(true);
   };
 
@@ -300,25 +300,20 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     onUpdateWeights(newWeights);
     saveWeights(newWeights);
     const freshScored = scoreAllNumbers(numberStatsMap, newWeights, 36);
-    setSelectedPool(
-      freshScored
-        .slice(0, poolSizeV)
-        .map((s) => s.number)
-        .sort((a, b) => a - b)
-    );
+    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV);
+    setFunnelSelection(freshFunnel);
+    setSelectedPool(freshFunnel.top12Numbers);
     setHasPendingChanges(true);
   };
 
-  // Explicit "Ricalcola dai Pesi" action: refreshes Pool Base from weights without overwriting sestine until "Calcola Sistema Ottimizzato" is pressed
+  // Explicit "Ricalcola dai Pesi" action: refreshes Pool Base from weights via 30->12 Funnel (25 Genetic + 5 Chaos) without overwriting sestine until "Calcola Sistema Ottimizzato" is pressed
   const handleRecalculateFromWeights = () => {
     const freshScored = scoreAllNumbers(numberStatsMap, weights, 36);
-    const freshTopV = freshScored
-      .slice(0, poolSizeV)
-      .map((s) => s.number)
-      .sort((a, b) => a - b);
+    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV);
+    setFunnelSelection(freshFunnel);
     setManualPoolEdit(false);
     onClearSimPreset?.();
-    setSelectedPool(freshTopV);
+    setSelectedPool(freshFunnel.top12Numbers);
     setHasPendingChanges(true);
     setRecalcFeedback(true);
     setTimeout(() => setRecalcFeedback(false), 2500);
@@ -1036,11 +1031,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                     onClick={() => {
                       setPoolSizeV(v);
                       setManualPoolEdit(false);
-                      const freshTopV = scoredNumbers
-                        .slice(0, v)
-                        .map((s) => s.number)
-                        .sort((a, b) => a - b);
-                      setSelectedPool(freshTopV);
+                      const freshFunnel = selectFunnelPool30To12(scoredNumbers, v);
+                      setFunnelSelection(freshFunnel);
+                      setSelectedPool(freshFunnel.top12Numbers);
                       setHasPendingChanges(true);
                     }}
                     className={`px-2 py-0.5 text-xs font-mono font-bold rounded ${
@@ -1064,9 +1057,13 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">
                   Pool Base ({selectedPool.length} Numeri)
                 </h3>
-                {manualPoolEdit && (
+                {manualPoolEdit ? (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
                     Personalizzato
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
+                    Imbuto 30→{selectedPool.length} (25 Gen + 5 Caos)
                   </span>
                 )}
               </div>
@@ -1078,12 +1075,28 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                     : 'bg-slate-800/90 hover:bg-slate-800 text-amber-300 border-slate-700 hover:border-amber-500/40'
                 }`}
-                title="Ricalcola i migliori numeri in base agli slider w₁, w₂, w₃ attuali e rigenera le sestine"
+                title="Ricalcola i migliori numeri tramite Imbuto 30->12 (25 Genetici + 5 Caos in Competizione Pura)"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>{recalcFeedback ? 'Ricalcolato dai Pesi!' : 'Ricalcola dai Pesi'}</span>
+                <span>{recalcFeedback ? 'Imbuto 30→12 Ricalcolato!' : 'Ricalcola Imbuto 30→12'}</span>
               </button>
             </div>
+
+            {!manualPoolEdit && funnelSelection.chaosNumbers.length > 0 && (
+              <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-emerald-500/25 text-[11px] text-slate-300 space-y-1">
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span className="font-bold text-emerald-300">
+                    Competizione Pura (30 → {selectedPool.length}): Clustering + Polarizzazione − Dispersione
+                  </span>
+                  <span className="font-mono text-[10px] text-amber-300">
+                    5 Caos Iniettati: [{funnelSelection.chaosNumbers.join(', ')}]
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Rosa 30 (25 Genetici + 5 Caos) valutata per Ambi Decina (+20), Cadenza (+15), Contigui ±2 (+30), Estremi 1–15/76–90 (+35) e Penalità Dispersione (−60/−25/−20).
+                </p>
+              </div>
+            )}
 
             {/* Balls of the selected pool with live S(x) score */}
             <div className="flex flex-wrap gap-2.5 p-3 bg-slate-950 rounded-xl border border-slate-800 min-h-[68px]">
