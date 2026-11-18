@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Header, NavTab } from './components/Header';
 import { SystemGenerator } from './components/SystemGenerator';
 import { CamelWorkforceLab } from './components/CamelWorkforceLab';
+import { WinForItaliaLab } from './components/WinForItaliaLab';
 import { SimulationEngine } from './components/SimulationEngine';
 import { HistoricalArchive } from './components/HistoricalArchive';
 import { PlaysVerification } from './components/PlaysVerification';
@@ -90,7 +91,7 @@ export default function App() {
   const defaultWeeklyColumns = useMemo<GeneratedColumn[]>(() => {
     const stats = calculateNumberStatistics(draws, 36);
     const scored = scoreAllNumbers(stats, weights, 36);
-    const pool = selectFunnelPool30To12(scored, 12).top12Numbers;
+    const pool = selectFunnelPool30To12(scored, 10).top12Numbers;
     return generateOptimizedSystem(pool, filters, 10, undefined, coverageTarget).columns;
   }, [draws, weights, filters, coverageTarget]);
 
@@ -477,6 +478,10 @@ export default function App() {
             onApplyToGenerator={handleApplySimulationPreset}
             onSavePlay={handleSavePlay}
           />
+        )}
+
+        {activeTab === 'winforitalia' && (
+          <WinForItaliaLab onSavePlay={handleSavePlay} />
         )}
 
         {activeTab === 'simulation' && (

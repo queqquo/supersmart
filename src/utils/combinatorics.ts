@@ -787,6 +787,7 @@ export function scoreAllNumbers(
 
 export interface FunnelCandidateScore {
   num: number;
+  decade: number;
   score: number;
   sameDecadeCount: number;
   sameCadenceCount: number;
@@ -825,11 +826,12 @@ export function generateGeneticTopNumbers(
 }
 
 /**
- * Scores a 30-number candidate pool in Pure Competition (Opzione 1):
- * - Bonus Clustering: +20 per same decade mate, +15 per same cadence mate, +30 per adjacent (±1 / ±2) mate
- * - Bonus Polarizzazione: +35 for extreme ranges (1–15 and 76–90)
- * - Penalità Dispersione: -60 for completely isolated numbers (0 decade mates & 0 adjacent),
- *   -25 for single-decade without decade mates, and -20 for isolated middle-board numbers (31–60 with 0 adjacent)
+ * Scores a 30-number candidate pool with balanced Competition between Clusters/Sequences and Extremes:
+ * 1. BONUS CLUSTERING CON TETTO MASSIMO (max +45 pt totali):
+ *    min(sameDecadeCount, 2)*12 + min(sameCadenceCount, 2)*8 + min(adjacentCount, 2)*15, capped at 45
+ * 2. BONUS POLARIZZAZIONE EQUILIBRATO (+40 pt agli estremi 1–15 e 76–90)
+ * 3. PENALITÀ DISPERSIONE MIRATA (non uccide gli estremi isolati):
+ *    -5 se estremo isolato (0 decina e 0 contigui), -30 se non-estremo isolato, -15 se centrale (31–60) senza contigui
  */
 export function scorePool30InPureCompetition(pool30: number[]): FunnelCandidateScore[] {
   return pool30.map((num) => {
@@ -837,8 +839,9 @@ export function scorePool30InPureCompetition(pool30: number[]): FunnelCandidateS
 
     const decade = Math.floor((num - 1) / 10);
     const cadence = num % 10;
+    const isExtreme = num <= 15 || num >= 76;
+    const isCentral = num >= 31 && num <= 60;
 
-    // Conta i compagni nel pool dei 30
     const sameDecadeCount = pool30.filter(
       (n) => n !== num && Math.floor((n - 1) / 10) === decade
     ).length;
@@ -849,50 +852,126 @@ export function scorePool30InPureCompetition(pool30: number[]): FunnelCandidateS
       (n) => n !== num && Math.abs(n - num) <= 2
     ).length;
 
-    // BONUS CLUSTERING
-    score += sameDecadeCount * 20;
-    score += sameCadenceCount * 15;
-    score += adjacentCount * 30;
+    // 1. BONUS CLUSTERING CON TETTO MASSIMO (max +45 pt totali)
+    const rawClusterScore =
+      Math.min(sameDecadeCount, 2) * 12 +
+      Math.min(sameCadenceCount, 2) * 8 +
+      Math.min(adjacentCount, 2) * 15;
+    score += Math.min(rawClusterScore, 45);
 
-    // BONUS POLARIZZAZIONE (Estremi del tabellone)
-    const isPolarized = num <= 15 || num >= 76;
-    if (isPolarized) {
-      score += 35;
+    // 2. BONUS POLARIZZAZIONE EQUILIBRATO (+40 pt agli estremi)
+    if (isExtreme) {
+      score += 40;
     }
 
-    // PENALITÀ DISPERSIONE (Isolati e fascia centrale senza cluster)
+    // 3. PENALITÀ DISPERSIONE MIRATA (non uccide gli estremi isolati)
     let dispersionPenalty = 0;
     if (sameDecadeCount === 0 && adjacentCount === 0) {
-      score -= 60; // Penalità pesante per numeri completamente isolati
-      dispersionPenalty += 60;
-    } else if (sameDecadeCount === 0) {
-      score -= 25; // Penalità media per decina singola
-      dispersionPenalty += 25;
-    }
-
-    if (num >= 31 && num <= 60 && adjacentCount === 0) {
-      score -= 20; // Penalizza la "pancia" dispersa del tabellone
-      dispersionPenalty += 20;
+      const pen = isExtreme ? 5 : 30;
+      score -= pen;
+      dispersionPenalty += pen;
+    } else if (isCentral && adjacentCount === 0) {
+      score -= 15;
+      dispersionPenalty += 15;
     }
 
     return {
       num,
+      decade,
       score,
       sameDecadeCount,
       sameCadenceCount,
       adjacentCount,
-      isPolarized,
+      isPolarized: isExtreme,
       dispersionPenalty
     };
   });
 }
 
 /**
- * Pipeline a Imbuto (90 -> 30 -> 12) in Competizione Pura con Polarizzazione e Penalità Dispersione:
+ * Selezione Bilanciata dall'Imbuto (30 -> N, es. N=10 nel Generatore Ottimizzato e N=12 in Agenti CAMEL)
+ * Evita che i grappoli centrali monopolizzino il pool finale tramite:
+ * - Tetto massimo al bonus clustering (+45 pt)
+ * - Bonus polarizzazione equilibrato (+40 pt agli estremi 1–15 e 76–90)
+ * - Penalità dispersione mirata (-5 agli estremi isolati, -30 agli altri isolati, -15 ai centrali 31–60 senza contigui)
+ * - Limite morbido di massimo 3 numeri per singola decina
+ */
+export function selectBalancedTopNumbers(pool30: number[], targetCount: number): number[] {
+  const scoredPool = pool30.map((num) => {
+    let score = 0;
+
+    const decade = Math.floor((num - 1) / 10);
+    const cadence = num % 10;
+    const isExtreme = num <= 15 || num >= 76;
+    const isCentral = num >= 31 && num <= 60;
+
+    const sameDecadeCount = pool30.filter(
+      (n) => n !== num && Math.floor((n - 1) / 10) === decade
+    ).length;
+    const sameCadenceCount = pool30.filter(
+      (n) => n !== num && n % 10 === cadence
+    ).length;
+    const adjacentCount = pool30.filter(
+      (n) => n !== num && Math.abs(n - num) <= 2
+    ).length;
+
+    // 1. BONUS CLUSTERING CON TETTO MASSIMO (max +45 pt totali)
+    const rawClusterScore =
+      Math.min(sameDecadeCount, 2) * 12 +
+      Math.min(sameCadenceCount, 2) * 8 +
+      Math.min(adjacentCount, 2) * 15;
+    score += Math.min(rawClusterScore, 45);
+
+    // 2. BONUS POLARIZZAZIONE EQUILIBRATO (+40 pt agli estremi)
+    if (isExtreme) {
+      score += 40;
+    }
+
+    // 3. PENALITÀ DISPERSIONE MIRATA (non uccide gli estremi isolati)
+    if (sameDecadeCount === 0 && adjacentCount === 0) {
+      score -= isExtreme ? 5 : 30;
+    } else if (isCentral && adjacentCount === 0) {
+      score -= 15;
+    }
+
+    return { num, decade, score };
+  });
+
+  // Ordina per punteggio decrescente
+  scoredPool.sort((a, b) => b.score - a.score);
+
+  // 4. SELEZIONE FINALE CON LIMITE MORBIDO (max 3 numeri per singola decina)
+  const selected: number[] = [];
+  const decadeCounts: Record<number, number> = {};
+
+  for (const item of scoredPool) {
+    if (selected.length >= targetCount) break;
+    const currentCount = decadeCounts[item.decade] || 0;
+    if (currentCount < 3) {
+      selected.push(item.num);
+      decadeCounts[item.decade] = currentCount + 1;
+    }
+  }
+
+  // Fallback di sicurezza se un input artificiale con meno decine non avesse raggiunto targetCount
+  if (selected.length < targetCount) {
+    for (const item of scoredPool) {
+      if (selected.length >= targetCount) break;
+      if (!selected.includes(item.num)) {
+        selected.push(item.num);
+      }
+    }
+  }
+
+  return selected.sort((a, b) => a - b);
+}
+
+/**
+ * Pipeline a Imbuto (90 -> 30 -> N) Bilanciata tra Sequenze/Cluster ed Estremi:
  * 1. Estrae i 25 migliori candidati dal motore genetico/statistico esistente
  * 2. Inietta 5 numeri casuali (Math.random() univoci tra 1 e 90) per formare un pool di 30 candidati
- * 3. Valuta tutti e 30 i candidati alla pari con scorePool30InPureCompetition (Clustering + Polarizzazione - Dispersione)
- * 4. Seleziona i Top 12 (o targetSize) ordinati in modo crescente da passare alla matrice ortogonale C(12,6,3)
+ * 3. Valuta i 30 candidati con selectBalancedTopNumbers (Cluster max +45, Estremi +40, Dispersione -5/-30/-15, max 3/decina)
+ * 4. Seleziona i Top N (es. 10 nel Generatore Ottimizzato, 12 in Agenti CAMEL) ordinati in modo crescente
  */
 export function selectFunnelPool30To12(
   scoredOrRankedInput: Array<NumberStat | { number: number; score?: number; compositeScore?: number } | number>,
@@ -921,16 +1000,12 @@ export function selectFunnelPool30To12(
     }
   }
 
-  // 3. Scoring in Competizione Pura (Clustering + Polarizzazione + Penalità Dispersione)
+  // 3. Scoring Bilanciato in Competizione Pura
   const scoredPool = scorePool30InPureCompetition(pool30);
 
-  // 4. Estrazione Top 12 (o targetSize) finali per la matrice C(12,6,3)
+  // 4. Estrazione Top N finali con limite morbido max 3 per decina
   const clampedTargetSize = Math.min(30, Math.max(6, Math.round(targetSize || 12)));
-  const top12Numbers: number[] = [...scoredPool]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, clampedTargetSize)
-    .map((item) => item.num)
-    .sort((a, b) => a - b);
+  const top12Numbers: number[] = selectBalancedTopNumbers(pool30, clampedTargetSize);
 
   return {
     geneticCandidates,
@@ -941,10 +1016,37 @@ export function selectFunnelPool30To12(
   };
 }
 
+export interface BalancedFunnelUiLabels {
+  targetCount: number;
+  title: string;
+  shortBadge: string;
+  subtitle: string;
+  weightsDetail: string;
+  recalcButton: string;
+  recalcDoneButton: string;
+}
+
+/**
+ * Costante/helper di riferimento unificato per tutte le etichette UI dell'Imbuto Bilanciato (30 -> targetCount)
+ */
+export function getBalancedFunnelUiLabels(targetCount: number): BalancedFunnelUiLabels {
+  const n = Math.max(6, Math.round(targetCount || 10));
+  return {
+    targetCount: n,
+    title: `Imbuto Bilanciato 30→${n} (25 Gen + 5 Caos)`,
+    shortBadge: `Imbuto 30→${n} (25 Gen + 5 Caos)`,
+    subtitle: `Competizione Pura Bilanciata (30 → ${n}): Cluster + Estremi • Max 3/Decina`,
+    weightsDetail:
+      'Rosa 30 (25 Genetici + 5 Caos) valutata con Cluster (cap +45: Decina +12, Cadenza +8, Contigui ±2 +15), Estremi 1–15/76–90 (+40), Penalità Isolati (-30 / -5 estremi / -15 centro) e limite Max 3 per decina.',
+    recalcButton: `Ricalcola Imbuto 30→${n}`,
+    recalcDoneButton: `Imbuto 30→${n} Ricalcolato!`
+  };
+}
+
 /**
  * Full Pipeline: Generates the optimized SuperEnalotto system using Soft-Penalty Orthogonal Reduction.
- * Disables the legacy Dispersione Decine filter weight in the final reduction phase so that
- * clustered/polarized pairs from the 30->12 funnel can form optimal triplets in C(12,6,3).
+ * Disables the legacy decade filter weight in the final reduction phase (decades: false) so that
+ * pairs from the balanced 30->N funnel (Max 3/Decina) can form optimal triplets in C(v,6,3).
  */
 export function generateOptimizedSystem(
   poolNumbers: number[],

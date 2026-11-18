@@ -1,0 +1,96 @@
+{
+  "exportedAt": "2026-10-30T20:30:00.000Z",
+  "count": 10,
+  "draws": [
+    {
+      "id": "2026-174",
+      "contestNumber": 174,
+      "year": 2026,
+      "date": "2026-10-30",
+      "numbers": [19, 24, 49, 62, 64, 85],
+      "jolly": 10,
+      "superstar": 45
+    },
+    {
+      "id": "2026-173",
+      "contestNumber": 173,
+      "year": 2026,
+      "date": "2026-10-29",
+      "numbers": [5, 18, 33, 47, 71, 88],
+      "jolly": 22,
+      "superstar": 14
+    },
+    {
+      "id": "2026-172",
+      "contestNumber": 172,
+      "year": 2026,
+      "date": "2026-10-27",
+      "numbers": [8, 21, 39, 54, 68, 82],
+      "jolly": 61,
+      "superstar": 77
+    },
+    {
+      "id": "2026-171",
+      "contestNumber": 171,
+      "year": 2026,
+      "date": "2026-10-24",
+      "numbers": [3, 14, 29, 52, 76, 90],
+      "jolly": 44,
+      "superstar": 9
+    },
+    {
+      "id": "2026-170",
+      "contestNumber": 170,
+      "year": 2026,
+      "date": "2026-10-23",
+      "numbers": [11, 27, 42, 58, 69, 81],
+      "jolly": 15,
+      "superstar": 63
+    },
+    {
+      "id": "2026-169",
+      "contestNumber": 169,
+      "year": 2026,
+      "date": "2026-10-20",
+      "numbers": [6, 17, 35, 48, 74, 86],
+      "jolly": 31,
+      "superstar": 50
+    },
+    {
+      "id": "2026-168",
+      "contestNumber": 168,
+      "year": 2026,
+      "date": "2026-10-17",
+      "numbers": [2, 19, 36, 55, 72, 89],
+      "jolly": 40,
+      "superstar": 12
+    },
+    {
+      "id": "2026-167",
+      "contestNumber": 167,
+      "year": 2026,
+      "date": "2026-10-16",
+      "numbers": [9, 23, 41, 60, 75, 84],
+      "jolly": 28,
+      "superstar": 37
+    },
+    {
+      "id": "2026-166",
+      "contestNumber": 166,
+      "year": 2026,
+      "date": "2026-10-13",
+      "numbers": [4, 15, 31, 53, 67, 80],
+      "jolly": 79,
+      "superstar": 25
+    },
+    {
+      "id": "2026-165",
+      "contestNumber": 165,
+      "year": 2026,
+      "date": "2026-10-10",
+      "numbers": [7, 22, 38, 46, 70, 87],
+      "jolly": 16,
+      "superstar": 59
+    }
+  ]
+}

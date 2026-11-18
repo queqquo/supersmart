@@ -12,6 +12,7 @@ import {
   UserSimulationStateRecord
 } from '../types/lottery';
 import { generateFullHistoricalDataset } from '../data/seedDraws';
+import superenalottoSyncedJson from '../data/superenalotto.json';
 import {
   fetchCloudPlays,
   upsertCloudPlay,
@@ -416,6 +417,20 @@ async function loadPlaysFromIDB(): Promise<SavedPlay[]> {
  */
 export function loadDraws(): Draw[] {
   const fullSeed = generateFullHistoricalDataset();
+  const syncedJsonDraws: Draw[] = Array.isArray(
+    (superenalottoSyncedJson as { draws?: unknown[] })?.draws
+  )
+    ? ((superenalottoSyncedJson as unknown as { draws: Draw[] }).draws || [])
+    : [];
+
+  const mergedMap = new Map<string, Draw>();
+  for (const d of fullSeed) mergedMap.set(d.id, d);
+  for (const d of syncedJsonDraws) {
+    if (d && d.id && Array.isArray(d.numbers) && d.numbers.length === 6) {
+      mergedMap.set(d.id, d);
+    }
+  }
+
   try {
     // Free up localStorage space by removing legacy full-archive keys
     localStorage.removeItem('superenalotto_historical_draws');
@@ -425,17 +440,14 @@ export function loadDraws(): Draw[] {
     if (rawDelta) {
       const parsedDelta: Draw[] = JSON.parse(rawDelta);
       if (Array.isArray(parsedDelta) && parsedDelta.length > 0) {
-        const mergedMap = new Map<string, Draw>();
-        for (const d of fullSeed) mergedMap.set(d.id, d);
         for (const d of parsedDelta) mergedMap.set(d.id, d);
-        return Array.from(mergedMap.values()).sort((a, b) => b.date.localeCompare(a.date));
       }
     }
   } catch (e) {
     console.warn('Error reading custom draws delta from localStorage:', e);
   }
 
-  return fullSeed;
+  return Array.from(mergedMap.values()).sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /**

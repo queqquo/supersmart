@@ -45,6 +45,7 @@ import {
   scoreAllNumbers,
   selectFunnelPool30To12,
   FunnelPoolSelectionResult,
+  getBalancedFunnelUiLabels,
   generateOptimizedSystem,
   calculateBudgetSystemAllocation,
   MAX_REDUCED_SYSTEM_BUDGET,
@@ -105,10 +106,16 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     [userEmail]
   );
 
-  // Config state initialized from the user's persisted system
-  const [poolSizeV, setPoolSizeV] = useState<number>(
-    () => initialUserRecord?.poolSizeV ?? 12
-  );
+  // Config state initialized from the user's persisted system (default N=10 in Generatore Ottimizzato)
+  const [poolSizeV, setPoolSizeV] = useState<number>(() => {
+    if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
+      return appliedSimPreset.top12PoolNumbers.length;
+    }
+    if (initialUserRecord && initialUserRecord.selectedPool.length >= 6) {
+      return initialUserRecord.selectedPool.length;
+    }
+    return initialUserRecord?.poolSizeV ?? 10;
+  });
   const [playMode, setPlayMode] = useState<PlayMode>(
     () => initialUserRecord?.playMode ?? 'pure_coverage'
   );
@@ -306,10 +313,21 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     setHasPendingChanges(true);
   };
 
-  // Explicit "Ricalcola dai Pesi" action: refreshes Pool Base from weights via 30->12 Funnel (25 Genetic + 5 Chaos) without overwriting sestine until "Calcola Sistema Ottimizzato" is pressed
+  const activeFunnelTargetCount =
+    !manualPoolEdit && selectedPool.length >= 6 ? selectedPool.length : poolSizeV;
+  const funnelUiLabels = useMemo(
+    () => getBalancedFunnelUiLabels(activeFunnelTargetCount),
+    [activeFunnelTargetCount]
+  );
+
+  // Explicit "Ricalcola Imbuto 30->N" action: refreshes Pool Base from weights via Balanced 30->N Funnel (25 Genetic + 5 Chaos)
   const handleRecalculateFromWeights = () => {
+    const targetV = activeFunnelTargetCount;
+    if (poolSizeV !== targetV) {
+      setPoolSizeV(targetV);
+    }
     const freshScored = scoreAllNumbers(numberStatsMap, weights, 36);
-    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV);
+    const freshFunnel = selectFunnelPool30To12(freshScored, targetV);
     setFunnelSelection(freshFunnel);
     setManualPoolEdit(false);
     onClearSimPreset?.();
@@ -1063,7 +1081,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                   </span>
                 ) : (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
-                    Imbuto 30→{selectedPool.length} (25 Gen + 5 Caos)
+                    {funnelUiLabels.shortBadge}
                   </span>
                 )}
               </div>
@@ -1075,50 +1093,93 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                     : 'bg-slate-800/90 hover:bg-slate-800 text-amber-300 border-slate-700 hover:border-amber-500/40'
                 }`}
-                title="Ricalcola i migliori numeri tramite Imbuto 30->12 (25 Genetici + 5 Caos in Competizione Pura)"
+                title={`${funnelUiLabels.title} — ${funnelUiLabels.subtitle}`}
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>{recalcFeedback ? 'Imbuto 30→12 Ricalcolato!' : 'Ricalcola Imbuto 30→12'}</span>
+                <span>
+                  {recalcFeedback ? funnelUiLabels.recalcDoneButton : funnelUiLabels.recalcButton}
+                </span>
               </button>
             </div>
 
             {!manualPoolEdit && funnelSelection.chaosNumbers.length > 0 && (
-              <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-emerald-500/25 text-[11px] text-slate-300 space-y-1">
-                <div className="flex flex-wrap items-center justify-between gap-1">
+              <div className="px-3 py-2.5 rounded-xl bg-slate-950/90 border border-emerald-500/25 text-[11px] text-slate-300 space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <span className="font-bold text-emerald-300">
-                    Competizione Pura (30 → {selectedPool.length}): Clustering + Polarizzazione − Dispersione
+                    {funnelUiLabels.subtitle}
                   </span>
-                  <span className="font-mono text-[10px] text-amber-300">
-                    5 Caos Iniettati: [{funnelSelection.chaosNumbers.join(', ')}]
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1 font-mono text-[10px]">
+                    <span className="text-amber-300 font-semibold">
+                      5 Caos Iniettati: [{funnelSelection.chaosNumbers.join(', ')}]
+                    </span>
+                    {funnelSelection.chaosNumbers.map((cNum) => {
+                      const survived = selectedPool.includes(cNum);
+                      return (
+                        <span
+                          key={cNum}
+                          className={`px-1.5 py-0.5 rounded border font-bold ${
+                            survived
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : 'bg-slate-900 text-slate-500 border-slate-800'
+                          }`}
+                          title={
+                            survived
+                              ? `Numero Caos ${cNum} sopravvissuto nella selezione finale dei ${selectedPool.length} numeri`
+                              : `Numero Caos ${cNum} scartato nell'imbuto 30→${selectedPool.length}`
+                          }
+                        >
+                          {survived ? `★${cNum}` : cNum}
+                        </span>
+                      );
+                    })}
+                  </div>
                 </div>
                 <p className="text-[10px] text-slate-400">
-                  Rosa 30 (25 Genetici + 5 Caos) valutata per Ambi Decina (+20), Cadenza (+15), Contigui ±2 (+30), Estremi 1–15/76–90 (+35) e Penalità Dispersione (−60/−25/−20).
+                  {funnelUiLabels.weightsDetail}
                 </p>
               </div>
             )}
 
-            {/* Balls of the selected pool with live S(x) score */}
+            {/* Balls of the selected pool with live S(x) score & Chaos indicator */}
             <div className="flex flex-wrap gap-2.5 p-3 bg-slate-950 rounded-xl border border-slate-800 min-h-[68px]">
               {selectedPool.map((num) => {
                 const stat = scoredByNumber[num] || numberStatsMap[num];
+                const isChaosSurvived = !manualPoolEdit && funnelSelection.chaosNumbers.includes(num);
+                const funnelEntry = funnelSelection.scoredPool.find((s) => s.num === num);
                 return (
                   <div
                     key={num}
                     onClick={() => toggleNumberInPool(num)}
                     className="group relative cursor-pointer flex flex-col items-center"
-                    title={`Numero ${num} | S(x): ${stat?.compositeScore?.toFixed(3)} | Rit: ${stat?.normalizedDelay?.toFixed(2)} (${stat?.currentDelay}/${stat?.maxHistoricalDelay}) | Freq(36): ${stat?.frequencyK} | Aff: ${stat?.affinityScore?.toFixed(2)}`}
+                    title={`Numero ${num}${isChaosSurvived ? ' (CAOS Sopravvissuto)' : ''}${
+                      funnelEntry !== undefined ? ` | Score Imbuto: ${funnelEntry.score >= 0 ? '+' : ''}${funnelEntry.score} pt` : ''
+                    } | S(x): ${stat?.compositeScore?.toFixed(3)} | Rit: ${stat?.normalizedDelay?.toFixed(2)} (${stat?.currentDelay}/${stat?.maxHistoricalDelay}) | Freq(36): ${stat?.frequencyK} | Aff: ${stat?.affinityScore?.toFixed(2)}`}
                   >
                     <div className="relative">
-                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-extrabold text-sm flex items-center justify-center font-mono shadow-md border border-amber-300 group-hover:scale-110 transition-transform">
+                      <div
+                        className={`w-9 h-9 rounded-full font-extrabold text-sm flex items-center justify-center font-mono shadow-md border group-hover:scale-110 transition-transform ${
+                          isChaosSurvived
+                            ? 'bg-gradient-to-br from-emerald-400 to-amber-500 text-slate-950 border-emerald-200 ring-2 ring-emerald-400/40'
+                            : 'bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 border-amber-300'
+                        }`}
+                      >
                         {num}
                       </div>
+                      {isChaosSurvived && (
+                        <span className="absolute -top-1.5 -left-1.5 px-1 py-0.2 rounded bg-emerald-500 text-slate-950 text-[7px] font-extrabold uppercase shadow">
+                          CAOS
+                        </span>
+                      )}
                       <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-700 text-[8px] font-bold text-slate-400 flex items-center justify-center">
                         ×
                       </span>
                     </div>
                     <span className="text-[9px] font-mono text-slate-400 mt-1">
-                      {stat?.compositeScore !== undefined ? stat.compositeScore.toFixed(2) : ''}
+                      {funnelEntry !== undefined
+                        ? `${funnelEntry.score >= 0 ? '+' : ''}${funnelEntry.score}pt`
+                        : stat?.compositeScore !== undefined
+                        ? stat.compositeScore.toFixed(2)
+                        : ''}
                     </span>
                   </div>
                 );

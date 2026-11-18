@@ -35,6 +35,7 @@ import {
   CamelAgentId,
   CamelPoolNumberReason
 } from '../utils/camelWorkforce';
+import { getBalancedFunnelUiLabels } from '../utils/combinatorics';
 
 interface CamelWorkforceLabProps {
   draws: Draw[];
@@ -107,9 +108,6 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
-
-  const lowCountForV = Math.round(poolSizeV / 3);
-  const highCountForV = poolSizeV - lowCountForV;
 
   const executeWorkforce = (
     v = poolSizeV,
@@ -245,7 +243,11 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
             className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-sm shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer shrink-0 transition-all active:scale-95"
           >
             <Play className="w-4 h-4 fill-slate-950" />
-            <span>{isRunning ? 'Agenti in Esecuzione...' : 'Riesegui Workforce CAMEL'}</span>
+            <span>
+              {isRunning
+                ? 'Agenti in Esecuzione...'
+                : getBalancedFunnelUiLabels(poolSizeV).recalcButton}
+            </span>
           </button>
         </div>
 
@@ -263,11 +265,12 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                   {historicalDrawsWindow.toLocaleString('it-IT')} / {maxHistoricalDraws.toLocaleString('it-IT')} concorsi
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                  Regola Pool: {lowCountForV} più forti [1–31] + {highCountForV} più forti [32–90]
+                  {getBalancedFunnelUiLabels(poolSizeV).title}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Seleziona da <strong>1</strong> fino al massimo storico (<strong>{maxHistoricalDraws}</strong> estrazioni, default <strong>200</strong>). Nessun bonus artificiale ai numeri &gt;31: vengono presi i {lowCountForV} migliori da 1 a 31 e gli {highCountForV} migliori da 32 a 90.
+                Seleziona da <strong>1</strong> fino al massimo storico (<strong>{maxHistoricalDraws}</strong> estrazioni, default <strong>200</strong>).{' '}
+                {getBalancedFunnelUiLabels(poolSizeV).weightsDetail}
               </p>
             </div>
 
@@ -717,7 +720,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                             </span>
                           </div>
                           <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                            <span className="text-slate-400 block">2. Struttura & Filtri</span>
+                            <span className="text-slate-400 block">2. Equilibrio Cluster / Estremi</span>
                             <span className="text-amber-300 font-bold">
                               {sb.antiCrowdScore} / {sb.antiCrowdMax} pt
                             </span>
@@ -840,7 +843,9 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                       {/* Pillar 2 */}
                       <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5">
                         <div className="flex items-center justify-between font-bold">
-                          <span className="text-amber-300">2. Qualità Filtri & Equilibrio 4+8</span>
+                          <span className="text-amber-300">
+                            2. Equilibrio Cluster / Estremi
+                          </span>
                           <span className="font-mono text-white">
                             {activeCandidate.scoreBreakdown.antiCrowdScore} /{' '}
                             {activeCandidate.scoreBreakdown.antiCrowdMax} pt
@@ -936,9 +941,46 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                       </span>
                     </div>
 
-                    <p className="text-xs text-slate-400">
-                      {activeCandidate.strategyOriginDescription}
-                    </p>
+                    <div className="p-2.5 rounded-lg bg-emerald-950/20 border border-emerald-500/30 text-[11px] space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <span className="font-bold text-emerald-300">
+                          {getBalancedFunnelUiLabels(activeCandidate.poolNumbers.length).subtitle}
+                        </span>
+                        {activeCandidate.chaosNumbersInjected && activeCandidate.chaosNumbersInjected.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1 font-mono text-[10px]">
+                            <span className="text-amber-300 font-semibold">
+                              5 Caos Iniettati: [{activeCandidate.chaosNumbersInjected.join(', ')}]
+                            </span>
+                            {activeCandidate.chaosNumbersInjected.map((cNum) => {
+                              const survived = activeCandidate.poolNumbers.includes(cNum);
+                              return (
+                                <span
+                                  key={cNum}
+                                  className={`px-1.5 py-0.5 rounded border font-bold ${
+                                    survived
+                                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                      : 'bg-slate-900 text-slate-500 border-slate-800'
+                                  }`}
+                                  title={
+                                    survived
+                                      ? `Numero Caos ${cNum} sopravvissuto nella selezione finale dei ${activeCandidate.poolNumbers.length} numeri`
+                                      : `Numero Caos ${cNum} scartato nell'imbuto 30→${activeCandidate.poolNumbers.length}`
+                                  }
+                                >
+                                  {survived ? `★${cNum}` : cNum}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-slate-300">
+                        {activeCandidate.strategyOriginDescription}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        {getBalancedFunnelUiLabels(activeCandidate.poolNumbers.length).weightsDetail}
+                      </p>
+                    </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                       {activeCandidate.poolReasons.map((pr) => (

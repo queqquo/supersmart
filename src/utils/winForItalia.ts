@@ -1,0 +1,916 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import seedWinForItaliaData from '../data/winforitalia.json';
+
+export interface WinForItaliaDraw {
+  id: string;
+  contestNumber: number;
+  year: number;
+  date: string;
+  time?: string;
+  numbers: [number, number, number, number, number, number];
+}
+
+export interface WinForItaliaNumberStat {
+  number: number;
+  decade: number; // 0: 1-10, 1: 11-20, 2: 21-30, 3: 31-40
+  frequencyWindow: number;
+  currentDelay: number;
+  maxDelay: number;
+  affinityScore: number;
+  geneticScore: number;
+}
+
+export interface WinForItaliaFunnelCandidate {
+  num: number;
+  decade: number;
+  cadence: number;
+  isExtreme: boolean;
+  isCentral: boolean;
+  isChaos: boolean;
+  sameDecadeCount: number;
+  sameCadenceCount: number;
+  adjacentCount: number;
+  clusterBonus: number;
+  extremeBonus: number;
+  isolationPenalty: number;
+  totalFunnelScore: number;
+  selectedInTop12: boolean;
+}
+
+export interface WinForItaliaFunnelResult {
+  genetic13: number[];
+  chaos3: number[];
+  pool16: number[];
+  scoredPool16: WinForItaliaFunnelCandidate[];
+  top12Numbers: number[];
+  decadeDistributionTop12: Record<number, number>;
+}
+
+export interface WinForItaliaRankedSestina {
+  rank: number;
+  numbers: [number, number, number, number, number, number];
+  totalScore: number;
+  sum: number;
+  evenCount: number;
+  oddCount: number;
+  extremesCount: number; // 1-8 and 33-40
+  adjacentPairsCount: number;
+  sameDecadePairsCount: number;
+  maxPerDecade: number;
+  decadeCounts: [number, number, number, number];
+  geneticBaseScore: number;
+  structuralScore: number;
+}
+
+export interface WinForItaliaSniperSelection {
+  primarySestina: WinForItaliaRankedSestina;
+  alternative2: WinForItaliaRankedSestina;
+  alternative3: WinForItaliaRankedSestina;
+  totalCombinationsEvaluated: number; // C(12,6) = 924
+}
+
+export interface WinForItaliaWeeklyMonteCarloResult {
+  totalSimulatedDraws: number;
+  totalSimulatedWeeks: number;
+  ticketCost: number; // 2.00 €
+  weeklyCost: number; // 14.00 € (7 draws)
+  totalSpent: number;
+  totalEarned: number;
+  averagePayoutPerDraw: number;
+  averageWeeklyPayout: number;
+  averageWeeklyRecoveryRatePct: number;
+  expectedPunto2PerWeek: number;
+  probAtLeastOneWinPerWeekPct: number;
+  probAtLeastOnePunto2PerWeekPct: number;
+  executionTimeMs: number;
+  hitsByCategory: {
+    punto2: number;
+    punto3: number;
+    punto4: number;
+    punto5: number;
+    punto6: number;
+  };
+  payoutByCategory: {
+    punto2: number;
+    punto3: number;
+    punto4: number;
+    punto5: number;
+    punto6: number;
+  };
+}
+
+export const WIN_FOR_ITALIA_PRIZES = {
+  PUNTO_2: 2.0,
+  PUNTO_3: 8.0,
+  PUNTO_4: 50.0,
+  PUNTO_5: 440.0,
+  PUNTO_6: 10000.0
+} as const;
+
+export const WIN_FOR_ITALIA_STORAGE_KEY = 'winforitalia_custom_draws_delta_v1';
+
+export const WIN_FOR_ITALIA_UI_LABELS = {
+  title: 'Imbuto Cecchino 40→16→12→1 (13 Gen + 3 Caos)',
+  subtitle: 'Competizione Pura Bilanciata (16 → 12 → 1 Sestina): Cluster + Estremi 1–8/33–40 • Max 3/Decina',
+  weightsDetail:
+    'Rosa 16 (13 Genetici + 3 Caos su 1..40) valutata con Cluster (cap +45: Decina +12, Cadenza +8, Contigui ±2 +15), Estremi 1–8/33–40 (+40), Penalità Isolati (-30 / -5 estremi) e limite morbido Max 3 per decina nei Top 12. Sestina #1 estratta dalle C(12,6) = 924 combinazioni integrali.'
+} as const;
+
+/**
+ * Helper to get decade index (0..3) for a number in 1..40:
+ * 0 -> 1..10, 1 -> 11..20, 2 -> 21..30, 3 -> 31..40
+ */
+export function getWinForItaliaDecade(num: number): number {
+  return Math.min(3, Math.max(0, Math.floor((num - 1) / 10)));
+}
+
+/**
+ * Normalize and validate a 6-number array in 1..40
+ */
+export function isValidWinForItaliaSestina(nums: number[]): nums is [number, number, number, number, number, number] {
+  if (!Array.isArray(nums) || nums.length !== 6) return false;
+  const unique = new Set(nums);
+  if (unique.size !== 6) return false;
+  return nums.every((n) => Number.isInteger(n) && n >= 1 && n <= 40);
+}
+
+/**
+ * Load official seed draws from src/data/winforitalia.json merged with localStorage custom draws
+ */
+export function loadWinForItaliaDraws(): WinForItaliaDraw[] {
+  const rawSeed = Array.isArray((seedWinForItaliaData as { draws?: unknown[] })?.draws)
+    ? ((seedWinForItaliaData as unknown as { draws: WinForItaliaDraw[] }).draws || [])
+    : [];
+
+  const mergedMap = new Map<string, WinForItaliaDraw>();
+  for (const d of rawSeed) {
+    if (d && d.id && isValidWinForItaliaSestina(d.numbers)) {
+      const sorted = [...d.numbers].sort((a, b) => a - b) as [number, number, number, number, number, number];
+      mergedMap.set(d.id, { ...d, numbers: sorted });
+    }
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const rawDelta = localStorage.getItem(WIN_FOR_ITALIA_STORAGE_KEY);
+      if (rawDelta) {
+        const parsedDelta = JSON.parse(rawDelta) as WinForItaliaDraw[];
+        if (Array.isArray(parsedDelta)) {
+          for (const d of parsedDelta) {
+            if (d && d.id && isValidWinForItaliaSestina(d.numbers)) {
+              const sorted = [...d.numbers].sort((a, b) => a - b) as [
+                number,
+                number,
+                number,
+                number,
+                number,
+                number
+              ];
+              mergedMap.set(d.id, { ...d, numbers: sorted });
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  return Array.from(mergedMap.values()).sort((a, b) => {
+    const cmp = b.date.localeCompare(a.date);
+    if (cmp !== 0) return cmp;
+    return b.contestNumber - a.contestNumber;
+  });
+}
+
+/**
+ * Save custom/synced Win for Italia Team draws delta to localStorage
+ */
+export function saveWinForItaliaDraws(draws: WinForItaliaDraw[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const rawSeed = Array.isArray((seedWinForItaliaData as { draws?: unknown[] })?.draws)
+      ? ((seedWinForItaliaData as unknown as { draws: WinForItaliaDraw[] }).draws || [])
+      : [];
+    const seedMap = new Map(rawSeed.map((d) => [d.id, d.numbers.join(',')]));
+    const delta = draws.filter((d) => seedMap.get(d.id) !== d.numbers.join(','));
+    localStorage.setItem(WIN_FOR_ITALIA_STORAGE_KEY, JSON.stringify(delta));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+/**
+ * Parse rapid manual entry of 6 comma-separated (or space-separated) numbers between 1 and 40
+ */
+export function parseWinForItaliaManualInput(
+  rawInput: string,
+  existingHistory: WinForItaliaDraw[],
+  customDate?: string
+): { draw?: WinForItaliaDraw; error?: string } {
+  const cleaned = String(rawInput || '').trim();
+  if (!cleaned) {
+    return { error: 'Inserisci 6 numeri tra 1 e 40 separati da virgola (es. 4, 11, 18, 25, 34, 39).' };
+  }
+
+  const tokens = cleaned
+    .split(/[\s,;.-]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  if (tokens.length !== 6) {
+    return {
+      error: `Trovati ${tokens.length} valori: inserisci esattamente 6 numeri distinti compresi tra 1 e 40.`
+    };
+  }
+
+  const nums = tokens.map((t) => Number(t));
+  if (nums.some((n) => !Number.isInteger(n) || n < 1 || n > 40)) {
+    return {
+      error: 'Tutti i 6 numeri devono essere interi compresi tra 1 e 40 (estremi inclusi).'
+    };
+  }
+
+  const unique = new Set(nums);
+  if (unique.size !== 6) {
+    return {
+      error: 'I 6 numeri devono essere tutti diversi tra loro (nessun duplicato).'
+    };
+  }
+
+  const sorted = [...nums].sort((a, b) => a - b) as [number, number, number, number, number, number];
+  const dateStr =
+    customDate && /^\d{4}-\d{2}-\d{2}$/.test(customDate)
+      ? customDate
+      : new Date().toISOString().slice(0, 10);
+  const year = parseInt(dateStr.slice(0, 4), 10);
+  const maxContestInYear = existingHistory
+    .filter((d) => d.year === year)
+    .reduce((max, d) => Math.max(max, d.contestNumber), 0);
+  const nextContest = maxContestInYear + 1;
+
+  const draw: WinForItaliaDraw = {
+    id: `WFI-${year}-${String(nextContest).padStart(3, '0')}`,
+    contestNumber: nextContest,
+    year,
+    date: dateStr,
+    time: '20:00',
+    numbers: sorted
+  };
+
+  return { draw };
+}
+
+/**
+ * Insert a new manual or synced Win for Italia Team draw into history and persist to localStorage
+ */
+export function insertWinForItaliaDraw(newDraw: WinForItaliaDraw): WinForItaliaDraw[] {
+  const current = loadWinForItaliaDraws();
+  const idx = current.findIndex((d) => d.id === newDraw.id || d.date === newDraw.date && d.numbers.join(',') === newDraw.numbers.join(','));
+  if (idx >= 0) {
+    current[idx] = newDraw;
+  } else {
+    current.unshift(newDraw);
+  }
+  current.sort((a, b) => {
+    const cmp = b.date.localeCompare(a.date);
+    if (cmp !== 0) return cmp;
+    return b.contestNumber - a.contestNumber;
+  });
+  saveWinForItaliaDraws(current);
+  return current;
+}
+
+/**
+ * Sync Win for Italia Team archive from server endpoint /api/winforitalia/official-sync
+ */
+export async function syncWinForItaliaDrawsFromServer(): Promise<{
+  draws: WinForItaliaDraw[];
+  addedOrUpdated: number;
+  latestDate: string;
+}> {
+  const current = loadWinForItaliaDraws();
+  const prevCount = current.length;
+
+  try {
+    const res = await fetch('/api/winforitalia/official-sync');
+    if (res.ok) {
+      const payload = await res.json();
+      if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
+        const mergedMap = new Map<string, WinForItaliaDraw>();
+        for (const d of current) mergedMap.set(d.id, d);
+        for (const d of payload.draws as WinForItaliaDraw[]) {
+          if (d && d.id && isValidWinForItaliaSestina(d.numbers)) {
+            const sorted = [...d.numbers].sort((a, b) => a - b) as [
+              number,
+              number,
+              number,
+              number,
+              number,
+              number
+            ];
+            mergedMap.set(d.id, { ...d, numbers: sorted });
+          }
+        }
+        const merged = Array.from(mergedMap.values()).sort((a, b) => {
+          const cmp = b.date.localeCompare(a.date);
+          if (cmp !== 0) return cmp;
+          return b.contestNumber - a.contestNumber;
+        });
+        saveWinForItaliaDraws(merged);
+        return {
+          draws: merged,
+          addedOrUpdated: Math.max(0, merged.length - prevCount),
+          latestDate: merged[0]?.date || ''
+        };
+      }
+    }
+  } catch {
+    // Offline fallback uses local archive
+  }
+
+  return {
+    draws: current,
+    addedOrUpdated: 0,
+    latestDate: current[0]?.date || ''
+  };
+}
+
+/**
+ * Calculate dynamic historical statistics on numbers 1..40 using windowSize = Math.min(history.length, 50)
+ */
+export function calculateWinForItaliaStats(history: WinForItaliaDraw[]): {
+  windowSize: number;
+  stats: WinForItaliaNumberStat[];
+} {
+  const windowSize = Math.min(history.length, 50);
+  const recentWindow = history.slice(0, windowSize);
+  const lastDrawNumbers = new Set(recentWindow[0]?.numbers || []);
+
+  const freqMap = new Array<number>(41).fill(0);
+  const currentDelayMap = new Array<number>(41).fill(windowSize);
+  const maxDelayMap = new Array<number>(41).fill(0);
+  const lastSeenIndex = new Array<number>(41).fill(-1);
+  const coOccurrenceScore = new Array<number>(41).fill(0);
+
+  // Compute delays and frequency over the dynamic window (up to 50 draws)
+  for (let idx = 0; idx < recentWindow.length; idx++) {
+    const draw = recentWindow[idx];
+    const hasOverlapWithLatest =
+      idx > 0 && draw.numbers.some((n) => lastDrawNumbers.has(n));
+
+    for (const num of draw.numbers) {
+      if (num < 1 || num > 40) continue;
+      freqMap[num]++;
+
+      if (lastSeenIndex[num] === -1) {
+        currentDelayMap[num] = idx;
+        maxDelayMap[num] = idx;
+      } else {
+        const gap = idx - lastSeenIndex[num] - 1;
+        if (gap > maxDelayMap[num]) {
+          maxDelayMap[num] = gap;
+        }
+      }
+      lastSeenIndex[num] = idx;
+
+      if (hasOverlapWithLatest) {
+        coOccurrenceScore[num] += 1;
+      }
+    }
+  }
+
+  for (let num = 1; num <= 40; num++) {
+    if (lastSeenIndex[num] === -1) {
+      currentDelayMap[num] = windowSize;
+      maxDelayMap[num] = windowSize;
+    } else {
+      const tailGap = windowSize - 1 - lastSeenIndex[num];
+      if (tailGap > maxDelayMap[num]) {
+        maxDelayMap[num] = tailGap;
+      }
+    }
+  }
+
+  const maxFreq = Math.max(1, ...freqMap.slice(1));
+  const maxDel = Math.max(1, ...currentDelayMap.slice(1));
+  const maxAff = Math.max(1, ...coOccurrenceScore.slice(1));
+
+  const stats: WinForItaliaNumberStat[] = [];
+  for (let num = 1; num <= 40; num++) {
+    const normFreq = (freqMap[num] / maxFreq) * 100;
+    const normDelay = (currentDelayMap[num] / maxDel) * 100;
+    const normAff = (coOccurrenceScore[num] / maxAff) * 100;
+
+    // Genetic composite score (45% cyclic frequency + 35% delay tension + 20% spia affinity)
+    const geneticScore = Number((normFreq * 0.45 + normDelay * 0.35 + normAff * 0.20).toFixed(2));
+
+    stats.push({
+      number: num,
+      decade: getWinForItaliaDecade(num),
+      frequencyWindow: freqMap[num],
+      currentDelay: currentDelayMap[num],
+      maxDelay: maxDelayMap[num],
+      affinityScore: Number(normAff.toFixed(1)),
+      geneticScore
+    });
+  }
+
+  return {
+    windowSize,
+    stats: stats.sort((a, b) => b.geneticScore - a.geneticScore || a.number - b.number)
+  };
+}
+
+/**
+ * Balanced Funnel Scoring 16 -> 12 for Win for Italia Team (6/40):
+ * - Cluster (cap max +45 pt): Ambi decina (1-10, 11-20, 21-30, 31-40) +12, cadenza +8, contigui ±2 +15
+ * - Estremi (1-8 e 33-40): +40 pt
+ * - Penalità isolati: -30 pt (-5 pt se estremo)
+ * - Limite morbido: massimo 3 numeri per singola decina nei Top 12 finali
+ */
+export function selectBalancedTop12ForWinForItalia(
+  pool16: number[],
+  chaosSet: Set<number> = new Set()
+): {
+  top12Numbers: number[];
+  scoredPool16: WinForItaliaFunnelCandidate[];
+  decadeDistributionTop12: Record<number, number>;
+} {
+  const uniquePool = Array.from(new Set(pool16)).filter((n) => n >= 1 && n <= 40);
+
+  const rawCandidates = uniquePool.map((num) => {
+    const decade = getWinForItaliaDecade(num);
+    const cadence = num % 10;
+    const isExtreme = num <= 8 || num >= 33;
+    const isCentral = num >= 15 && num <= 26;
+
+    const sameDecadeCount = uniquePool.filter(
+      (n) => n !== num && getWinForItaliaDecade(n) === decade
+    ).length;
+    const sameCadenceCount = uniquePool.filter(
+      (n) => n !== num && n % 10 === cadence
+    ).length;
+    const adjacentCount = uniquePool.filter(
+      (n) => n !== num && Math.abs(n - num) <= 2
+    ).length;
+
+    // 1. BONUS CLUSTERING CON TETTO MASSIMO (max +45 pt totali)
+    const rawClusterScore =
+      Math.min(sameDecadeCount, 2) * 12 +
+      Math.min(sameCadenceCount, 2) * 8 +
+      Math.min(adjacentCount, 2) * 15;
+    const clusterBonus = Math.min(rawClusterScore, 45);
+
+    // 2. BONUS POLARIZZAZIONE EQUILIBRATO (+40 pt agli estremi 1-8 e 33-40)
+    const extremeBonus = isExtreme ? 40 : 0;
+
+    // 3. PENALITÀ DISPERSIONE MIRATA (-30 pt isolati, -5 pt se estremo)
+    let isolationPenalty = 0;
+    if (sameDecadeCount === 0 && adjacentCount === 0) {
+      isolationPenalty = isExtreme ? -5 : -30;
+    } else if (isCentral && adjacentCount === 0) {
+      isolationPenalty = -15;
+    }
+
+    const totalFunnelScore = clusterBonus + extremeBonus + isolationPenalty;
+
+    return {
+      num,
+      decade,
+      cadence,
+      isExtreme,
+      isCentral,
+      isChaos: chaosSet.has(num),
+      sameDecadeCount,
+      sameCadenceCount,
+      adjacentCount,
+      clusterBonus,
+      extremeBonus,
+      isolationPenalty,
+      totalFunnelScore,
+      selectedInTop12: false
+    };
+  });
+
+  // Sort descending by score
+  rawCandidates.sort((a, b) => b.totalFunnelScore - a.totalFunnelScore || a.num - b.num);
+
+  // 4. SELEZIONE FINALE CON LIMITE MORBIDO (max 3 numeri per singola decina)
+  const selected: number[] = [];
+  const decadeCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0 };
+
+  for (const item of rawCandidates) {
+    if (selected.length >= 12) break;
+    const currentCount = decadeCounts[item.decade] || 0;
+    if (currentCount < 3) {
+      selected.push(item.num);
+      decadeCounts[item.decade] = currentCount + 1;
+      item.selectedInTop12 = true;
+    }
+  }
+
+  // Fallback di sicurezza se il filtro decine ha bloccato troppi candidati
+  if (selected.length < 12) {
+    for (const item of rawCandidates) {
+      if (selected.length >= 12) break;
+      if (!selected.includes(item.num)) {
+        selected.push(item.num);
+        decadeCounts[item.decade] = (decadeCounts[item.decade] || 0) + 1;
+        item.selectedInTop12 = true;
+      }
+    }
+  }
+
+  return {
+    top12Numbers: [...selected].sort((a, b) => a - b),
+    scoredPool16: rawCandidates,
+    decadeDistributionTop12: decadeCounts
+  };
+}
+
+/**
+ * Full 40 -> 16 (13 Genetic + 3 Chaos) -> 12 Funnel for Win for Italia Team
+ */
+export function runWinForItaliaFunnel40To12(
+  rankedStats: WinForItaliaNumberStat[],
+  rng: () => number = Math.random
+): WinForItaliaFunnelResult {
+  const sortedStats = [...rankedStats].sort(
+    (a, b) => b.geneticScore - a.geneticScore || a.number - b.number
+  );
+
+  // Ensure each of the 4 decades (1-10, 11-20, 21-30, 31-40) contributes its top 3 genetic candidates (4x3=12)
+  // plus the highest-scoring 13th remaining genetic candidate so that max 3 per decade in Top 12 is always respected.
+  const genetic13: number[] = [];
+  const pickedGenetic = new Set<number>();
+
+  for (let dec = 0; dec < 4; dec++) {
+    const decCandidates = sortedStats.filter((s) => s.decade === dec);
+    for (let i = 0; i < Math.min(3, decCandidates.length); i++) {
+      genetic13.push(decCandidates[i].number);
+      pickedGenetic.add(decCandidates[i].number);
+    }
+  }
+
+  for (const s of sortedStats) {
+    if (genetic13.length >= 13) break;
+    if (!pickedGenetic.has(s.number)) {
+      genetic13.push(s.number);
+      pickedGenetic.add(s.number);
+    }
+  }
+
+  const chaos3: number[] = [];
+  const existingSet = new Set<number>(genetic13);
+
+  let guard = 0;
+  while (chaos3.length < 3 && guard < 500) {
+    guard++;
+    const randNum = Math.floor(rng() * 40) + 1;
+    if (!existingSet.has(randNum)) {
+      existingSet.add(randNum);
+      chaos3.push(randNum);
+    }
+  }
+
+  // Deterministic fill if rng produced collisions
+  for (let n = 1; n <= 40 && chaos3.length < 3; n++) {
+    if (!existingSet.has(n)) {
+      existingSet.add(n);
+      chaos3.push(n);
+    }
+  }
+
+  const pool16 = [...genetic13, ...chaos3];
+  const chaosSet = new Set(chaos3);
+
+  const { top12Numbers, scoredPool16, decadeDistributionTop12 } =
+    selectBalancedTop12ForWinForItalia(pool16, chaosSet);
+
+  return {
+    genetic13,
+    chaos3,
+    pool16,
+    scoredPool16,
+    top12Numbers,
+    decadeDistributionTop12
+  };
+}
+
+/**
+ * Generate all C(12, 6) = 924 integral sestine in memory and score them in "Cecchino" mode
+ * to extract Sestina #1 (2,00 €) and alternatives #2 and #3.
+ */
+export function selectSniperSestinaFromTop12(
+  top12Numbers: number[],
+  stats: WinForItaliaNumberStat[]
+): WinForItaliaSniperSelection {
+  const pool = [...top12Numbers].slice(0, 12).sort((a, b) => a - b);
+  const statScoreMap = new Map<number, number>();
+  for (const s of stats) {
+    statScoreMap.set(s.number, s.geneticScore);
+  }
+
+  const evaluated: Omit<WinForItaliaRankedSestina, 'rank'>[] = [];
+
+  const n = pool.length;
+  for (let i0 = 0; i0 < n - 5; i0++) {
+    for (let i1 = i0 + 1; i1 < n - 4; i1++) {
+      for (let i2 = i1 + 1; i2 < n - 3; i2++) {
+        for (let i3 = i2 + 1; i3 < n - 2; i3++) {
+          for (let i4 = i3 + 1; i4 < n - 1; i4++) {
+            for (let i5 = i4 + 1; i5 < n; i5++) {
+              const combo: [number, number, number, number, number, number] = [
+                pool[i0],
+                pool[i1],
+                pool[i2],
+                pool[i3],
+                pool[i4],
+                pool[i5]
+              ];
+
+              let sum = 0;
+              let evenCount = 0;
+              let extremesCount = 0;
+              let adjacentPairsCount = 0;
+              let sameDecadePairsCount = 0;
+              let geneticSum = 0;
+              const decadeCounts: [number, number, number, number] = [0, 0, 0, 0];
+
+              for (let k = 0; k < 6; k++) {
+                const val = combo[k];
+                sum += val;
+                if (val % 2 === 0) evenCount++;
+                if (val <= 8 || val >= 33) extremesCount++;
+                const dec = getWinForItaliaDecade(val);
+                decadeCounts[dec]++;
+                geneticSum += statScoreMap.get(val) || 50;
+
+                if (k > 0 && combo[k] - combo[k - 1] <= 2) {
+                  adjacentPairsCount++;
+                }
+              }
+
+              for (let d = 0; d < 4; d++) {
+                if (decadeCounts[d] >= 2) {
+                  sameDecadePairsCount += (decadeCounts[d] * (decadeCounts[d] - 1)) / 2;
+                }
+              }
+
+              const oddCount = 6 - evenCount;
+              const maxPerDecade = Math.max(...decadeCounts);
+
+              // Structural scoring for Cecchino mode:
+              let structuralScore = 0;
+
+              // 1. Bilanciamento Pari/Dispari (3/3 o 4/2 - 2/4)
+              if (evenCount === 3 && oddCount === 3) {
+                structuralScore += 35;
+              } else if (evenCount === 4 || evenCount === 2) {
+                structuralScore += 22;
+              } else {
+                structuralScore -= 45;
+              }
+
+              // 2. Somma fisiologica per 6/40 (95 - 150, centro ideale ~123)
+              if (sum >= 95 && sum <= 150) {
+                const distFromIdeal = Math.abs(sum - 123);
+                structuralScore += 35 + Math.max(0, 15 - distFromIdeal * 0.5);
+              } else {
+                structuralScore -= 50;
+              }
+
+              // 3. Presenza di almeno 1-2 estremi (1-8 / 33-40)
+              if (extremesCount >= 1 && extremesCount <= 2) {
+                structuralScore += 32;
+              } else if (extremesCount === 3) {
+                structuralScore += 20;
+              } else {
+                structuralScore -= 35;
+              }
+
+              // 4. Presenza di almeno 1 coppia contigua (±1/±2) o d'ambo di decina
+              if (adjacentPairsCount >= 1 && adjacentPairsCount <= 2) {
+                structuralScore += 28;
+              } else if (sameDecadePairsCount >= 1) {
+                structuralScore += 18;
+              } else {
+                structuralScore -= 25;
+              }
+
+              // 5. Massimo 3 numeri nella stessa decina
+              if (maxPerDecade <= 2) {
+                structuralScore += 25;
+              } else if (maxPerDecade === 3) {
+                structuralScore += 15;
+              } else {
+                structuralScore -= 80;
+              }
+
+              const geneticBaseScore = Number((geneticSum / 6).toFixed(2));
+              const totalScore = Number((structuralScore + geneticBaseScore * 0.35).toFixed(2));
+
+              evaluated.push({
+                numbers: combo,
+                totalScore,
+                sum,
+                evenCount,
+                oddCount,
+                extremesCount,
+                adjacentPairsCount,
+                sameDecadePairsCount,
+                maxPerDecade,
+                decadeCounts,
+                geneticBaseScore,
+                structuralScore: Number(structuralScore.toFixed(2))
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  evaluated.sort((a, b) => b.totalScore - a.totalScore || a.sum - b.sum);
+
+  const primarySestina: WinForItaliaRankedSestina = {
+    ...evaluated[0],
+    rank: 1
+  };
+
+  // Pick #2 and #3 with slight diversity (avoiding 5/6 identical numbers to #1 when possible)
+  const diverseCandidates = evaluated.slice(1).filter((cand) => {
+    const overlapWith1 = cand.numbers.filter((n) => primarySestina.numbers.includes(n)).length;
+    return overlapWith1 <= 4;
+  });
+
+  const alt2Source = diverseCandidates[0] || evaluated[1] || evaluated[0];
+  const alt3Source =
+    diverseCandidates.find((cand) => {
+      const overlapWith2 = cand.numbers.filter((n) => alt2Source.numbers.includes(n)).length;
+      return overlapWith2 <= 4;
+    }) ||
+    diverseCandidates[1] ||
+    evaluated[2] ||
+    evaluated[0];
+
+  return {
+    primarySestina,
+    alternative2: { ...alt2Source, rank: 2 },
+    alternative3: { ...alt3Source, rank: 3 },
+    totalCombinationsEvaluated: evaluated.length
+  };
+}
+
+function popcnt32(v: number): number {
+  let x = v - ((v >>> 1) & 0x55555555);
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+/**
+ * Simulatore Monte Carlo "Settimana Tipo" (7 Estrazioni = 14,00 €) per Win for Italia Team (6/40)
+ * Usa bitmask compatte a 40 bit (2 x 20-bit integers) per simulare 50.000 estrazioni sulla Sestina #1.
+ */
+export function runWinForItaliaWeeklyMonteCarlo(
+  sestina: number[],
+  totalSimulatedDraws: number = 50000,
+  seed: number = 2026040
+): WinForItaliaWeeklyMonteCarloResult {
+  const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+  // Build 40-bit bitmask split into two 20-bit words: low20 (1..20) and high20 (21..40)
+  let ticketLow20 = 0;
+  let ticketHigh20 = 0;
+  for (const n of sestina) {
+    if (n >= 1 && n <= 20) {
+      ticketLow20 |= 1 << (n - 1);
+    } else if (n >= 21 && n <= 40) {
+      ticketHigh20 |= 1 << (n - 21);
+    }
+  }
+
+  let rngState = (seed >>> 0) || 123456789;
+  const nextRand = (): number => {
+    rngState ^= rngState << 13;
+    rngState ^= rngState >>> 17;
+    rngState ^= rngState << 5;
+    return (rngState >>> 0) / 4294967296;
+  };
+
+  const hitsByCategory = {
+    punto2: 0,
+    punto3: 0,
+    punto4: 0,
+    punto5: 0,
+    punto6: 0
+  };
+
+  let weeksWithAtLeastOneWin = 0;
+  let weeksWithAtLeastOnePunto2 = 0;
+  let currentWeekWins = 0;
+  let currentWeekPunto2 = 0;
+  let completedWeeks = 0;
+
+  for (let d = 0; d < totalSimulatedDraws; d++) {
+    let drawLow20 = 0;
+    let drawHigh20 = 0;
+    let picked = 0;
+
+    while (picked < 6) {
+      const r = Math.floor(nextRand() * 40) + 1;
+      if (r <= 20) {
+        const bit = 1 << (r - 1);
+        if ((drawLow20 & bit) === 0) {
+          drawLow20 |= bit;
+          picked++;
+        }
+      } else {
+        const bit = 1 << (r - 21);
+        if ((drawHigh20 & bit) === 0) {
+          drawHigh20 |= bit;
+          picked++;
+        }
+      }
+    }
+
+    const matchCount =
+      popcnt32(ticketLow20 & drawLow20) + popcnt32(ticketHigh20 & drawHigh20);
+
+    if (matchCount >= 2) {
+      currentWeekWins++;
+      if (matchCount === 2) {
+        hitsByCategory.punto2++;
+        currentWeekPunto2++;
+      } else if (matchCount === 3) {
+        hitsByCategory.punto3++;
+      } else if (matchCount === 4) {
+        hitsByCategory.punto4++;
+      } else if (matchCount === 5) {
+        hitsByCategory.punto5++;
+      } else if (matchCount === 6) {
+        hitsByCategory.punto6++;
+      }
+    }
+
+    if ((d + 1) % 7 === 0) {
+      completedWeeks++;
+      if (currentWeekWins > 0) weeksWithAtLeastOneWin++;
+      if (currentWeekPunto2 > 0) weeksWithAtLeastOnePunto2++;
+      currentWeekWins = 0;
+      currentWeekPunto2 = 0;
+    }
+  }
+
+  const payoutByCategory = {
+    punto2: hitsByCategory.punto2 * WIN_FOR_ITALIA_PRIZES.PUNTO_2,
+    punto3: hitsByCategory.punto3 * WIN_FOR_ITALIA_PRIZES.PUNTO_3,
+    punto4: hitsByCategory.punto4 * WIN_FOR_ITALIA_PRIZES.PUNTO_4,
+    punto5: hitsByCategory.punto5 * WIN_FOR_ITALIA_PRIZES.PUNTO_5,
+    punto6: hitsByCategory.punto6 * WIN_FOR_ITALIA_PRIZES.PUNTO_6
+  };
+
+  const ticketCost = 2.0;
+  const weeklyCost = 14.0;
+  const totalSpent = totalSimulatedDraws * ticketCost;
+  const totalEarned =
+    payoutByCategory.punto2 +
+    payoutByCategory.punto3 +
+    payoutByCategory.punto4 +
+    payoutByCategory.punto5 +
+    payoutByCategory.punto6;
+
+  const averagePayoutPerDraw = totalEarned / Math.max(1, totalSimulatedDraws);
+  const averageWeeklyPayout = averagePayoutPerDraw * 7;
+  const averageWeeklyRecoveryRatePct = (averageWeeklyPayout / weeklyCost) * 100;
+  const expectedPunto2PerWeek = (hitsByCategory.punto2 / Math.max(1, totalSimulatedDraws)) * 7;
+
+  const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+  return {
+    totalSimulatedDraws,
+    totalSimulatedWeeks: Math.max(1, completedWeeks),
+    ticketCost,
+    weeklyCost,
+    totalSpent,
+    totalEarned,
+    averagePayoutPerDraw: Number(averagePayoutPerDraw.toFixed(2)),
+    averageWeeklyPayout: Number(averageWeeklyPayout.toFixed(2)),
+    averageWeeklyRecoveryRatePct: Number(averageWeeklyRecoveryRatePct.toFixed(1)),
+    expectedPunto2PerWeek: Number(expectedPunto2PerWeek.toFixed(2)),
+    probAtLeastOneWinPerWeekPct: Number(
+      ((weeksWithAtLeastOneWin / Math.max(1, completedWeeks)) * 100).toFixed(1)
+    ),
+    probAtLeastOnePunto2PerWeekPct: Number(
+      ((weeksWithAtLeastOnePunto2 / Math.max(1, completedWeeks)) * 100).toFixed(1)
+    ),
+    executionTimeMs: Math.max(1, Math.round(endTime - startTime)),
+    hitsByCategory,
+    payoutByCategory
+  };
+}

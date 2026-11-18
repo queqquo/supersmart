@@ -1,0 +1,41 @@
+name: Nightly Lottery Draws Auto-Sync
+
+on:
+  schedule:
+    # Win for Italia Team (6/40): ogni notte alle 02:00 UTC (03:00 CET / 04:00 CEST)
+    - cron: '0 2 * * *'
+    # SuperEnalotto (6/90): notte successiva ai concorsi (Mer, Ven, Sab, Dom) alle 02:15 UTC
+    - cron: '15 2 * * 3,5,6,0'
+  workflow_dispatch: # Permette il test manuale dalla tab Actions di GitHub
+
+permissions:
+  contents: write
+
+jobs:
+  sync-draws:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Esegui script idempotente di sincronizzazione estrazioni
+        run: node scripts/sync-draws.mjs
+
+      - name: Commit e Push automatico su main se i file JSON sono cambiati (Trigger Deploy Vercel)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain src/data/superenalotto.json src/data/winforitalia.json)" ]]; then
+            git add src/data/superenalotto.json src/data/winforitalia.json
+            git commit -m "chore(data): auto-sync notturno estrazioni SuperEnalotto e Win for Italia Team"
+            git push origin main
+          else
+            echo "Nessuna nuova estrazione da committare."
+          fi

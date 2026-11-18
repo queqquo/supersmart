@@ -629,7 +629,7 @@ export function generateSmartPoolRecommendation(
     },
     {
       id: 'wf-anti-crowd-high',
-      label: 'Anti-Massa Dispersione Decine & Cadenze',
+      label: 'Equilibrio Cluster & Estremi (Max 3/Decina)',
       wFreqHot: 0.38,
       wFreqCold: 0.22,
       wDelay: 0.48,

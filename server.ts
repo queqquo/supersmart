@@ -714,6 +714,115 @@ async function startServer() {
     }
   });
 
+  app.get('/api/winforitalia/official-sync', async (_req, res) => {
+    try {
+      const winForItaliaFile = path.resolve(process.cwd(), 'src', 'data', 'winforitalia.json');
+      let localDraws: Array<{
+        id: string;
+        contestNumber: number;
+        year: number;
+        date: string;
+        time?: string;
+        numbers: number[];
+      }> = [];
+
+      if (fs.existsSync(winForItaliaFile)) {
+        const raw = fs.readFileSync(winForItaliaFile, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.draws)) {
+          localDraws = parsed.draws;
+        }
+      }
+
+      // Attempt upstream Sisal / GiochiNumerici Win for Italia Team feed check
+      const now = new Date();
+      const year = now.getUTCFullYear();
+      const month = now.getUTCMonth() + 1;
+      const sisalUrl = `https://www.giochinumerici.info/sisal-gn-proxy-servlet-web/rest/gioco/winforlife/estrazioni/archivio?anno=${year}&mese=${month}&tipoGioco=WINFORITALIA`;
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4500);
+        const upstreamRes = await fetch(sisalUrl, {
+          headers: {
+            'User-Agent': 'SuperEnalotto-WinForItalia-Optimizer/1.0',
+            Accept: 'application/json'
+          },
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+
+        if (upstreamRes.ok) {
+          const payload = await upstreamRes.json();
+          const list =
+            payload?.estrazioni ||
+            payload?.concorsi ||
+            payload?.draws ||
+            (Array.isArray(payload) ? payload : []);
+          if (Array.isArray(list) && list.length > 0) {
+            const byId = new Map(localDraws.map((d) => [d.id, d]));
+            for (const item of list) {
+              const rawNums =
+                item?.combinazioneVincente?.estratti ||
+                item?.numeriEstratti ||
+                item?.numbers ||
+                item?.nums;
+              if (!Array.isArray(rawNums) || rawNums.length < 6) continue;
+              const nums = rawNums
+                .slice(0, 6)
+                .map(Number)
+                .filter((n: number) => Number.isInteger(n) && n >= 1 && n <= 40)
+                .sort((a: number, b: number) => a - b);
+              if (nums.length !== 6 || new Set(nums).size !== 6) continue;
+
+              const rawDate = item?.dataEstrazione || item?.data || item?.date;
+              const dateStr =
+                typeof rawDate === 'number'
+                  ? new Date(rawDate).toISOString().slice(0, 10)
+                  : typeof rawDate === 'string' && rawDate.length >= 10
+                  ? rawDate.slice(0, 10)
+                  : now.toISOString().slice(0, 10);
+              const drawYear = parseInt(dateStr.slice(0, 4), 10);
+              const contestNumber = Number(item?.concorso?.numero || item?.concorso || item?.contestNumber || 1);
+              const id = `WFI-${drawYear}-${String(contestNumber).padStart(3, '0')}`;
+              byId.set(id, {
+                id,
+                contestNumber,
+                year: drawYear,
+                date: dateStr,
+                time: '20:00',
+                numbers: nums
+              });
+            }
+            localDraws = Array.from(byId.values());
+          }
+        }
+      } catch {
+        // Fallback to local src/data/winforitalia.json archive
+      }
+
+      localDraws.sort((a, b) => {
+        const cmp = b.date.localeCompare(a.date);
+        if (cmp !== 0) return cmp;
+        return b.contestNumber - a.contestNumber;
+      });
+
+      res.json({
+        game: 'Win for Italia Team (6/40)',
+        exportedAt: new Date().toISOString(),
+        count: localDraws.length,
+        draws: localDraws
+      });
+    } catch (err) {
+      res.status(500).json({
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Impossibile sincronizzare il feed Win for Italia Team.'
+      });
+    }
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     let viteMiddlewares: express.RequestHandler | null = null;
     const hmrConfig =

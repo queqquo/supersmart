@@ -1,5 +1,4657 @@
 [
   {
+    "id": "play-wfi-1795034983423",
+    "createdAt": "2026-11-18T20:49:43.423Z",
+    "targetContestId": "WFI-2026-304",
+    "mode": "manual",
+    "savedAmount": 0,
+    "manualNote": "Win for Italia Team (6/40) — Sestina Cecchino #1 (2,00 €)",
+    "poolNumbers": [
+      1,
+      3,
+      6,
+      14,
+      15,
+      16,
+      23,
+      26,
+      30,
+      33,
+      34,
+      35
+    ],
+    "columns": [
+      {
+        "id": 1,
+        "numbers": [
+          6,
+          14,
+          15,
+          23,
+          30,
+          35
+        ],
+        "sum": 123,
+        "evens": 3,
+        "odds": 3,
+        "lows": 3,
+        "highs": 3
+      }
+    ],
+    "cost": 2,
+    "status": "IN_ATTESA",
+    "userEmail": "giuseppe.vitiello@gmail.com"
+  },
+  {
+    "savedAmount": 0,
+    "updatedAt": "2026-11-16T20:09:25.115Z",
+    "manualNote": "Generato da CAMEL Workforce (Strategia C — Genetico Puro & Dispersione Decine (4 Bassi + 8 Alti))",
+    "result": {
+      "netReturn": -8,
+      "matchesPerColumn": [
+        {
+          "estimatedPrize": 2,
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "columnId": 1,
+          "hasJolly": false,
+          "numbers": [
+            5,
+            18,
+            28,
+            30,
+            54,
+            55
+          ],
+          "prizeTier": "Vincita Manuale"
+        },
+        {
+          "matchCount": 0,
+          "numbers": [
+            5,
+            28,
+            33,
+            41,
+            60,
+            85
+          ],
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "columnId": 2,
+          "hasJolly": false,
+          "matchedNumbers": [],
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "numbers": [
+            18,
+            28,
+            30,
+            33,
+            56,
+            85
+          ],
+          "estimatedPrize": 0,
+          "columnId": 3,
+          "hasJolly": false,
+          "prizeTier": "Esito Manuale",
+          "matchedNumbers": []
+        },
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "numbers": [
+            18,
+            41,
+            54,
+            55,
+            60,
+            85
+          ],
+          "prizeTier": "Esito Manuale",
+          "hasJolly": false,
+          "columnId": 4
+        },
+        {
+          "estimatedPrize": 0,
+          "matchCount": 0,
+          "matchedNumbers": [],
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "numbers": [
+            18,
+            28,
+            30,
+            41,
+            60,
+            77
+          ],
+          "columnId": 5,
+          "hasJolly": false
+        },
+        {
+          "numbers": [
+            28,
+            33,
+            54,
+            55,
+            77,
+            85
+          ],
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "columnId": 6,
+          "hasJolly": false,
+          "matchedNumbers": [],
+          "estimatedPrize": 0
+        },
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "numbers": [
+            5,
+            30,
+            41,
+            54,
+            56,
+            85
+          ],
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "columnId": 7,
+          "hasJolly": false,
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "hasJolly": false,
+          "columnId": 8,
+          "matchedNumbers": [],
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "numbers": [
+            18,
+            33,
+            41,
+            54,
+            56,
+            77
+          ],
+          "matchCount": 0
+        },
+        {
+          "numbers": [
+            5,
+            30,
+            33,
+            54,
+            60,
+            77
+          ],
+          "columnId": 9,
+          "hasJolly": false,
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "matchedNumbers": []
+        },
+        {
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0,
+          "hasJolly": false,
+          "columnId": 10,
+          "numbers": [
+            5,
+            18,
+            33,
+            55,
+            56,
+            60
+          ],
+          "matchedNumbers": [],
+          "hasSuperstar": false
+        }
+      ],
+      "verifiedAt": "2026-11-16T20:09:25.114Z",
+      "isManualWinning": true,
+      "bestMatch": 0,
+      "hasWin": true,
+      "totalWinning": 2
+    },
+    "columns": [
+      {
+        "odds": 2,
+        "numbers": [
+          5,
+          18,
+          28,
+          30,
+          54,
+          55
+        ],
+        "evens": 4,
+        "highs": 2,
+        "lows": 4,
+        "id": 1,
+        "sum": 190
+      },
+      {
+        "highs": 2,
+        "numbers": [
+          5,
+          28,
+          33,
+          41,
+          60,
+          85
+        ],
+        "evens": 2,
+        "odds": 4,
+        "id": 2,
+        "sum": 252,
+        "lows": 4
+      },
+      {
+        "highs": 2,
+        "id": 3,
+        "evens": 4,
+        "sum": 250,
+        "numbers": [
+          18,
+          28,
+          30,
+          33,
+          56,
+          85
+        ],
+        "odds": 2,
+        "lows": 4
+      },
+      {
+        "id": 4,
+        "highs": 4,
+        "evens": 3,
+        "numbers": [
+          18,
+          41,
+          54,
+          55,
+          60,
+          85
+        ],
+        "sum": 313,
+        "odds": 3,
+        "lows": 2
+      },
+      {
+        "numbers": [
+          18,
+          28,
+          30,
+          41,
+          60,
+          77
+        ],
+        "evens": 4,
+        "odds": 2,
+        "lows": 4,
+        "highs": 2,
+        "id": 5,
+        "sum": 254
+      },
+      {
+        "odds": 4,
+        "highs": 4,
+        "id": 6,
+        "sum": 332,
+        "lows": 2,
+        "numbers": [
+          28,
+          33,
+          54,
+          55,
+          77,
+          85
+        ],
+        "evens": 2
+      },
+      {
+        "highs": 3,
+        "evens": 3,
+        "id": 7,
+        "numbers": [
+          5,
+          30,
+          41,
+          54,
+          56,
+          85
+        ],
+        "sum": 271,
+        "odds": 3,
+        "lows": 3
+      },
+      {
+        "highs": 3,
+        "numbers": [
+          18,
+          33,
+          41,
+          54,
+          56,
+          77
+        ],
+        "evens": 3,
+        "odds": 3,
+        "id": 8,
+        "sum": 279,
+        "lows": 3
+      },
+      {
+        "odds": 3,
+        "id": 9,
+        "lows": 3,
+        "numbers": [
+          5,
+          30,
+          33,
+          54,
+          60,
+          77
+        ],
+        "evens": 3,
+        "sum": 259,
+        "highs": 3
+      },
+      {
+        "highs": 3,
+        "numbers": [
+          5,
+          18,
+          33,
+          55,
+          56,
+          60
+        ],
+        "evens": 3,
+        "odds": 3,
+        "sum": 227,
+        "lows": 3,
+        "id": 10
+      }
+    ],
+    "cost": 10,
+    "createdAt": "2026-11-16T20:08:51.530Z",
+    "targetContestId": "2026-184",
+    "status": "VERIFICATA",
+    "id": "play-camel-1794859731530",
+    "poolNumbers": [
+      5,
+      18,
+      28,
+      30,
+      33,
+      41,
+      54,
+      55,
+      56,
+      60,
+      77,
+      85
+    ],
+    "mode": "pure_coverage",
+    "userEmail": "giuseppe.vitiello@gmail.com"
+  },
+  {
+    "poolNumbers": [
+      12,
+      18,
+      28,
+      32,
+      41,
+      54,
+      73,
+      77,
+      78,
+      85
+    ],
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "targetContestId": "2026-183",
+    "createdAt": "2026-11-14T07:48:25.026Z",
+    "cost": 10,
+    "savedAmount": 0,
+    "status": "VERIFICATA",
+    "updatedAt": "2026-11-16T20:10:13.257Z",
+    "columns": [
+      {
+        "highs": 2,
+        "evens": 4,
+        "sum": 240,
+        "lows": 4,
+        "numbers": [
+          12,
+          18,
+          28,
+          32,
+          73,
+          77
+        ],
+        "id": 1,
+        "odds": 2
+      },
+      {
+        "evens": 4,
+        "lows": 3,
+        "odds": 2,
+        "sum": 288,
+        "numbers": [
+          12,
+          18,
+          41,
+          54,
+          78,
+          85
+        ],
+        "highs": 3,
+        "id": 2
+      },
+      {
+        "sum": 306,
+        "lows": 3,
+        "highs": 3,
+        "id": 3,
+        "odds": 2,
+        "evens": 4,
+        "numbers": [
+          28,
+          32,
+          41,
+          54,
+          73,
+          78
+        ]
+      },
+      {
+        "sum": 317,
+        "id": 4,
+        "highs": 3,
+        "lows": 3,
+        "odds": 3,
+        "numbers": [
+          28,
+          32,
+          41,
+          54,
+          77,
+          85
+        ],
+        "evens": 3
+      },
+      {
+        "odds": 2,
+        "numbers": [
+          12,
+          18,
+          32,
+          73,
+          78,
+          85
+        ],
+        "lows": 3,
+        "evens": 4,
+        "id": 5,
+        "highs": 3,
+        "sum": 298
+      },
+      {
+        "odds": 3,
+        "lows": 3,
+        "numbers": [
+          12,
+          28,
+          41,
+          77,
+          78,
+          85
+        ],
+        "evens": 3,
+        "highs": 3,
+        "sum": 321,
+        "id": 6
+      },
+      {
+        "id": 7,
+        "evens": 2,
+        "odds": 4,
+        "highs": 4,
+        "lows": 2,
+        "sum": 348,
+        "numbers": [
+          18,
+          41,
+          54,
+          73,
+          77,
+          85
+        ]
+      },
+      {
+        "evens": 4,
+        "lows": 4,
+        "odds": 2,
+        "highs": 2,
+        "sum": 230,
+        "numbers": [
+          12,
+          18,
+          32,
+          41,
+          54,
+          73
+        ],
+        "id": 8
+      },
+      {
+        "id": 9,
+        "lows": 3,
+        "numbers": [
+          12,
+          18,
+          28,
+          54,
+          73,
+          85
+        ],
+        "evens": 4,
+        "sum": 270,
+        "odds": 2,
+        "highs": 3
+      },
+      {
+        "numbers": [
+          12,
+          32,
+          41,
+          54,
+          77,
+          78
+        ],
+        "odds": 2,
+        "evens": 4,
+        "highs": 3,
+        "lows": 3,
+        "id": 10,
+        "sum": 294
+      }
+    ],
+    "id": "play-1794642505026",
+    "result": {
+      "totalWinning": 14,
+      "bestMatch": 0,
+      "hasWin": true,
+      "verifiedAt": "2026-11-16T20:10:13.255Z",
+      "matchesPerColumn": [
+        {
+          "estimatedPrize": 14,
+          "matchCount": 0,
+          "matchedNumbers": [],
+          "numbers": [
+            12,
+            18,
+            28,
+            32,
+            73,
+            77
+          ],
+          "prizeTier": "Vincita Manuale",
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 1
+        },
+        {
+          "numbers": [
+            12,
+            18,
+            41,
+            54,
+            78,
+            85
+          ],
+          "matchCount": 0,
+          "matchedNumbers": [],
+          "columnId": 2,
+          "hasJolly": false,
+          "estimatedPrize": 0,
+          "prizeTier": "Nessun Punto",
+          "hasSuperstar": false
+        },
+        {
+          "numbers": [
+            28,
+            32,
+            41,
+            54,
+            73,
+            78
+          ],
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "columnId": 3,
+          "prizeTier": "Nessun Punto",
+          "hasJolly": false
+        },
+        {
+          "hasSuperstar": false,
+          "prizeTier": "Nessun Punto",
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "columnId": 4,
+          "hasJolly": false,
+          "numbers": [
+            28,
+            32,
+            41,
+            54,
+            77,
+            85
+          ],
+          "matchCount": 0
+        },
+        {
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "numbers": [
+            12,
+            18,
+            32,
+            73,
+            78,
+            85
+          ],
+          "matchedNumbers": [],
+          "prizeTier": "Nessun Punto",
+          "columnId": 5,
+          "hasJolly": false
+        },
+        {
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "columnId": 6,
+          "hasJolly": false,
+          "estimatedPrize": 0,
+          "prizeTier": "Nessun Punto",
+          "matchCount": 0,
+          "numbers": [
+            12,
+            28,
+            41,
+            77,
+            78,
+            85
+          ]
+        },
+        {
+          "prizeTier": "Nessun Punto",
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "hasJolly": false,
+          "columnId": 7,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "numbers": [
+            18,
+            41,
+            54,
+            73,
+            77,
+            85
+          ]
+        },
+        {
+          "hasSuperstar": false,
+          "prizeTier": "Nessun Punto",
+          "matchCount": 0,
+          "numbers": [
+            12,
+            18,
+            32,
+            41,
+            54,
+            73
+          ],
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "columnId": 8,
+          "hasJolly": false
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "prizeTier": "Nessun Punto",
+          "columnId": 9,
+          "hasJolly": false,
+          "numbers": [
+            12,
+            18,
+            28,
+            54,
+            73,
+            85
+          ]
+        },
+        {
+          "prizeTier": "Nessun Punto",
+          "hasJolly": false,
+          "columnId": 10,
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "numbers": [
+            12,
+            32,
+            41,
+            54,
+            77,
+            78
+          ],
+          "hasSuperstar": false
+        }
+      ],
+      "netReturn": 4,
+      "isManualWinning": true
+    },
+    "mode": "pure_coverage"
+  },
+  {
+    "targetContestId": "2026-182",
+    "updatedAt": "2026-11-13T22:42:17.850Z",
+    "columns": [
+      {
+        "numbers": [
+          6,
+          40,
+          55,
+          68,
+          75,
+          88
+        ],
+        "odds": 2,
+        "highs": 4,
+        "lows": 2,
+        "id": 1,
+        "evens": 4,
+        "sum": 332
+      },
+      {
+        "highs": 3,
+        "id": 2,
+        "evens": 4,
+        "sum": 314,
+        "odds": 2,
+        "lows": 3,
+        "numbers": [
+          16,
+          28,
+          40,
+          68,
+          75,
+          87
+        ]
+      },
+      {
+        "sum": 249,
+        "id": 3,
+        "lows": 4,
+        "numbers": [
+          6,
+          9,
+          18,
+          41,
+          87,
+          88
+        ],
+        "highs": 2,
+        "evens": 3,
+        "odds": 3
+      },
+      {
+        "numbers": [
+          8,
+          9,
+          16,
+          55,
+          58,
+          75
+        ],
+        "sum": 221,
+        "id": 4,
+        "highs": 3,
+        "evens": 3,
+        "lows": 3,
+        "odds": 3
+      },
+      {
+        "evens": 3,
+        "lows": 3,
+        "sum": 289,
+        "odds": 3,
+        "highs": 3,
+        "numbers": [
+          8,
+          9,
+          40,
+          68,
+          77,
+          87
+        ],
+        "id": 5
+      }
+    ],
+    "status": "IN_ATTESA",
+    "mode": "manual",
+    "createdAt": "2026-11-13T22:42:17.848Z",
+    "id": "play-manual-1794609737848",
+    "poolNumbers": [
+      6,
+      8,
+      9,
+      16,
+      18,
+      28,
+      40,
+      41,
+      55,
+      58,
+      68,
+      75,
+      77,
+      87,
+      88
+    ],
+    "userEmail": "sercru@gmail.com",
+    "cost": 5,
+    "savedAmount": 0
+  },
+  {
+    "mode": "manual",
+    "targetContestId": "2026-182",
+    "updatedAt": "2026-11-13T22:40:39.592Z",
+    "savedAmount": 0,
+    "columns": [
+      {
+        "highs": 2,
+        "evens": 4,
+        "numbers": [
+          6,
+          9,
+          28,
+          40,
+          58,
+          75
+        ],
+        "sum": 216,
+        "id": 1,
+        "lows": 4,
+        "odds": 2
+      },
+      {
+        "odds": 3,
+        "numbers": [
+          9,
+          16,
+          41,
+          68,
+          77,
+          88
+        ],
+        "lows": 3,
+        "evens": 3,
+        "highs": 3,
+        "id": 2,
+        "sum": 299
+      },
+      {
+        "odds": 3,
+        "evens": 3,
+        "highs": 2,
+        "numbers": [
+          8,
+          18,
+          40,
+          41,
+          75,
+          77
+        ],
+        "lows": 4,
+        "id": 3,
+        "sum": 259
+      },
+      {
+        "lows": 2,
+        "odds": 4,
+        "sum": 346,
+        "evens": 2,
+        "id": 4,
+        "numbers": [
+          28,
+          41,
+          55,
+          58,
+          77,
+          87
+        ],
+        "highs": 4
+      }
+    ],
+    "cost": 4,
+    "createdAt": "2026-11-13T22:40:39.589Z",
+    "id": "play-manual-1794609639589",
+    "status": "IN_ATTESA",
+    "poolNumbers": [
+      6,
+      8,
+      9,
+      16,
+      18,
+      28,
+      40,
+      41,
+      55,
+      58,
+      68,
+      75,
+      77,
+      87,
+      88
+    ],
+    "userEmail": "sercru@gmail.com"
+  },
+  {
+    "mode": "manual",
+    "targetContestId": "2026-182",
+    "updatedAt": "2026-11-13T22:38:54.718Z",
+    "savedAmount": 0,
+    "columns": [
+      {
+        "sum": 190,
+        "id": 1,
+        "numbers": [
+          6,
+          8,
+          16,
+          18,
+          55,
+          87
+        ],
+        "lows": 4,
+        "highs": 2,
+        "evens": 4,
+        "odds": 2
+      }
+    ],
+    "createdAt": "2026-11-13T22:38:54.715Z",
+    "cost": 1,
+    "id": "play-manual-1794609534715",
+    "status": "IN_ATTESA",
+    "poolNumbers": [
+      6,
+      8,
+      16,
+      18,
+      55,
+      87
+    ],
+    "userEmail": "sercru@gmail.com"
+  },
+  {
+    "mode": "manual",
+    "poolNumbers": [
+      16,
+      18,
+      28,
+      34,
+      35,
+      38,
+      41,
+      42,
+      54,
+      55,
+      64,
+      68,
+      77,
+      85
+    ],
+    "status": "VERIFICATA",
+    "id": "play-manual-1794605895442",
+    "result": {
+      "verifiedAt": "2026-11-13T21:38:15.442Z",
+      "isManualWinning": true,
+      "bestMatch": 0,
+      "totalWinning": 2,
+      "matchesPerColumn": [
+        {
+          "prizeTier": "Vincita Manuale",
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "estimatedPrize": 2,
+          "numbers": [
+            16,
+            18,
+            28,
+            34,
+            35,
+            77
+          ],
+          "columnId": 1,
+          "hasJolly": false,
+          "matchCount": 0
+        },
+        {
+          "matchedNumbers": [],
+          "numbers": [
+            28,
+            34,
+            41,
+            42,
+            54,
+            55
+          ],
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "prizeTier": "Esito Manuale",
+          "hasJolly": false,
+          "columnId": 2
+        },
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "numbers": [
+            16,
+            28,
+            41,
+            64,
+            68,
+            77
+          ],
+          "hasJolly": false,
+          "columnId": 3,
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0,
+          "hasSuperstar": false
+        },
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "hasJolly": false,
+          "columnId": 4,
+          "matchCount": 0,
+          "numbers": [
+            16,
+            28,
+            42,
+            54,
+            77,
+            85
+          ],
+          "hasSuperstar": false,
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "matchedNumbers": [],
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            16,
+            41,
+            42,
+            54,
+            64,
+            85
+          ],
+          "estimatedPrize": 0,
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "matchCount": 0,
+          "columnId": 5
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "columnId": 6,
+          "hasJolly": false,
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "numbers": [
+            18,
+            34,
+            38,
+            41,
+            68,
+            85
+          ],
+          "matchedNumbers": [],
+          "matchCount": 0
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "numbers": [
+            18,
+            42,
+            54,
+            55,
+            68,
+            77
+          ],
+          "hasJolly": false,
+          "columnId": 7,
+          "hasSuperstar": false
+        },
+        {
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "columnId": 8,
+          "hasJolly": false,
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "numbers": [
+            18,
+            41,
+            55,
+            64,
+            77,
+            85
+          ]
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "columnId": 9,
+          "hasJolly": false,
+          "numbers": [
+            16,
+            34,
+            55,
+            64,
+            68,
+            85
+          ],
+          "hasSuperstar": false
+        },
+        {
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            18,
+            34,
+            41,
+            42,
+            64,
+            77
+          ],
+          "hasJolly": false,
+          "columnId": 10,
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "hasSuperstar": false
+        }
+      ],
+      "hasWin": true,
+      "netReturn": -8
+    },
+    "updatedAt": "2026-11-13T21:38:15.443Z",
+    "savedAmount": 0,
+    "cost": 10,
+    "createdAt": "2026-11-13T21:38:15.442Z",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "targetContestId": "2026-177",
+    "columns": [
+      {
+        "odds": 2,
+        "lows": 5,
+        "id": 1,
+        "evens": 4,
+        "sum": 208,
+        "numbers": [
+          16,
+          18,
+          28,
+          34,
+          35,
+          77
+        ],
+        "highs": 1
+      },
+      {
+        "odds": 2,
+        "evens": 4,
+        "lows": 4,
+        "highs": 2,
+        "id": 2,
+        "numbers": [
+          28,
+          34,
+          41,
+          42,
+          54,
+          55
+        ],
+        "sum": 254
+      },
+      {
+        "numbers": [
+          16,
+          28,
+          41,
+          64,
+          68,
+          77
+        ],
+        "highs": 3,
+        "evens": 4,
+        "sum": 294,
+        "lows": 3,
+        "odds": 2,
+        "id": 3
+      },
+      {
+        "sum": 302,
+        "id": 4,
+        "lows": 3,
+        "highs": 3,
+        "evens": 4,
+        "odds": 2,
+        "numbers": [
+          16,
+          28,
+          42,
+          54,
+          77,
+          85
+        ]
+      },
+      {
+        "sum": 302,
+        "id": 5,
+        "highs": 3,
+        "evens": 4,
+        "lows": 3,
+        "numbers": [
+          16,
+          41,
+          42,
+          54,
+          64,
+          85
+        ],
+        "odds": 2
+      },
+      {
+        "id": 6,
+        "odds": 2,
+        "lows": 4,
+        "numbers": [
+          18,
+          34,
+          38,
+          41,
+          68,
+          85
+        ],
+        "sum": 284,
+        "evens": 4,
+        "highs": 2
+      },
+      {
+        "id": 7,
+        "highs": 4,
+        "odds": 2,
+        "sum": 314,
+        "lows": 2,
+        "numbers": [
+          18,
+          42,
+          54,
+          55,
+          68,
+          77
+        ],
+        "evens": 4
+      },
+      {
+        "highs": 4,
+        "numbers": [
+          18,
+          41,
+          55,
+          64,
+          77,
+          85
+        ],
+        "evens": 2,
+        "odds": 4,
+        "id": 8,
+        "lows": 2,
+        "sum": 340
+      },
+      {
+        "numbers": [
+          16,
+          34,
+          55,
+          64,
+          68,
+          85
+        ],
+        "highs": 4,
+        "evens": 4,
+        "odds": 2,
+        "sum": 322,
+        "id": 9,
+        "lows": 2
+      },
+      {
+        "sum": 276,
+        "id": 10,
+        "highs": 2,
+        "numbers": [
+          18,
+          34,
+          41,
+          42,
+          64,
+          77
+        ],
+        "evens": 4,
+        "lows": 4,
+        "odds": 2
+      }
+    ]
+  },
+  {
+    "updatedAt": "2026-11-13T21:10:56.726Z",
+    "mode": "manual",
+    "status": "VERIFICATA",
+    "result": {
+      "totalWinning": 2,
+      "netReturn": -8,
+      "matchesPerColumn": [
+        {
+          "hasSuperstar": false,
+          "numbers": [
+            5,
+            14,
+            16,
+            27,
+            68,
+            69
+          ],
+          "matchCount": 0,
+          "estimatedPrize": 2,
+          "hasJolly": false,
+          "columnId": 1,
+          "matchedNumbers": [],
+          "prizeTier": "Vincita Manuale"
+        },
+        {
+          "matchCount": 0,
+          "columnId": 2,
+          "hasJolly": false,
+          "hasSuperstar": false,
+          "numbers": [
+            5,
+            19,
+            28,
+            38,
+            71,
+            82
+          ],
+          "prizeTier": "Esito Manuale",
+          "matchedNumbers": [],
+          "estimatedPrize": 0
+        },
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "numbers": [
+            14,
+            16,
+            27,
+            28,
+            71,
+            84
+          ],
+          "hasJolly": false,
+          "columnId": 3,
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "hasJolly": false,
+          "columnId": 4,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            14,
+            19,
+            38,
+            68,
+            69,
+            84
+          ],
+          "hasSuperstar": false
+        },
+        {
+          "hasSuperstar": false,
+          "numbers": [
+            14,
+            28,
+            68,
+            69,
+            71,
+            82
+          ],
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0,
+          "hasJolly": false,
+          "columnId": 5,
+          "estimatedPrize": 0,
+          "matchedNumbers": []
+        },
+        {
+          "numbers": [
+            16,
+            19,
+            27,
+            38,
+            82,
+            84
+          ],
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasJolly": false,
+          "columnId": 6,
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "matchCount": 0
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "columnId": 7,
+          "hasJolly": false,
+          "numbers": [
+            5,
+            16,
+            19,
+            28,
+            68,
+            84
+          ]
+        },
+        {
+          "hasJolly": false,
+          "columnId": 8,
+          "numbers": [
+            5,
+            27,
+            38,
+            69,
+            71,
+            84
+          ],
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "matchedNumbers": [],
+          "estimatedPrize": 0
+        },
+        {
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "prizeTier": "Esito Manuale",
+          "hasJolly": false,
+          "columnId": 9,
+          "numbers": [
+            5,
+            16,
+            38,
+            68,
+            71,
+            82
+          ],
+          "matchedNumbers": [],
+          "estimatedPrize": 0
+        },
+        {
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "numbers": [
+            14,
+            19,
+            27,
+            28,
+            62,
+            82
+          ],
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 10
+        }
+      ],
+      "isManualWinning": true,
+      "bestMatch": 0,
+      "hasWin": true,
+      "verifiedAt": "2026-11-13T21:10:56.725Z"
+    },
+    "savedAmount": 0,
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "cost": 10,
+    "id": "play-manual-1794604256725",
+    "poolNumbers": [
+      5,
+      14,
+      16,
+      19,
+      27,
+      28,
+      38,
+      62,
+      68,
+      69,
+      71,
+      82,
+      84
+    ],
+    "createdAt": "2026-11-13T21:10:56.725Z",
+    "targetContestId": "2026-175",
+    "columns": [
+      {
+        "odds": 3,
+        "lows": 4,
+        "id": 1,
+        "evens": 3,
+        "numbers": [
+          5,
+          14,
+          16,
+          27,
+          68,
+          69
+        ],
+        "highs": 2,
+        "sum": 199
+      },
+      {
+        "odds": 3,
+        "lows": 4,
+        "numbers": [
+          5,
+          19,
+          28,
+          38,
+          71,
+          82
+        ],
+        "evens": 3,
+        "id": 2,
+        "highs": 2,
+        "sum": 243
+      },
+      {
+        "sum": 240,
+        "id": 3,
+        "highs": 2,
+        "evens": 4,
+        "lows": 4,
+        "numbers": [
+          14,
+          16,
+          27,
+          28,
+          71,
+          84
+        ],
+        "odds": 2
+      },
+      {
+        "highs": 3,
+        "evens": 4,
+        "numbers": [
+          14,
+          19,
+          38,
+          68,
+          69,
+          84
+        ],
+        "sum": 292,
+        "lows": 3,
+        "odds": 2,
+        "id": 4
+      },
+      {
+        "odds": 2,
+        "lows": 2,
+        "evens": 4,
+        "numbers": [
+          14,
+          28,
+          68,
+          69,
+          71,
+          82
+        ],
+        "highs": 4,
+        "sum": 332,
+        "id": 5
+      },
+      {
+        "odds": 2,
+        "lows": 4,
+        "id": 6,
+        "evens": 4,
+        "sum": 266,
+        "highs": 2,
+        "numbers": [
+          16,
+          19,
+          27,
+          38,
+          82,
+          84
+        ]
+      },
+      {
+        "highs": 2,
+        "sum": 220,
+        "evens": 4,
+        "numbers": [
+          5,
+          16,
+          19,
+          28,
+          68,
+          84
+        ],
+        "id": 7,
+        "lows": 4,
+        "odds": 2
+      },
+      {
+        "evens": 2,
+        "lows": 3,
+        "sum": 294,
+        "highs": 3,
+        "odds": 4,
+        "id": 8,
+        "numbers": [
+          5,
+          27,
+          38,
+          69,
+          71,
+          84
+        ]
+      },
+      {
+        "numbers": [
+          5,
+          16,
+          38,
+          68,
+          71,
+          82
+        ],
+        "evens": 4,
+        "lows": 3,
+        "sum": 280,
+        "id": 9,
+        "highs": 3,
+        "odds": 2
+      },
+      {
+        "numbers": [
+          14,
+          19,
+          27,
+          28,
+          62,
+          82
+        ],
+        "odds": 2,
+        "highs": 2,
+        "id": 10,
+        "lows": 4,
+        "evens": 4,
+        "sum": 232
+      }
+    ]
+  },
+  {
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "mode": "manual",
+    "id": "play-manual-1794604121319",
+    "savedAmount": 0,
+    "targetContestId": "2026-176",
+    "createdAt": "2026-11-13T21:08:41.319Z",
+    "poolNumbers": [
+      12,
+      26,
+      28,
+      32,
+      41,
+      42,
+      47,
+      52,
+      54,
+      55,
+      64,
+      85
+    ],
+    "cost": 9,
+    "columns": [
+      {
+        "highs": 4,
+        "sum": 286,
+        "evens": 4,
+        "id": 1,
+        "lows": 2,
+        "numbers": [
+          26,
+          42,
+          47,
+          52,
+          55,
+          64
+        ],
+        "superstar": 55,
+        "odds": 2
+      },
+      {
+        "lows": 4,
+        "superstar": 41,
+        "sum": 200,
+        "id": 2,
+        "odds": 2,
+        "evens": 4,
+        "highs": 2,
+        "numbers": [
+          12,
+          26,
+          28,
+          32,
+          47,
+          55
+        ]
+      },
+      {
+        "lows": 3,
+        "numbers": [
+          12,
+          41,
+          42,
+          52,
+          54,
+          85
+        ],
+        "superstar": 28,
+        "odds": 2,
+        "sum": 286,
+        "evens": 4,
+        "highs": 3,
+        "id": 3
+      },
+      {
+        "numbers": [
+          28,
+          41,
+          47,
+          54,
+          55,
+          85
+        ],
+        "sum": 310,
+        "highs": 4,
+        "superstar": 85,
+        "evens": 2,
+        "id": 4,
+        "lows": 2,
+        "odds": 4
+      },
+      {
+        "superstar": 26,
+        "numbers": [
+          12,
+          32,
+          41,
+          47,
+          54,
+          64
+        ],
+        "sum": 250,
+        "highs": 3,
+        "id": 5,
+        "evens": 4,
+        "lows": 3,
+        "odds": 2
+      },
+      {
+        "numbers": [
+          26,
+          28,
+          32,
+          41,
+          64,
+          85
+        ],
+        "sum": 276,
+        "id": 6,
+        "highs": 2,
+        "evens": 4,
+        "superstar": 12,
+        "lows": 4,
+        "odds": 2
+      }
+    ],
+    "updatedAt": "2026-11-13T21:08:41.320Z",
+    "status": "VERIFICATA",
+    "result": {
+      "netReturn": -4,
+      "verifiedAt": "2026-11-13T21:08:41.319Z",
+      "bestMatch": 0,
+      "isManualWinning": true,
+      "matchesPerColumn": [
+        {
+          "prizeTier": "Vincita Manuale",
+          "columnId": 1,
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "matchedNumbers": [],
+          "estimatedPrize": 5,
+          "hasJolly": false,
+          "numbers": [
+            26,
+            42,
+            47,
+            52,
+            55,
+            64
+          ],
+          "superstarPlayed": 55
+        },
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "hasSuperstar": false,
+          "numbers": [
+            12,
+            26,
+            28,
+            32,
+            47,
+            55
+          ],
+          "columnId": 2,
+          "matchCount": 0,
+          "superstarPlayed": 41,
+          "prizeTier": "Esito Manuale",
+          "hasJolly": false
+        },
+        {
+          "numbers": [
+            12,
+            41,
+            42,
+            52,
+            54,
+            85
+          ],
+          "superstarPlayed": 28,
+          "hasJolly": false,
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "columnId": 3,
+          "hasSuperstar": false,
+          "matchCount": 0
+        },
+        {
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "superstarPlayed": 85,
+          "columnId": 4,
+          "numbers": [
+            28,
+            41,
+            47,
+            54,
+            55,
+            85
+          ],
+          "hasSuperstar": false,
+          "hasJolly": false
+        },
+        {
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "numbers": [
+            12,
+            32,
+            41,
+            47,
+            54,
+            64
+          ],
+          "matchedNumbers": [],
+          "columnId": 5,
+          "superstarPlayed": 26,
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "hasJolly": false
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "superstarPlayed": 12,
+          "numbers": [
+            26,
+            28,
+            32,
+            41,
+            64,
+            85
+          ],
+          "hasJolly": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasSuperstar": false,
+          "columnId": 6,
+          "matchCount": 0
+        }
+      ],
+      "hasWin": true,
+      "totalWinning": 5
+    }
+  },
+  {
+    "poolNumbers": [
+      16,
+      18,
+      28,
+      34,
+      35,
+      38,
+      41,
+      42,
+      54,
+      55,
+      64,
+      68,
+      77,
+      85
+    ],
+    "updatedAt": "2026-11-13T21:05:25.136Z",
+    "result": {
+      "netReturn": -8,
+      "hasWin": true,
+      "bestMatch": 0,
+      "matchesPerColumn": [
+        {
+          "numbers": [
+            16,
+            18,
+            28,
+            34,
+            35,
+            77
+          ],
+          "matchedNumbers": [],
+          "estimatedPrize": 2,
+          "hasJolly": false,
+          "columnId": 1,
+          "prizeTier": "Vincita Manuale",
+          "matchCount": 0,
+          "hasSuperstar": false
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "prizeTier": "Esito Manuale",
+          "columnId": 2,
+          "hasJolly": false,
+          "matchCount": 0,
+          "numbers": [
+            28,
+            34,
+            41,
+            42,
+            54,
+            55
+          ],
+          "hasSuperstar": false
+        },
+        {
+          "hasSuperstar": false,
+          "numbers": [
+            16,
+            28,
+            41,
+            64,
+            68,
+            77
+          ],
+          "matchedNumbers": [],
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0,
+          "columnId": 3,
+          "hasJolly": false,
+          "matchCount": 0
+        },
+        {
+          "hasSuperstar": false,
+          "columnId": 4,
+          "hasJolly": false,
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "numbers": [
+            16,
+            28,
+            42,
+            54,
+            77,
+            85
+          ],
+          "matchCount": 0
+        },
+        {
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasJolly": false,
+          "columnId": 5,
+          "numbers": [
+            16,
+            41,
+            42,
+            54,
+            64,
+            85
+          ],
+          "hasSuperstar": false
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "numbers": [
+            18,
+            34,
+            38,
+            41,
+            68,
+            85
+          ],
+          "hasSuperstar": false,
+          "columnId": 6,
+          "hasJolly": false,
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 7,
+          "numbers": [
+            18,
+            42,
+            54,
+            55,
+            68,
+            77
+          ],
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            18,
+            41,
+            55,
+            64,
+            77,
+            85
+          ],
+          "hasJolly": false,
+          "columnId": 8,
+          "hasSuperstar": false
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 9,
+          "numbers": [
+            16,
+            34,
+            55,
+            64,
+            68,
+            85
+          ]
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "numbers": [
+            18,
+            34,
+            41,
+            42,
+            64,
+            77
+          ],
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "columnId": 10,
+          "hasJolly": false
+        }
+      ],
+      "isManualWinning": true,
+      "totalWinning": 2,
+      "verifiedAt": "2026-11-13T21:05:25.135Z"
+    },
+    "status": "VERIFICATA",
+    "savedAmount": 0,
+    "columns": [
+      {
+        "evens": 4,
+        "lows": 5,
+        "odds": 2,
+        "sum": 208,
+        "highs": 1,
+        "numbers": [
+          16,
+          18,
+          28,
+          34,
+          35,
+          77
+        ],
+        "id": 1
+      },
+      {
+        "odds": 2,
+        "evens": 4,
+        "highs": 2,
+        "lows": 4,
+        "id": 2,
+        "sum": 254,
+        "numbers": [
+          28,
+          34,
+          41,
+          42,
+          54,
+          55
+        ]
+      },
+      {
+        "highs": 3,
+        "numbers": [
+          16,
+          28,
+          41,
+          64,
+          68,
+          77
+        ],
+        "evens": 4,
+        "odds": 2,
+        "id": 3,
+        "sum": 294,
+        "lows": 3
+      },
+      {
+        "odds": 2,
+        "lows": 3,
+        "id": 4,
+        "evens": 4,
+        "sum": 302,
+        "highs": 3,
+        "numbers": [
+          16,
+          28,
+          42,
+          54,
+          77,
+          85
+        ]
+      },
+      {
+        "sum": 302,
+        "numbers": [
+          16,
+          41,
+          42,
+          54,
+          64,
+          85
+        ],
+        "lows": 3,
+        "highs": 3,
+        "id": 5,
+        "evens": 4,
+        "odds": 2
+      },
+      {
+        "numbers": [
+          18,
+          34,
+          38,
+          41,
+          68,
+          85
+        ],
+        "evens": 4,
+        "id": 6,
+        "odds": 2,
+        "highs": 2,
+        "lows": 4,
+        "sum": 284
+      },
+      {
+        "sum": 314,
+        "id": 7,
+        "lows": 2,
+        "highs": 4,
+        "evens": 4,
+        "numbers": [
+          18,
+          42,
+          54,
+          55,
+          68,
+          77
+        ],
+        "odds": 2
+      },
+      {
+        "lows": 2,
+        "sum": 340,
+        "numbers": [
+          18,
+          41,
+          55,
+          64,
+          77,
+          85
+        ],
+        "id": 8,
+        "odds": 4,
+        "evens": 2,
+        "highs": 4
+      },
+      {
+        "id": 9,
+        "evens": 4,
+        "odds": 2,
+        "numbers": [
+          16,
+          34,
+          55,
+          64,
+          68,
+          85
+        ],
+        "lows": 2,
+        "highs": 4,
+        "sum": 322
+      },
+      {
+        "sum": 276,
+        "id": 10,
+        "numbers": [
+          18,
+          34,
+          41,
+          42,
+          64,
+          77
+        ],
+        "highs": 2,
+        "lows": 4,
+        "evens": 4,
+        "odds": 2
+      }
+    ],
+    "cost": 10,
+    "targetContestId": "2026-178",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "id": "play-manual-1794603925135",
+    "mode": "manual",
+    "createdAt": "2026-11-13T21:05:25.135Z"
+  },
+  {
+    "mode": "manual",
+    "result": {
+      "matchesPerColumn": [
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 2,
+          "hasSuperstar": false,
+          "prizeTier": "Vincita Manuale",
+          "matchCount": 0,
+          "numbers": [
+            12,
+            13,
+            32,
+            41,
+            52,
+            55
+          ],
+          "hasJolly": false,
+          "columnId": 1
+        },
+        {
+          "numbers": [
+            12,
+            16,
+            43,
+            77,
+            78,
+            85
+          ],
+          "matchedNumbers": [],
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "prizeTier": "Esito Manuale",
+          "columnId": 2,
+          "hasJolly": false,
+          "matchCount": 0
+        },
+        {
+          "hasSuperstar": false,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            13,
+            18,
+            32,
+            41,
+            77,
+            78
+          ],
+          "matchCount": 0,
+          "columnId": 3,
+          "hasJolly": false,
+          "matchedNumbers": [],
+          "estimatedPrize": 0
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "hasJolly": false,
+          "columnId": 4,
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "numbers": [
+            16,
+            18,
+            43,
+            52,
+            55,
+            85
+          ]
+        },
+        {
+          "hasSuperstar": false,
+          "prizeTier": "Esito Manuale",
+          "hasJolly": false,
+          "columnId": 5,
+          "matchCount": 0,
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "numbers": [
+            13,
+            16,
+            32,
+            41,
+            52,
+            85
+          ]
+        },
+        {
+          "numbers": [
+            12,
+            18,
+            52,
+            55,
+            77,
+            78
+          ],
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "hasJolly": false,
+          "columnId": 6,
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "hasSuperstar": false,
+          "columnId": 7,
+          "matchCount": 0,
+          "hasJolly": false,
+          "numbers": [
+            13,
+            32,
+            41,
+            43,
+            52,
+            77
+          ],
+          "matchedNumbers": [],
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "columnId": 8,
+          "hasJolly": false,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            13,
+            16,
+            32,
+            43,
+            55,
+            78
+          ]
+        },
+        {
+          "columnId": 9,
+          "hasJolly": false,
+          "hasSuperstar": false,
+          "numbers": [
+            12,
+            18,
+            41,
+            43,
+            55,
+            85
+          ],
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasJolly": false,
+          "columnId": 10,
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            12,
+            18,
+            32,
+            77,
+            78,
+            85
+          ],
+          "hasSuperstar": false
+        }
+      ],
+      "hasWin": true,
+      "isManualWinning": true,
+      "totalWinning": 2,
+      "bestMatch": 0,
+      "verifiedAt": "2026-11-13T21:03:24.777Z",
+      "netReturn": -8
+    },
+    "id": "play-manual-1794603804777",
+    "savedAmount": 0,
+    "poolNumbers": [
+      12,
+      13,
+      16,
+      18,
+      32,
+      41,
+      43,
+      52,
+      55,
+      77,
+      78,
+      85
+    ],
+    "updatedAt": "2026-11-13T21:03:24.777Z",
+    "status": "VERIFICATA",
+    "cost": 10,
+    "createdAt": "2026-11-13T21:03:24.777Z",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "columns": [
+      {
+        "odds": 3,
+        "lows": 4,
+        "numbers": [
+          12,
+          13,
+          32,
+          41,
+          52,
+          55
+        ],
+        "evens": 3,
+        "id": 1,
+        "highs": 2,
+        "sum": 205
+      },
+      {
+        "highs": 3,
+        "evens": 3,
+        "sum": 311,
+        "numbers": [
+          12,
+          16,
+          43,
+          77,
+          78,
+          85
+        ],
+        "lows": 3,
+        "id": 2,
+        "odds": 3
+      },
+      {
+        "highs": 2,
+        "numbers": [
+          13,
+          18,
+          32,
+          41,
+          77,
+          78
+        ],
+        "evens": 3,
+        "odds": 3,
+        "id": 3,
+        "lows": 4,
+        "sum": 259
+      },
+      {
+        "highs": 3,
+        "evens": 3,
+        "odds": 3,
+        "id": 4,
+        "numbers": [
+          16,
+          18,
+          43,
+          52,
+          55,
+          85
+        ],
+        "sum": 269,
+        "lows": 3
+      },
+      {
+        "evens": 3,
+        "lows": 4,
+        "odds": 3,
+        "sum": 239,
+        "numbers": [
+          13,
+          16,
+          32,
+          41,
+          52,
+          85
+        ],
+        "highs": 2,
+        "id": 5
+      },
+      {
+        "odds": 2,
+        "numbers": [
+          12,
+          18,
+          52,
+          55,
+          77,
+          78
+        ],
+        "lows": 2,
+        "id": 6,
+        "evens": 4,
+        "sum": 292,
+        "highs": 4
+      },
+      {
+        "numbers": [
+          13,
+          32,
+          41,
+          43,
+          52,
+          77
+        ],
+        "id": 7,
+        "odds": 4,
+        "lows": 4,
+        "sum": 258,
+        "evens": 2,
+        "highs": 2
+      },
+      {
+        "numbers": [
+          13,
+          16,
+          32,
+          43,
+          55,
+          78
+        ],
+        "sum": 237,
+        "highs": 2,
+        "id": 8,
+        "lows": 4,
+        "evens": 3,
+        "odds": 3
+      },
+      {
+        "lows": 4,
+        "sum": 254,
+        "evens": 2,
+        "id": 9,
+        "numbers": [
+          12,
+          18,
+          41,
+          43,
+          55,
+          85
+        ],
+        "odds": 4,
+        "highs": 2
+      },
+      {
+        "numbers": [
+          12,
+          18,
+          32,
+          77,
+          78,
+          85
+        ],
+        "sum": 302,
+        "highs": 3,
+        "id": 10,
+        "lows": 3,
+        "evens": 4,
+        "odds": 2
+      }
+    ],
+    "targetContestId": "2026-178"
+  },
+  {
+    "mode": "manual",
+    "status": "VERIFICATA",
+    "createdAt": "2026-11-13T21:00:50.685Z",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "result": {
+      "hasWin": true,
+      "matchesPerColumn": [
+        {
+          "hasJolly": false,
+          "prizeTier": "Vincita Manuale",
+          "estimatedPrize": 5,
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "superstarPlayed": 2,
+          "columnId": 1,
+          "matchCount": 0,
+          "numbers": [
+            5,
+            40,
+            47,
+            52,
+            56,
+            68
+          ]
+        }
+      ],
+      "isManualWinning": true,
+      "verifiedAt": "2026-11-13T21:00:50.685Z",
+      "bestMatch": 0,
+      "totalWinning": 5,
+      "netReturn": 3.5
+    },
+    "poolNumbers": [
+      5,
+      40,
+      47,
+      52,
+      56,
+      68
+    ],
+    "id": "play-manual-1794603650685",
+    "cost": 1.5,
+    "savedAmount": 0,
+    "updatedAt": "2026-11-13T21:00:50.685Z",
+    "columns": [
+      {
+        "evens": 4,
+        "lows": 2,
+        "sum": 268,
+        "numbers": [
+          5,
+          40,
+          47,
+          52,
+          56,
+          68
+        ],
+        "odds": 2,
+        "highs": 4,
+        "id": 1,
+        "superstar": 2
+      }
+    ],
+    "targetContestId": "2026-178"
+  },
+  {
+    "createdAt": "2026-11-13T20:58:40.669Z",
+    "poolNumbers": [
+      19,
+      22,
+      43,
+      52,
+      55,
+      83
+    ],
+    "columns": [
+      {
+        "odds": 4,
+        "evens": 2,
+        "numbers": [
+          19,
+          22,
+          43,
+          52,
+          55,
+          83
+        ],
+        "highs": 3,
+        "id": 1,
+        "lows": 3,
+        "superstar": 35,
+        "sum": 274
+      }
+    ],
+    "targetContestId": "2026-178",
+    "cost": 1.5,
+    "savedAmount": 0,
+    "id": "play-manual-1794603520669",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "result": {
+      "hasWin": false,
+      "netReturn": -1.5,
+      "matchesPerColumn": [
+        {
+          "matchCount": 0,
+          "numbers": [
+            19,
+            22,
+            43,
+            52,
+            55,
+            83
+          ],
+          "hasSuperstar": false,
+          "columnId": 1,
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0,
+          "hasJolly": false,
+          "matchedNumbers": [],
+          "superstarPlayed": 35
+        }
+      ],
+      "totalWinning": 0,
+      "bestMatch": 0,
+      "isManualWinning": true,
+      "verifiedAt": "2026-11-13T20:58:40.669Z"
+    },
+    "status": "VERIFICATA",
+    "mode": "manual",
+    "updatedAt": "2026-11-13T20:58:40.670Z"
+  },
+  {
+    "columns": [
+      {
+        "odds": 4,
+        "numbers": [
+          18,
+          41,
+          54,
+          59,
+          77,
+          85
+        ],
+        "lows": 2,
+        "evens": 2,
+        "highs": 4,
+        "id": 1,
+        "sum": 334
+      },
+      {
+        "sum": 327,
+        "highs": 4,
+        "evens": 3,
+        "id": 2,
+        "lows": 2,
+        "numbers": [
+          12,
+          41,
+          52,
+          59,
+          78,
+          85
+        ],
+        "odds": 3
+      },
+      {
+        "numbers": [
+          12,
+          13,
+          41,
+          45,
+          52,
+          54
+        ],
+        "odds": 3,
+        "highs": 2,
+        "evens": 3,
+        "id": 3,
+        "lows": 4,
+        "sum": 217
+      },
+      {
+        "lows": 4,
+        "sum": 280,
+        "id": 4,
+        "odds": 4,
+        "evens": 2,
+        "highs": 2,
+        "numbers": [
+          13,
+          18,
+          41,
+          45,
+          78,
+          85
+        ]
+      },
+      {
+        "id": 5,
+        "odds": 4,
+        "lows": 2,
+        "sum": 350,
+        "evens": 2,
+        "highs": 4,
+        "numbers": [
+          41,
+          45,
+          54,
+          55,
+          77,
+          78
+        ]
+      },
+      {
+        "sum": 269,
+        "lows": 3,
+        "numbers": [
+          12,
+          18,
+          45,
+          54,
+          55,
+          85
+        ],
+        "highs": 3,
+        "odds": 3,
+        "evens": 3,
+        "id": 6
+      },
+      {
+        "sum": 261,
+        "highs": 3,
+        "lows": 3,
+        "odds": 3,
+        "evens": 3,
+        "numbers": [
+          12,
+          13,
+          45,
+          54,
+          59,
+          78
+        ],
+        "id": 7
+      },
+      {
+        "lows": 2,
+        "sum": 299,
+        "odds": 3,
+        "numbers": [
+          12,
+          18,
+          55,
+          59,
+          77,
+          78
+        ],
+        "evens": 3,
+        "id": 8,
+        "highs": 4
+      },
+      {
+        "evens": 2,
+        "lows": 2,
+        "numbers": [
+          12,
+          13,
+          52,
+          55,
+          77,
+          85
+        ],
+        "sum": 294,
+        "odds": 4,
+        "highs": 4,
+        "id": 9
+      },
+      {
+        "id": 10,
+        "odds": 4,
+        "lows": 3,
+        "sum": 264,
+        "evens": 2,
+        "highs": 3,
+        "numbers": [
+          13,
+          18,
+          45,
+          52,
+          59,
+          77
+        ]
+      }
+    ],
+    "targetContestId": "2026-179",
+    "cost": 10,
+    "updatedAt": "2026-11-13T21:53:16.187Z",
+    "id": "play-manual-1794603320594",
+    "poolNumbers": [
+      12,
+      13,
+      18,
+      41,
+      45,
+      52,
+      54,
+      55,
+      59,
+      77,
+      78,
+      85
+    ],
+    "result": {
+      "bestMatch": 4,
+      "isManualWinning": true,
+      "totalWinning": 772,
+      "netReturn": 762,
+      "matchesPerColumn": [
+        {
+          "matchedNumbers": [
+            41,
+            54,
+            59,
+            85
+          ],
+          "estimatedPrize": 772,
+          "prizeTier": "Vincita Manuale",
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 1,
+          "numbers": [
+            18,
+            41,
+            54,
+            59,
+            77,
+            85
+          ],
+          "matchCount": 4
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [
+            41,
+            59,
+            85
+          ],
+          "prizeTier": "3 Punti",
+          "columnId": 2,
+          "hasJolly": false,
+          "matchCount": 3,
+          "numbers": [
+            12,
+            41,
+            52,
+            59,
+            78,
+            85
+          ],
+          "hasSuperstar": false
+        },
+        {
+          "hasJolly": false,
+          "columnId": 3,
+          "hasSuperstar": false,
+          "numbers": [
+            12,
+            13,
+            41,
+            45,
+            52,
+            54
+          ],
+          "matchCount": 2,
+          "prizeTier": "2 Punti",
+          "matchedNumbers": [
+            41,
+            54
+          ],
+          "estimatedPrize": 0
+        },
+        {
+          "numbers": [
+            13,
+            18,
+            41,
+            45,
+            78,
+            85
+          ],
+          "estimatedPrize": 0,
+          "matchedNumbers": [
+            41,
+            85
+          ],
+          "hasSuperstar": false,
+          "columnId": 4,
+          "hasJolly": false,
+          "prizeTier": "2 Punti",
+          "matchCount": 2
+        },
+        {
+          "numbers": [
+            41,
+            45,
+            54,
+            55,
+            77,
+            78
+          ],
+          "estimatedPrize": 0,
+          "prizeTier": "2 Punti",
+          "matchedNumbers": [
+            41,
+            54
+          ],
+          "matchCount": 2,
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 5
+        },
+        {
+          "matchCount": 2,
+          "prizeTier": "2 Punti",
+          "numbers": [
+            12,
+            18,
+            45,
+            54,
+            55,
+            85
+          ],
+          "estimatedPrize": 0,
+          "matchedNumbers": [
+            54,
+            85
+          ],
+          "columnId": 6,
+          "hasJolly": false,
+          "hasSuperstar": false
+        },
+        {
+          "numbers": [
+            12,
+            13,
+            45,
+            54,
+            59,
+            78
+          ],
+          "prizeTier": "2 Punti",
+          "matchCount": 2,
+          "hasJolly": false,
+          "columnId": 7,
+          "matchedNumbers": [
+            54,
+            59
+          ],
+          "hasSuperstar": false,
+          "estimatedPrize": 0
+        },
+        {
+          "matchCount": 1,
+          "numbers": [
+            12,
+            18,
+            55,
+            59,
+            77,
+            78
+          ],
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": [
+            59
+          ],
+          "columnId": 8,
+          "prizeTier": "Nessun Punto",
+          "hasJolly": false
+        },
+        {
+          "hasJolly": false,
+          "columnId": 9,
+          "matchCount": 1,
+          "estimatedPrize": 0,
+          "prizeTier": "Nessun Punto",
+          "matchedNumbers": [
+            85
+          ],
+          "hasSuperstar": false,
+          "numbers": [
+            12,
+            13,
+            52,
+            55,
+            77,
+            85
+          ]
+        },
+        {
+          "hasJolly": false,
+          "columnId": 10,
+          "prizeTier": "Nessun Punto",
+          "hasSuperstar": false,
+          "matchedNumbers": [
+            59
+          ],
+          "numbers": [
+            13,
+            18,
+            45,
+            52,
+            59,
+            77
+          ],
+          "estimatedPrize": 0,
+          "matchCount": 1
+        }
+      ],
+      "verifiedAt": "2026-11-13T21:53:16.186Z",
+      "hasWin": true
+    },
+    "createdAt": "2026-11-13T20:55:20.594Z",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "status": "VERIFICATA",
+    "mode": "manual",
+    "savedAmount": 0
+  },
+  {
+    "updatedAt": "2026-11-13T20:51:51.801Z",
+    "savedAmount": 0,
+    "cost": 1.5,
+    "poolNumbers": [
+      13,
+      32,
+      48,
+      51,
+      53,
+      62
+    ],
+    "columns": [
+      {
+        "id": 1,
+        "lows": 2,
+        "evens": 3,
+        "sum": 259,
+        "superstar": 24,
+        "odds": 3,
+        "highs": 4,
+        "numbers": [
+          13,
+          32,
+          48,
+          51,
+          53,
+          62
+        ]
+      }
+    ],
+    "targetContestId": "2026-179",
+    "result": {
+      "verifiedAt": "2026-11-13T20:51:51.801Z",
+      "matchesPerColumn": [
+        {
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "superstarPlayed": 24,
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "prizeTier": "Esito Manuale",
+          "columnId": 1,
+          "numbers": [
+            13,
+            32,
+            48,
+            51,
+            53,
+            62
+          ]
+        }
+      ],
+      "totalWinning": 0,
+      "isManualWinning": true,
+      "hasWin": false,
+      "bestMatch": 0,
+      "netReturn": -1.5
+    },
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "createdAt": "2026-11-13T20:51:51.801Z",
+    "status": "VERIFICATA",
+    "id": "play-manual-1794603111801",
+    "mode": "manual"
+  },
+  {
+    "savedAmount": 0,
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "targetContestId": "2026-179",
+    "result": {
+      "netReturn": -1.5,
+      "hasWin": false,
+      "isManualWinning": true,
+      "bestMatch": 0,
+      "matchesPerColumn": [
+        {
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "columnId": 1,
+          "numbers": [
+            6,
+            21,
+            24,
+            74,
+            83,
+            87
+          ],
+          "superstarPlayed": 15,
+          "estimatedPrize": 0,
+          "hasJolly": false,
+          "matchedNumbers": []
+        }
+      ],
+      "totalWinning": 0,
+      "verifiedAt": "2026-11-13T20:48:42.583Z"
+    },
+    "cost": 1.5,
+    "poolNumbers": [
+      6,
+      21,
+      24,
+      74,
+      83,
+      87
+    ],
+    "status": "VERIFICATA",
+    "createdAt": "2026-11-13T20:48:42.583Z",
+    "updatedAt": "2026-11-13T20:48:42.584Z",
+    "mode": "manual",
+    "columns": [
+      {
+        "evens": 3,
+        "lows": 3,
+        "numbers": [
+          6,
+          21,
+          24,
+          74,
+          83,
+          87
+        ],
+        "sum": 295,
+        "id": 1,
+        "highs": 3,
+        "odds": 3,
+        "superstar": 15
+      }
+    ],
+    "id": "play-manual-1794602922583"
+  },
+  {
+    "updatedAt": "2026-11-13T20:46:41.677Z",
+    "columns": [
+      {
+        "highs": 3,
+        "odds": 3,
+        "id": 1,
+        "numbers": [
+          6,
+          19,
+          45,
+          52,
+          68,
+          85
+        ],
+        "superstar": 49,
+        "sum": 275,
+        "lows": 3,
+        "evens": 3
+      }
+    ],
+    "id": "play-manual-1794602801677",
+    "mode": "manual",
+    "targetContestId": "2026-180",
+    "poolNumbers": [
+      6,
+      19,
+      45,
+      52,
+      68,
+      85
+    ],
+    "status": "VERIFICATA",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "createdAt": "2026-11-13T20:46:41.677Z",
+    "result": {
+      "isManualWinning": true,
+      "matchesPerColumn": [
+        {
+          "numbers": [
+            6,
+            19,
+            45,
+            52,
+            68,
+            85
+          ],
+          "columnId": 1,
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "superstarPlayed": 49,
+          "hasJolly": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "prizeTier": "Esito Manuale"
+        }
+      ],
+      "bestMatch": 0,
+      "totalWinning": 0,
+      "verifiedAt": "2026-11-13T20:46:41.677Z",
+      "netReturn": -1.5,
+      "hasWin": false
+    },
+    "cost": 1.5,
+    "savedAmount": 0
+  },
+  {
+    "updatedAt": "2026-11-13T20:43:21.275Z",
+    "savedAmount": 0,
+    "cost": 10,
+    "poolNumbers": [
+      5,
+      6,
+      28,
+      39,
+      40,
+      43,
+      45,
+      52,
+      55,
+      65,
+      68,
+      77,
+      86,
+      87,
+      88
+    ],
+    "columns": [
+      {
+        "numbers": [
+          5,
+          6,
+          28,
+          39,
+          52,
+          65
+        ],
+        "highs": 2,
+        "odds": 3,
+        "id": 1,
+        "lows": 4,
+        "sum": 195,
+        "evens": 3
+      },
+      {
+        "numbers": [
+          5,
+          40,
+          43,
+          55,
+          68,
+          77
+        ],
+        "sum": 288,
+        "highs": 3,
+        "lows": 3,
+        "odds": 4,
+        "evens": 2,
+        "id": 2
+      },
+      {
+        "numbers": [
+          6,
+          28,
+          40,
+          45,
+          86,
+          87
+        ],
+        "odds": 2,
+        "evens": 4,
+        "highs": 2,
+        "lows": 4,
+        "id": 3,
+        "sum": 292
+      },
+      {
+        "numbers": [
+          39,
+          43,
+          45,
+          52,
+          55,
+          88
+        ],
+        "highs": 3,
+        "evens": 2,
+        "sum": 322,
+        "lows": 3,
+        "id": 4,
+        "odds": 4
+      },
+      {
+        "highs": 4,
+        "numbers": [
+          6,
+          45,
+          65,
+          68,
+          77,
+          88
+        ],
+        "evens": 3,
+        "odds": 3,
+        "id": 5,
+        "sum": 349,
+        "lows": 2
+      },
+      {
+        "odds": 3,
+        "evens": 3,
+        "highs": 4,
+        "lows": 2,
+        "id": 6,
+        "numbers": [
+          5,
+          39,
+          52,
+          68,
+          86,
+          87
+        ],
+        "sum": 337
+      },
+      {
+        "id": 7,
+        "sum": 342,
+        "lows": 2,
+        "highs": 4,
+        "evens": 2,
+        "odds": 4,
+        "numbers": [
+          6,
+          43,
+          55,
+          65,
+          86,
+          87
+        ]
+      },
+      {
+        "odds": 2,
+        "lows": 3,
+        "evens": 4,
+        "numbers": [
+          28,
+          39,
+          40,
+          52,
+          77,
+          88
+        ],
+        "id": 8,
+        "highs": 3,
+        "sum": 324
+      },
+      {
+        "lows": 4,
+        "evens": 3,
+        "sum": 295,
+        "odds": 3,
+        "id": 9,
+        "highs": 2,
+        "numbers": [
+          5,
+          28,
+          43,
+          45,
+          86,
+          88
+        ]
+      },
+      {
+        "numbers": [
+          28,
+          40,
+          55,
+          65,
+          68,
+          87
+        ],
+        "evens": 3,
+        "odds": 3,
+        "lows": 2,
+        "highs": 4,
+        "id": 10,
+        "sum": 343
+      }
+    ],
+    "result": {
+      "totalWinning": 0,
+      "isManualWinning": true,
+      "hasWin": false,
+      "verifiedAt": "2026-11-13T20:43:21.274Z",
+      "bestMatch": 0,
+      "matchesPerColumn": [
+        {
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasJolly": false,
+          "columnId": 1,
+          "numbers": [
+            5,
+            6,
+            28,
+            39,
+            52,
+            65
+          ],
+          "matchCount": 0
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0,
+          "columnId": 2,
+          "hasJolly": false,
+          "matchedNumbers": [],
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "numbers": [
+            5,
+            40,
+            43,
+            55,
+            68,
+            77
+          ]
+        },
+        {
+          "hasJolly": false,
+          "columnId": 3,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            6,
+            28,
+            40,
+            45,
+            86,
+            87
+          ],
+          "hasSuperstar": false
+        },
+        {
+          "hasSuperstar": false,
+          "numbers": [
+            39,
+            43,
+            45,
+            52,
+            55,
+            88
+          ],
+          "matchCount": 0,
+          "hasJolly": false,
+          "columnId": 4,
+          "matchedNumbers": [],
+          "prizeTier": "Esito Manuale",
+          "estimatedPrize": 0
+        },
+        {
+          "numbers": [
+            6,
+            45,
+            65,
+            68,
+            77,
+            88
+          ],
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "columnId": 5,
+          "hasJolly": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": []
+        },
+        {
+          "numbers": [
+            5,
+            39,
+            52,
+            68,
+            86,
+            87
+          ],
+          "hasJolly": false,
+          "columnId": 6,
+          "matchCount": 0,
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": []
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "numbers": [
+            6,
+            43,
+            55,
+            65,
+            86,
+            87
+          ],
+          "hasSuperstar": false,
+          "prizeTier": "Esito Manuale",
+          "columnId": 7,
+          "hasJolly": false
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0,
+          "columnId": 8,
+          "hasJolly": false,
+          "numbers": [
+            28,
+            39,
+            40,
+            52,
+            77,
+            88
+          ],
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasSuperstar": false
+        },
+        {
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 9,
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            5,
+            28,
+            43,
+            45,
+            86,
+            88
+          ],
+          "matchCount": 0
+        },
+        {
+          "numbers": [
+            28,
+            40,
+            55,
+            65,
+            68,
+            87
+          ],
+          "hasSuperstar": false,
+          "prizeTier": "Esito Manuale",
+          "matchCount": 0,
+          "hasJolly": false,
+          "columnId": 10,
+          "matchedNumbers": [],
+          "estimatedPrize": 0
+        }
+      ],
+      "netReturn": -10
+    },
+    "targetContestId": "2026-180",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "status": "VERIFICATA",
+    "createdAt": "2026-11-13T20:43:21.274Z",
+    "id": "play-manual-1794602601274",
+    "mode": "manual"
+  },
+  {
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "result": {
+      "verifiedAt": "2026-11-13T20:39:34.348Z",
+      "totalWinning": 2,
+      "matchesPerColumn": [
+        {
+          "estimatedPrize": 2,
+          "matchCount": 0,
+          "matchedNumbers": [],
+          "hasJolly": false,
+          "columnId": 1,
+          "hasSuperstar": false,
+          "prizeTier": "Vincita Manuale",
+          "numbers": [
+            18,
+            25,
+            28,
+            34,
+            52,
+            55
+          ]
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "hasJolly": false,
+          "columnId": 2,
+          "numbers": [
+            18,
+            41,
+            54,
+            56,
+            64,
+            77
+          ],
+          "matchCount": 0
+        },
+        {
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "numbers": [
+            25,
+            28,
+            34,
+            41,
+            54,
+            85
+          ],
+          "hasJolly": false,
+          "columnId": 3,
+          "estimatedPrize": 0,
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "numbers": [
+            25,
+            28,
+            34,
+            56,
+            64,
+            77
+          ],
+          "hasJolly": false,
+          "columnId": 4,
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "hasJolly": false,
+          "columnId": 5,
+          "hasSuperstar": false,
+          "prizeTier": "Esito Manuale",
+          "numbers": [
+            18,
+            41,
+            52,
+            55,
+            64,
+            85
+          ],
+          "estimatedPrize": 0,
+          "matchCount": 0,
+          "matchedNumbers": []
+        },
+        {
+          "matchedNumbers": [],
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "estimatedPrize": 0,
+          "numbers": [
+            18,
+            25,
+            52,
+            56,
+            77,
+            85
+          ],
+          "prizeTier": "Esito Manuale",
+          "columnId": 6,
+          "hasJolly": false
+        },
+        {
+          "prizeTier": "Esito Manuale",
+          "hasJolly": false,
+          "columnId": 7,
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "numbers": [
+            18,
+            28,
+            54,
+            55,
+            77,
+            85
+          ]
+        },
+        {
+          "matchedNumbers": [],
+          "estimatedPrize": 0,
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "numbers": [
+            34,
+            41,
+            55,
+            56,
+            77,
+            85
+          ],
+          "hasJolly": false,
+          "columnId": 8,
+          "prizeTier": "Esito Manuale"
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "numbers": [
+            25,
+            28,
+            41,
+            52,
+            54,
+            64
+          ],
+          "prizeTier": "Esito Manuale",
+          "columnId": 9,
+          "hasJolly": false,
+          "hasSuperstar": false
+        },
+        {
+          "numbers": [
+            18,
+            34,
+            41,
+            52,
+            54,
+            77
+          ],
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "columnId": 10,
+          "hasJolly": false,
+          "prizeTier": "Esito Manuale"
+        }
+      ],
+      "hasWin": true,
+      "isManualWinning": true,
+      "netReturn": -8,
+      "bestMatch": 0
+    },
+    "mode": "manual",
+    "poolNumbers": [
+      18,
+      25,
+      28,
+      34,
+      41,
+      52,
+      54,
+      55,
+      56,
+      64,
+      77,
+      85
+    ],
+    "targetContestId": "2026-181",
+    "savedAmount": 0,
+    "createdAt": "2026-11-13T20:39:34.348Z",
+    "status": "VERIFICATA",
+    "updatedAt": "2026-11-13T20:39:34.348Z",
+    "cost": 10,
+    "columns": [
+      {
+        "highs": 2,
+        "numbers": [
+          18,
+          25,
+          28,
+          34,
+          52,
+          55
+        ],
+        "id": 1,
+        "evens": 4,
+        "sum": 212,
+        "odds": 2,
+        "lows": 4
+      },
+      {
+        "highs": 4,
+        "numbers": [
+          18,
+          41,
+          54,
+          56,
+          64,
+          77
+        ],
+        "evens": 4,
+        "id": 2,
+        "odds": 2,
+        "sum": 310,
+        "lows": 2
+      },
+      {
+        "highs": 2,
+        "id": 3,
+        "evens": 3,
+        "sum": 267,
+        "odds": 3,
+        "numbers": [
+          25,
+          28,
+          34,
+          41,
+          54,
+          85
+        ],
+        "lows": 4
+      },
+      {
+        "id": 4,
+        "lows": 3,
+        "sum": 284,
+        "odds": 2,
+        "evens": 4,
+        "numbers": [
+          25,
+          28,
+          34,
+          56,
+          64,
+          77
+        ],
+        "highs": 3
+      },
+      {
+        "highs": 4,
+        "evens": 3,
+        "odds": 3,
+        "numbers": [
+          18,
+          41,
+          52,
+          55,
+          64,
+          85
+        ],
+        "id": 5,
+        "lows": 2,
+        "sum": 315
+      },
+      {
+        "highs": 4,
+        "evens": 3,
+        "odds": 3,
+        "numbers": [
+          18,
+          25,
+          52,
+          56,
+          77,
+          85
+        ],
+        "id": 6,
+        "sum": 313,
+        "lows": 2
+      },
+      {
+        "id": 7,
+        "sum": 317,
+        "highs": 4,
+        "odds": 3,
+        "numbers": [
+          18,
+          28,
+          54,
+          55,
+          77,
+          85
+        ],
+        "lows": 2,
+        "evens": 3
+      },
+      {
+        "odds": 4,
+        "evens": 2,
+        "highs": 4,
+        "numbers": [
+          34,
+          41,
+          55,
+          56,
+          77,
+          85
+        ],
+        "lows": 2,
+        "id": 8,
+        "sum": 348
+      },
+      {
+        "lows": 3,
+        "sum": 264,
+        "odds": 2,
+        "id": 9,
+        "evens": 4,
+        "numbers": [
+          25,
+          28,
+          41,
+          52,
+          54,
+          64
+        ],
+        "highs": 3
+      },
+      {
+        "highs": 3,
+        "sum": 276,
+        "evens": 4,
+        "lows": 3,
+        "id": 10,
+        "numbers": [
+          18,
+          34,
+          41,
+          52,
+          54,
+          77
+        ],
+        "odds": 2
+      }
+    ],
+    "id": "play-manual-1794602374348"
+  },
+  {
+    "columns": [
+      {
+        "id": 1,
+        "highs": 4,
+        "evens": 4,
+        "sum": 318,
+        "odds": 2,
+        "lows": 2,
+        "numbers": [
+          21,
+          30,
+          58,
+          62,
+          71,
+          76
+        ],
+        "superstar": 35
+      }
+    ],
+    "poolNumbers": [
+      21,
+      30,
+      58,
+      62,
+      71,
+      76
+    ],
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "createdAt": "2026-11-13T20:34:14.048Z",
+    "mode": "manual",
+    "savedAmount": 0,
+    "id": "play-manual-1794602054048",
+    "updatedAt": "2026-11-13T21:54:13.222Z",
+    "status": "VERIFICATA",
+    "result": {
+      "matchesPerColumn": [
+        {
+          "superstarPlayed": 35,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasJolly": false,
+          "columnId": 1,
+          "numbers": [
+            21,
+            30,
+            58,
+            62,
+            71,
+            76
+          ],
+          "hasSuperstar": false,
+          "prizeTier": "Nessun Punto",
+          "matchCount": 0
+        }
+      ],
+      "hasWin": false,
+      "totalWinning": 0,
+      "verifiedAt": "2026-11-13T21:54:13.220Z",
+      "netReturn": -1.5,
+      "bestMatch": 0
+    },
+    "targetContestId": "2026-181",
+    "cost": 1.5
+  },
+  {
+    "poolNumbers": [
+      13,
+      16,
+      18,
+      25,
+      28,
+      41,
+      54,
+      55,
+      56,
+      77,
+      78,
+      85
+    ],
+    "result": {
+      "verifiedAt": "2026-11-14T07:40:41.362Z",
+      "bestMatch": 2,
+      "netReturn": 0,
+      "hasWin": true,
+      "matchesPerColumn": [
+        {
+          "hasSuperstar": false,
+          "matchCount": 1,
+          "hasJolly": false,
+          "columnId": 1,
+          "matchedNumbers": [
+            55
+          ],
+          "estimatedPrize": 0,
+          "prizeTier": "Nessun Punto",
+          "numbers": [
+            13,
+            16,
+            25,
+            28,
+            54,
+            55
+          ]
+        },
+        {
+          "hasSuperstar": false,
+          "prizeTier": "Nessun Punto",
+          "matchedNumbers": [
+            56
+          ],
+          "matchCount": 1,
+          "estimatedPrize": 0,
+          "hasJolly": false,
+          "columnId": 2,
+          "numbers": [
+            13,
+            18,
+            41,
+            56,
+            77,
+            78
+          ]
+        },
+        {
+          "prizeTier": "Nessun Punto",
+          "hasSuperstar": false,
+          "numbers": [
+            16,
+            18,
+            25,
+            28,
+            56,
+            85
+          ],
+          "hasJolly": false,
+          "columnId": 3,
+          "matchCount": 1,
+          "estimatedPrize": 0,
+          "matchedNumbers": [
+            56
+          ]
+        },
+        {
+          "matchCount": 1,
+          "matchedNumbers": [
+            55
+          ],
+          "estimatedPrize": 0,
+          "hasSuperstar": false,
+          "columnId": 4,
+          "hasJolly": false,
+          "numbers": [
+            16,
+            41,
+            54,
+            55,
+            77,
+            85
+          ],
+          "prizeTier": "Nessun Punto"
+        },
+        {
+          "estimatedPrize": 0,
+          "matchCount": 0,
+          "matchedNumbers": [],
+          "numbers": [
+            16,
+            25,
+            28,
+            41,
+            77,
+            78
+          ],
+          "prizeTier": "Nessun Punto",
+          "hasJolly": false,
+          "columnId": 5,
+          "hasSuperstar": false
+        },
+        {
+          "matchedNumbers": [
+            55
+          ],
+          "prizeTier": "Nessun Punto",
+          "hasJolly": false,
+          "columnId": 6,
+          "numbers": [
+            13,
+            18,
+            54,
+            55,
+            78,
+            85
+          ],
+          "estimatedPrize": 0,
+          "hasSuperstar": false,
+          "matchCount": 1
+        },
+        {
+          "matchCount": 1,
+          "hasSuperstar": false,
+          "matchedNumbers": [
+            56
+          ],
+          "numbers": [
+            13,
+            25,
+            41,
+            54,
+            56,
+            85
+          ],
+          "estimatedPrize": 0,
+          "columnId": 7,
+          "hasJolly": false,
+          "prizeTier": "Nessun Punto"
+        },
+        {
+          "numbers": [
+            13,
+            28,
+            55,
+            56,
+            77,
+            85
+          ],
+          "matchCount": 2,
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 8,
+          "estimatedPrize": 5,
+          "prizeTier": "2 Punti",
+          "matchedNumbers": [
+            55,
+            56
+          ]
+        },
+        {
+          "hasJolly": false,
+          "columnId": 9,
+          "prizeTier": "2 Punti",
+          "numbers": [
+            16,
+            18,
+            25,
+            55,
+            56,
+            78
+          ],
+          "estimatedPrize": 5,
+          "matchCount": 2,
+          "matchedNumbers": [
+            55,
+            56
+          ],
+          "hasSuperstar": false
+        },
+        {
+          "prizeTier": "Nessun Punto",
+          "hasSuperstar": false,
+          "matchCount": 1,
+          "matchedNumbers": [
+            56
+          ],
+          "hasJolly": false,
+          "columnId": 10,
+          "estimatedPrize": 0,
+          "numbers": [
+            28,
+            41,
+            54,
+            56,
+            78,
+            85
+          ]
+        }
+      ],
+      "totalWinning": 10
+    },
+    "mode": "manual",
+    "id": "play-manual-1794601740704",
+    "savedAmount": 0,
+    "updatedAt": "2026-11-14T07:40:41.364Z",
+    "status": "VERIFICATA",
+    "cost": 10,
+    "createdAt": "2026-11-13T20:29:00.704Z",
+    "userEmail": "giuseppe.vitiello@gmail.com",
+    "targetContestId": "2026-182 13/11/2026",
+    "columns": [
+      {
+        "odds": 3,
+        "evens": 3,
+        "highs": 2,
+        "lows": 4,
+        "numbers": [
+          13,
+          16,
+          25,
+          28,
+          54,
+          55
+        ],
+        "id": 1,
+        "sum": 191
+      },
+      {
+        "highs": 3,
+        "id": 2,
+        "evens": 3,
+        "numbers": [
+          13,
+          18,
+          41,
+          56,
+          77,
+          78
+        ],
+        "sum": 283,
+        "odds": 3,
+        "lows": 3
+      },
+      {
+        "numbers": [
+          16,
+          18,
+          25,
+          28,
+          56,
+          85
+        ],
+        "sum": 228,
+        "highs": 2,
+        "id": 3,
+        "evens": 4,
+        "lows": 4,
+        "odds": 2
+      },
+      {
+        "numbers": [
+          16,
+          41,
+          54,
+          55,
+          77,
+          85
+        ],
+        "highs": 4,
+        "odds": 4,
+        "id": 4,
+        "sum": 328,
+        "evens": 2,
+        "lows": 2
+      },
+      {
+        "odds": 3,
+        "evens": 3,
+        "highs": 2,
+        "lows": 4,
+        "id": 5,
+        "numbers": [
+          16,
+          25,
+          28,
+          41,
+          77,
+          78
+        ],
+        "sum": 265
+      },
+      {
+        "sum": 303,
+        "id": 6,
+        "lows": 2,
+        "numbers": [
+          13,
+          18,
+          54,
+          55,
+          78,
+          85
+        ],
+        "highs": 4,
+        "evens": 3,
+        "odds": 3
+      },
+      {
+        "highs": 3,
+        "numbers": [
+          13,
+          25,
+          41,
+          54,
+          56,
+          85
+        ],
+        "evens": 2,
+        "odds": 4,
+        "id": 7,
+        "sum": 274,
+        "lows": 3
+      },
+      {
+        "odds": 4,
+        "numbers": [
+          13,
+          28,
+          55,
+          56,
+          77,
+          85
+        ],
+        "lows": 2,
+        "evens": 2,
+        "id": 8,
+        "highs": 4,
+        "sum": 314
+      },
+      {
+        "id": 9,
+        "odds": 2,
+        "numbers": [
+          16,
+          18,
+          25,
+          55,
+          56,
+          78
+        ],
+        "lows": 3,
+        "sum": 248,
+        "evens": 4,
+        "highs": 3
+      },
+      {
+        "numbers": [
+          28,
+          41,
+          54,
+          56,
+          78,
+          85
+        ],
+        "highs": 4,
+        "odds": 2,
+        "id": 10,
+        "sum": 342,
+        "lows": 2,
+        "evens": 4
+      }
+    ]
+  },
+  {
     "id": "play-archive-1794598583444",
     "createdAt": "2026-11-13T19:36:23.444Z",
     "targetContestId": "2026-182",
@@ -187,5 +4839,370 @@
     "status": "IN_ATTESA",
     "manualNote": "Sistema Ottimizzato (10 sestine)",
     "userEmail": "giuseppe.vitiello@gmail.com"
+  },
+  {
+    "createdAt": "2026-11-01T19:29:27.149Z",
+    "cost": 9,
+    "columns": [
+      {
+        "numbers": [
+          12,
+          26,
+          28,
+          32,
+          47,
+          55
+        ],
+        "highs": 2,
+        "id": 1,
+        "odds": 2,
+        "sum": 200,
+        "lows": 4,
+        "evens": 4
+      },
+      {
+        "numbers": [
+          12,
+          41,
+          42,
+          52,
+          54,
+          85
+        ],
+        "sum": 286,
+        "highs": 3,
+        "evens": 4,
+        "id": 2,
+        "lows": 3,
+        "odds": 2
+      },
+      {
+        "id": 3,
+        "numbers": [
+          26,
+          28,
+          32,
+          41,
+          64,
+          85
+        ],
+        "highs": 2,
+        "sum": 276,
+        "odds": 2,
+        "lows": 4,
+        "evens": 4
+      },
+      {
+        "id": 4,
+        "sum": 286,
+        "highs": 4,
+        "odds": 2,
+        "lows": 2,
+        "numbers": [
+          26,
+          42,
+          47,
+          52,
+          55,
+          64
+        ],
+        "evens": 4
+      },
+      {
+        "numbers": [
+          26,
+          41,
+          47,
+          54,
+          55,
+          85
+        ],
+        "highs": 4,
+        "id": 5,
+        "evens": 2,
+        "odds": 4,
+        "sum": 308,
+        "lows": 2
+      },
+      {
+        "lows": 4,
+        "odds": 2,
+        "numbers": [
+          28,
+          32,
+          41,
+          42,
+          52,
+          55
+        ],
+        "sum": 250,
+        "evens": 4,
+        "id": 6,
+        "highs": 2
+      },
+      {
+        "lows": 3,
+        "odds": 2,
+        "numbers": [
+          12,
+          28,
+          41,
+          47,
+          54,
+          64
+        ],
+        "sum": 246,
+        "id": 7,
+        "evens": 4,
+        "highs": 3
+      },
+      {
+        "id": 8,
+        "numbers": [
+          12,
+          32,
+          54,
+          55,
+          64,
+          85
+        ],
+        "odds": 2,
+        "evens": 4,
+        "lows": 2,
+        "highs": 4,
+        "sum": 302
+      },
+      {
+        "sum": 266,
+        "lows": 3,
+        "id": 9,
+        "numbers": [
+          12,
+          28,
+          42,
+          47,
+          52,
+          85
+        ],
+        "odds": 2,
+        "evens": 4,
+        "highs": 3
+      },
+      {
+        "odds": 2,
+        "evens": 4,
+        "highs": 3,
+        "lows": 3,
+        "id": 10,
+        "numbers": [
+          26,
+          32,
+          41,
+          47,
+          52,
+          54
+        ],
+        "sum": 252
+      }
+    ],
+    "id": "play-1793561367149",
+    "poolNumbers": [
+      12,
+      26,
+      28,
+      32,
+      41,
+      42,
+      47,
+      52,
+      54,
+      55,
+      64,
+      85
+    ],
+    "mode": "superstar",
+    "status": "VERIFICATA",
+    "savedAmount": 1,
+    "updatedAt": "2026-11-15T18:09:14.235Z",
+    "targetContestId": "2026-176",
+    "result": {
+      "bestMatch": 0,
+      "totalWinning": 0,
+      "netReturn": -10,
+      "verifiedAt": "2026-11-01T19:30:23.318Z",
+      "matchesPerColumn": [
+        {
+          "hasSuperstar": false,
+          "hasJolly": false,
+          "columnId": 1,
+          "matchCount": 0,
+          "numbers": [
+            12,
+            26,
+            28,
+            32,
+            47,
+            55
+          ],
+          "matchedNumbers": [],
+          "prizeTier": "Nessun Punto",
+          "estimatedPrize": 0
+        },
+        {
+          "prizeTier": "Nessun Punto",
+          "numbers": [
+            12,
+            41,
+            42,
+            52,
+            54,
+            85
+          ],
+          "columnId": 2,
+          "hasJolly": false,
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": []
+        },
+        {
+          "prizeTier": "Nessun Punto",
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "hasJolly": false,
+          "columnId": 3,
+          "numbers": [
+            26,
+            28,
+            32,
+            41,
+            64,
+            85
+          ]
+        },
+        {
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "prizeTier": "Nessun Punto",
+          "hasSuperstar": false,
+          "matchCount": 0,
+          "hasJolly": false,
+          "columnId": 4,
+          "numbers": [
+            26,
+            42,
+            47,
+            52,
+            55,
+            64
+          ]
+        },
+        {
+          "numbers": [
+            26,
+            41,
+            47,
+            54,
+            55,
+            85
+          ],
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "matchedNumbers": [],
+          "hasJolly": false,
+          "columnId": 5,
+          "matchCount": 0,
+          "prizeTier": "Nessun Punto"
+        },
+        {
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "estimatedPrize": 0,
+          "prizeTier": "Nessun Punto",
+          "matchedNumbers": [],
+          "numbers": [
+            28,
+            32,
+            41,
+            42,
+            52,
+            55
+          ],
+          "columnId": 6,
+          "hasJolly": false
+        },
+        {
+          "prizeTier": "Nessun Punto",
+          "hasJolly": false,
+          "columnId": 7,
+          "numbers": [
+            12,
+            28,
+            41,
+            47,
+            54,
+            64
+          ],
+          "estimatedPrize": 0,
+          "matchCount": 0,
+          "hasSuperstar": false,
+          "matchedNumbers": []
+        },
+        {
+          "hasJolly": false,
+          "hasSuperstar": false,
+          "matchedNumbers": [],
+          "columnId": 8,
+          "estimatedPrize": 0,
+          "prizeTier": "Nessun Punto",
+          "numbers": [
+            12,
+            32,
+            54,
+            55,
+            64,
+            85
+          ],
+          "matchCount": 0
+        },
+        {
+          "prizeTier": "Nessun Punto",
+          "hasSuperstar": false,
+          "numbers": [
+            12,
+            28,
+            42,
+            47,
+            52,
+            85
+          ],
+          "estimatedPrize": 0,
+          "matchCount": 0,
+          "hasJolly": false,
+          "columnId": 9,
+          "matchedNumbers": []
+        },
+        {
+          "hasSuperstar": false,
+          "numbers": [
+            26,
+            32,
+            41,
+            47,
+            52,
+            54
+          ],
+          "matchedNumbers": [],
+          "matchCount": 0,
+          "hasJolly": false,
+          "columnId": 10,
+          "estimatedPrize": 0,
+          "prizeTier": "Nessun Punto"
+        }
+      ],
+      "hasWin": false
+    }
   }
 ]

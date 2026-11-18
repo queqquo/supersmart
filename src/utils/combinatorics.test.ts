@@ -352,34 +352,60 @@ test('compareSavedPlayAgainstRecentDraws clamps range [10..200], highlights draw
   assert.ok(summary.grossWinnings > 0);
 });
 
-test('selectFunnelPool30To12 implements 90->30 (25 Genetic + 5 Chaos)->12 Pure Competition with Clustering, Polarization, and Dispersion Penalty', async () => {
-  const { selectFunnelPool30To12, scorePool30InPureCompetition } = await import('./combinatorics');
+test('selectFunnelPool30To12 and selectBalancedTopNumbers implement balanced 30->N scoring (Cluster cap +45, Extremes +40, Targeted Dispersion -5/-30/-15, Max 3/decade)', async () => {
+  const {
+    selectFunnelPool30To12,
+    selectBalancedTopNumbers,
+    scorePool30InPureCompetition
+  } = await import('./combinatorics');
 
-  // Verify Pure Competition scoring math:
-  // Cluster in extreme decade [1, 2, 11] vs isolated middle number [45]
-  const testPool = [1, 2, 11, 45];
+  // Verify Balanced Competition scoring math:
+  // - Cluster in extreme decade [1, 2, 11]
+  // - Isolated extreme number [89]
+  // - Isolated middle number [45]
+  const testPool = [1, 2, 11, 45, 89];
   const scored = scorePool30InPureCompetition(testPool);
   const s1 = scored.find((s) => s.num === 1)!;
+  const s89 = scored.find((s) => s.num === 89)!;
   const s45 = scored.find((s) => s.num === 45)!;
-  // Number 1: sameDecade=1 (2), sameCadence=1 (11), adjacent=1 (2), polarized=true (<=15) -> 20 + 15 + 30 + 35 = +100
-  assert.equal(s1.score, 100);
-  // Number 45: sameDecade=0, sameCadence=0, adjacent=0, in [31..60] -> -60 (isolated) - 20 (middle belly) = -80
-  assert.equal(s45.score, -80);
 
-  // Full 25 + 5 -> 30 -> 12 funnel check
+  // Number 1: sameDecade=1 (2) -> 12, sameCadence=1 (11) -> 8, adjacent=1 (2) -> 15 => rawCluster=35 (<=45) + extreme(40) = +75
+  assert.equal(s1.score, 75);
+  // Number 89: isolated extreme (sameDecade=0, adjacent=0, isExtreme=true) -> +40 - 5 = +35
+  assert.equal(s89.score, 35);
+  // Number 45: isolated non-extreme (sameDecade=0, adjacent=0, isExtreme=false) -> -30
+  assert.equal(s45.score, -30);
+
+  // Verify soft limit max 3 numbers per single decade prevents central clusters from monopolizing
+  const centralHeavyPool = [
+    41, 42, 43, 44, 45, 46, // 6 numbers in decade 4 (41-50)
+    1, 2, 14, 15, 76, 77, 88, 89, 22, 23, 61, 62
+  ];
+  const balanced10 = selectBalancedTopNumbers(centralHeavyPool, 10);
+  assert.equal(balanced10.length, 10);
+  const decade4Count = balanced10.filter((n) => Math.floor((n - 1) / 10) === 4).length;
+  assert.ok(decade4Count <= 3, `Decade 4 count (${decade4Count}) must not exceed 3`);
+
+  // Full 25 + 5 -> 30 -> N funnel check for N=10 (Generatore Ottimizzato) and N=12 (Agenti CAMEL)
   const rankedInput = Array.from({ length: 90 }, (_, i) => i + 1);
-  const funnelRes = selectFunnelPool30To12(rankedInput, 12);
-  assert.equal(funnelRes.geneticCandidates.length, 25);
-  assert.equal(funnelRes.chaosNumbers.length, 5);
-  assert.equal(funnelRes.pool30.length, 30);
-  assert.equal(new Set(funnelRes.pool30).size, 30, 'All 30 candidates (25 + 5 chaos) must be unique');
-  assert.equal(funnelRes.top12Numbers.length, 12);
-  assert.equal(new Set(funnelRes.top12Numbers).size, 12, 'Top 12 must be 12 unique integers');
-  for (let i = 0; i < funnelRes.top12Numbers.length; i++) {
-    const n = funnelRes.top12Numbers[i];
-    assert.ok(n >= 1 && n <= 90, `Number ${n} must be between 1 and 90`);
-    if (i > 0) {
-      assert.ok(n > funnelRes.top12Numbers[i - 1], 'Top 12 must be sorted ascending');
+  for (const targetN of [10, 12]) {
+    const funnelRes = selectFunnelPool30To12(rankedInput, targetN);
+    assert.equal(funnelRes.geneticCandidates.length, 25);
+    assert.equal(funnelRes.chaosNumbers.length, 5);
+    assert.equal(funnelRes.pool30.length, 30);
+    assert.equal(new Set(funnelRes.pool30).size, 30, 'All 30 candidates (25 + 5 chaos) must be unique');
+    assert.equal(funnelRes.top12Numbers.length, targetN);
+    assert.equal(new Set(funnelRes.top12Numbers).size, targetN, `Top ${targetN} must be unique integers`);
+    const decCounts: Record<number, number> = {};
+    for (let i = 0; i < funnelRes.top12Numbers.length; i++) {
+      const n = funnelRes.top12Numbers[i];
+      const dec = Math.floor((n - 1) / 10);
+      decCounts[dec] = (decCounts[dec] || 0) + 1;
+      assert.ok(decCounts[dec] <= 3, `Decade ${dec} must have at most 3 numbers`);
+      assert.ok(n >= 1 && n <= 90, `Number ${n} must be between 1 and 90`);
+      if (i > 0) {
+        assert.ok(n > funnelRes.top12Numbers[i - 1], `Top ${targetN} must be sorted ascending`);
+      }
     }
   }
 });
@@ -420,7 +446,24 @@ test('runCamelWorkforcePipeline coordinates 5 agents, uses 30->12 Funnel Pipelin
     for (const n of cand.poolNumbers) {
       assert.ok(n >= 1 && n <= 90);
     }
+    for (const pr of cand.poolReasons) {
+      assert.ok(
+        /^(CAOS|ESTREMO|CLUSTER|GENETICO) • Score: [+-]?\d+ pt$/.test(pr.primaryTag),
+        `Expected primaryTag to match role & score format, got "${pr.primaryTag}"`
+      );
+    }
   }
+  const { getBalancedFunnelUiLabels } = await import('./combinatorics');
+  const labels10 = getBalancedFunnelUiLabels(10);
+  const labels12 = getBalancedFunnelUiLabels(12);
+  assert.equal(labels10.shortBadge, 'Imbuto 30→10 (25 Gen + 5 Caos)');
+  assert.equal(labels10.recalcButton, 'Ricalcola Imbuto 30→10');
+  assert.equal(
+    labels10.subtitle,
+    'Competizione Pura Bilanciata (30 → 10): Cluster + Estremi • Max 3/Decina'
+  );
+  assert.equal(labels12.title, 'Imbuto Bilanciato 30→12 (25 Gen + 5 Caos)');
+  assert.equal(labels12.recalcButton, 'Ricalcola Imbuto 30→12');
   assert.equal(res.winnerCandidate.systemResult.columns.length, 10);
   assert.ok(res.dialogueTranscript.length >= 5);
   assert.ok(res.winnerCandidate.camelCompositeScore > 0);
