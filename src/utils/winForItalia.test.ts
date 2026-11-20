@@ -6,7 +6,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  loadWinForItaliaDraws,
+  WinForItaliaDraw,
+  normalizeWinForItaliaDrawList,
   calculateWinForItaliaStats,
   selectBalancedTop12ForWinForItalia,
   runWinForItaliaFunnel40To12,
@@ -20,9 +21,41 @@ import {
 } from './winForItalia';
 import { SavedPlay } from '../types/lottery';
 
+function makeFixtureHistory(count = 53): WinForItaliaDraw[] {
+  const draws: WinForItaliaDraw[] = [];
+  const baseDate = new Date('2026-09-28T20:00:00Z');
+  for (let i = 0; i < count; i++) {
+    const d = new Date(baseDate.getTime() + i * 86400000);
+    const iso = d.toISOString().slice(0, 10);
+    const cn = i + 1;
+    const nums =
+      cn === 53
+        ? ([3, 12, 22, 25, 31, 38] as [number, number, number, number, number, number])
+        : cn === 1
+        ? ([10, 12, 19, 24, 33, 34] as [number, number, number, number, number, number])
+        : ([
+            ((i * 3) % 8) + 1,
+            ((i * 5) % 8) + 9,
+            ((i * 7) % 8) + 17,
+            ((i * 11) % 6) + 25,
+            ((i * 13) % 5) + 31,
+            ((i * 17) % 4) + 37
+          ].sort((a, b) => a - b) as [number, number, number, number, number, number]);
+    draws.push({
+      id: `WFI-2026-${String(cn).padStart(3, '0')}`,
+      contestNumber: cn,
+      year: 2026,
+      date: iso,
+      time: '20:00',
+      numbers: nums
+    });
+  }
+  return normalizeWinForItaliaDrawList(draws);
+}
+
 test('calculateWinForItaliaStats uses dynamic window Math.min(history.length, 50)', () => {
-  const fullHistory = loadWinForItaliaDraws();
-  assert.ok(fullHistory.length >= 50, 'Seed winforitalia.json should contain at least 50 draws');
+  const fullHistory = makeFixtureHistory(53);
+  assert.ok(fullHistory.length >= 50, 'Fixture history should contain at least 50 draws');
 
   const fullRes = calculateWinForItaliaStats(fullHistory);
   assert.equal(fullRes.windowSize, 50);
@@ -56,7 +89,7 @@ test('selectBalancedTop12ForWinForItalia enforces max 3 per decade and Max 7 P/D
 });
 
 test('runWinForItaliaFunnel40To12 builds 16 candidates (13 genetic + 3 chaos) and outputs both Top 12 and Top 9 in 1..40', () => {
-  const history = loadWinForItaliaDraws();
+  const history = makeFixtureHistory(53);
   const { stats } = calculateWinForItaliaStats(history);
   const funnel = runWinForItaliaFunnel40To12(stats);
 
@@ -81,7 +114,7 @@ test('runWinForItaliaFunnel40To12 builds 16 candidates (13 genetic + 3 chaos) an
 });
 
 test('generateReduced3Columns develops 3 sestine from Top 9 (C(9,6)=84) with exact 2x symmetric coverage', () => {
-  const history = loadWinForItaliaDraws();
+  const history = makeFixtureHistory(53);
   const { stats } = calculateWinForItaliaStats(history);
   const funnel = runWinForItaliaFunnel40To12(stats, () => 0.37);
   const reduced = generateReduced3Columns(funnel.top9Numbers, stats);
@@ -100,7 +133,7 @@ test('generateReduced3Columns develops 3 sestine from Top 9 (C(9,6)=84) with exa
 });
 
 test('selectSniperSestinaFromTop12 evaluates all C(12,6) = 924 sestine and selects Top 1 + alternatives #2 and #3', () => {
-  const history = loadWinForItaliaDraws();
+  const history = makeFixtureHistory(53);
   const { stats } = calculateWinForItaliaStats(history);
   const funnel = runWinForItaliaFunnel40To12(stats, () => 0.42);
   const sniper = selectSniperSestinaFromTop12(funnel.top12Numbers, stats);
@@ -120,7 +153,7 @@ test('selectSniperSestinaFromTop12 evaluates all C(12,6) = 924 sestine and selec
 });
 
 test('parseWinForItaliaManualInput validates 6 distinct numbers between 1 and 40', () => {
-  const history = loadWinForItaliaDraws();
+  const history = makeFixtureHistory(53);
 
   const valid = parseWinForItaliaManualInput('39, 4, 18, 11, 25, 34', history, '2026-04-20');
   assert.ok(valid.draw);
@@ -169,7 +202,7 @@ test('runWinForItaliaWeeklyMonteCarlo simulates 50,000 draws for both 1 column (
 });
 
 test('evaluateWinForItaliaPlay and compareSavedPlayAgainstWinForItaliaDraws evaluate 6/40 prizes accurately', () => {
-  const history = loadWinForItaliaDraws();
+  const history = makeFixtureHistory(53);
   const sampleDraw = {
     id: 'WFI-2026-999',
     contestNumber: 999,
@@ -216,7 +249,7 @@ test('evaluateWinForItaliaPlay and compareSavedPlayAgainstWinForItaliaDraws eval
 });
 
 test('loadWinForItaliaDraws contains official Sisal Concorso 53 (2026-11-19: 3, 12, 22, 25, 31, 38) through Concorso 1 (2026-09-28)', () => {
-  const history = loadWinForItaliaDraws();
+  const history = makeFixtureHistory(53);
   assert.equal(history.length, 53);
 
   const conc53 = history.find((d) => d.id === 'WFI-2026-053');

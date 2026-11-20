@@ -3,7 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import seedWinForItaliaData from '../data/winforitalia.json';
+import { EXTERNAL_WINFORITALIA_RAW_URL } from '../config/externalDrawsRepo';
+import {
+  fetchCloudWinForItaliaDraws,
+  upsertCloudWinForItaliaDraw,
+  upsertManyCloudWinForItaliaDraws,
+  clearCloudCustomDraws
+} from './firebase';
 import {
   SavedPlay,
   GeneratedColumn,
@@ -144,7 +150,8 @@ export const WIN_FOR_ITALIA_PRIZES = {
   PUNTO_6: 10000.0
 } as const;
 
-export const WIN_FOR_ITALIA_STORAGE_KEY = 'winforitalia_custom_draws_delta_v2';
+export const WIN_FOR_ITALIA_STORAGE_KEY = 'winforitalia_external_archive_v3';
+const LEGACY_WIN_FOR_ITALIA_STORAGE_KEY_V2 = 'winforitalia_custom_draws_delta_v2';
 const LEGACY_WIN_FOR_ITALIA_STORAGE_KEY = 'winforitalia_custom_draws_delta_v1';
 
 export const WIN_FOR_ITALIA_UI_LABELS = {
@@ -181,50 +188,36 @@ export function isValidWinForItaliaSestina(nums: number[]): nums is [number, num
   return nums.every((n) => Number.isInteger(n) && n >= 1 && n <= 40);
 }
 
-/**
- * Load official seed draws from src/data/winforitalia.json merged with localStorage custom draws
- */
-export function loadWinForItaliaDraws(): WinForItaliaDraw[] {
-  const rawSeed = Array.isArray((seedWinForItaliaData as { draws?: unknown[] })?.draws)
-    ? ((seedWinForItaliaData as unknown as { draws: WinForItaliaDraw[] }).draws || [])
-    : [];
-
-  // Key by calendar date (YYYY-MM-DD) since Win for Italia Team has exactly 1 official draw per day at 20:00
+export function normalizeWinForItaliaDrawList(rawList: unknown[]): WinForItaliaDraw[] {
   const mergedByDate = new Map<string, WinForItaliaDraw>();
-  for (const d of rawSeed) {
-    if (d && d.id && d.date && isValidWinForItaliaSestina(d.numbers)) {
-      const sorted = [...d.numbers].sort((a, b) => a - b) as [number, number, number, number, number, number];
-      mergedByDate.set(d.date, { ...d, numbers: sorted });
-    }
-  }
-
-  if (typeof localStorage !== 'undefined') {
-    try {
-      // Purge legacy v1 delta key that may contain synthetic fallback draws (WFI-2026-304..323)
-      localStorage.removeItem(LEGACY_WIN_FOR_ITALIA_STORAGE_KEY);
-
-      const rawDelta = localStorage.getItem(WIN_FOR_ITALIA_STORAGE_KEY);
-      if (rawDelta) {
-        const parsedDelta = JSON.parse(rawDelta) as WinForItaliaDraw[];
-        if (Array.isArray(parsedDelta)) {
-          for (const d of parsedDelta) {
-            if (d && d.id && d.date && isValidWinForItaliaSestina(d.numbers)) {
-              const sorted = [...d.numbers].sort((a, b) => a - b) as [
-                number,
-                number,
-                number,
-                number,
-                number,
-                number
-              ];
-              mergedByDate.set(d.date, { ...d, numbers: sorted });
-            }
-          }
-        }
-      }
-    } catch {
-      // Ignore storage errors
-    }
+  for (const item of rawList || []) {
+    if (!item || typeof item !== 'object') continue;
+    const d = item as Partial<WinForItaliaDraw> & { concorso?: number };
+    const dateStr = String(d.date || '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+    if (!Array.isArray(d.numbers) || !isValidWinForItaliaSestina(d.numbers.map(Number))) continue;
+    const sorted = [...d.numbers].map(Number).sort((a, b) => a - b) as [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number
+    ];
+    const year = parseInt(dateStr.slice(0, 4), 10);
+    const contestNumber = Number(d.contestNumber || d.concorso || 0) || 1;
+    const id =
+      typeof d.id === 'string' && d.id.trim()
+        ? d.id.trim()
+        : `WFI-${year}-${String(contestNumber).padStart(3, '0')}`;
+    mergedByDate.set(dateStr, {
+      id,
+      contestNumber,
+      year,
+      date: dateStr,
+      time: d.time || '20:00',
+      numbers: sorted
+    });
   }
 
   return Array.from(mergedByDate.values()).sort((a, b) => {
@@ -235,21 +228,40 @@ export function loadWinForItaliaDraws(): WinForItaliaDraw[] {
 }
 
 /**
- * Save custom/synced Win for Italia Team draws delta to localStorage
+ * Load cached Win for Italia Team / Win for Life (6/40) draws from localStorage.
+ * Full official history is loaded asynchronously from the external GitHub repository + Cloud Firestore
+ * so no heavy JSON file lives inside the app repo (zero AI Studio token overhead).
+ */
+export function loadWinForItaliaDraws(): WinForItaliaDraw[] {
+  const collected: unknown[] = [];
+
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem(LEGACY_WIN_FOR_ITALIA_STORAGE_KEY);
+      for (const key of [LEGACY_WIN_FOR_ITALIA_STORAGE_KEY_V2, WIN_FOR_ITALIA_STORAGE_KEY]) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          collected.push(...parsed);
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  return normalizeWinForItaliaDrawList(collected);
+}
+
+/**
+ * Save merged Win for Italia Team / Win for Life (6/40) archive cache to localStorage
  */
 export function saveWinForItaliaDraws(draws: WinForItaliaDraw[]): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    const rawSeed = Array.isArray((seedWinForItaliaData as { draws?: unknown[] })?.draws)
-      ? ((seedWinForItaliaData as unknown as { draws: WinForItaliaDraw[] }).draws || [])
-      : [];
-    const seedByDate = new Map(
-      rawSeed.map((d) => [d.date, `${d.id}:${[...d.numbers].sort((a, b) => a - b).join(',')}`])
-    );
-    const delta = draws.filter(
-      (d) => seedByDate.get(d.date) !== `${d.id}:${[...d.numbers].sort((a, b) => a - b).join(',')}`
-    );
-    localStorage.setItem(WIN_FOR_ITALIA_STORAGE_KEY, JSON.stringify(delta));
+    const clean = normalizeWinForItaliaDrawList(draws);
+    localStorage.setItem(WIN_FOR_ITALIA_STORAGE_KEY, JSON.stringify(clean));
   } catch {
     // Ignore storage quota errors
   }
@@ -318,93 +330,285 @@ export function parseWinForItaliaManualInput(
 }
 
 /**
- * Insert a new manual or synced Win for Italia Team draw into history and persist to localStorage and server
+ * Insert a new manual or synced Win for Italia Team draw into history and persist
+ * across localStorage, Cloud Firestore (cross-browser/cross-device), and External GitHub API.
  */
 export function insertWinForItaliaDraw(newDraw: WinForItaliaDraw): WinForItaliaDraw[] {
   const current = loadWinForItaliaDraws();
-  const idx = current.findIndex((d) => d.id === newDraw.id || d.date === newDraw.date);
-  if (idx >= 0) {
-    current[idx] = newDraw;
-  } else {
-    current.unshift(newDraw);
-  }
-  current.sort((a, b) => {
-    const cmp = b.date.localeCompare(a.date);
-    if (cmp !== 0) return cmp;
-    return b.contestNumber - a.contestNumber;
-  });
-  saveWinForItaliaDraws(current);
+  const merged = normalizeWinForItaliaDrawList([...current, newDraw]);
+  saveWinForItaliaDraws(merged);
+  upsertCloudWinForItaliaDraw(newDraw).catch(() => {});
   if (typeof fetch !== 'undefined') {
-    fetch('/api/winforitalia/draws', {
+    fetch('/api/draws', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ draw: newDraw })
+      body: JSON.stringify({ game: 'winforitalia', action: 'upsert', draw: newDraw })
     }).catch(() => {
       // Ignore if offline or in unit test environment
     });
   }
-  return current;
+  return merged;
+}
+
+async function fetchExternalWinForItaliaBase(): Promise<unknown[]> {
+  if (typeof fetch === 'undefined') return [];
+
+  try {
+    const apiRes = await fetch('/api/draws?game=winforitalia', { cache: 'no-store' });
+    const ct = apiRes.headers.get('content-type') || '';
+    if (apiRes.ok && ct.includes('application/json')) {
+      const payload = await apiRes.json();
+      if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
+        return payload.draws;
+      }
+    }
+  } catch {
+    // Fallback to direct external GitHub Raw URL below
+  }
+
+  try {
+    const rawRes = await fetch(`${EXTERNAL_WINFORITALIA_RAW_URL}?t=${Date.now()}`, {
+      cache: 'no-store'
+    });
+    if (rawRes.ok) {
+      const parsed = await rawRes.json();
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed?.draws)) return parsed.draws;
+    }
+  } catch {
+    // Offline fallback
+  }
+
+  return [];
 }
 
 /**
- * Sync Win for Italia Team archive from server endpoint /api/winforitalia/official-sync
+ * Startup loader: merges external GitHub archive + Cloud Firestore + localStorage cache
+ */
+export async function loadAndMergeWinForItaliaDraws(): Promise<WinForItaliaDraw[]> {
+  const localDraws = loadWinForItaliaDraws();
+  const [externalRecords, cloudDraws] = await Promise.all([
+    fetchExternalWinForItaliaBase(),
+    fetchCloudWinForItaliaDraws().catch(() => null)
+  ]);
+
+  const merged = normalizeWinForItaliaDrawList([
+    ...localDraws,
+    ...externalRecords,
+    ...(cloudDraws || [])
+  ]);
+  if (merged.length > 0) {
+    saveWinForItaliaDraws(merged);
+  }
+  return merged;
+}
+
+/**
+ * Sync Win for Italia Team / Win for Life (6/40) archive from live sources via /api/draws,
+ * commit back to external GitHub repo if configured, and persist new draws to Cloud Firestore.
  */
 export async function syncWinForItaliaDrawsFromServer(): Promise<{
   draws: WinForItaliaDraw[];
   addedOrUpdated: number;
   latestDate: string;
+  persistedToGitHub: boolean;
+  persistedToCloud: boolean;
 }> {
   const current = loadWinForItaliaDraws();
+  const prevKeys = new Set(current.map((d) => `${d.date}|${d.id}|${d.numbers.join(',')}`));
 
-  try {
-    const res = await fetch('/api/winforitalia/official-sync');
-    if (res.ok) {
-      const payload = await res.json();
-      if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
-        const mergedByDate = new Map<string, WinForItaliaDraw>();
-        for (const d of current) {
-          if (d && d.date) mergedByDate.set(d.date, d);
-        }
+  let serverDraws: unknown[] = [];
+  let persistedToGitHub = false;
 
-        let addedOrUpdated = 0;
-        for (const d of payload.draws as WinForItaliaDraw[]) {
-          if (d && d.id && d.date && isValidWinForItaliaSestina(d.numbers)) {
-            const sorted = [...d.numbers].sort((a, b) => a - b) as [
-              number,
-              number,
-              number,
-              number,
-              number,
-              number
-            ];
-            const prev = mergedByDate.get(d.date);
-            if (!prev || prev.id !== d.id || prev.numbers.join(',') !== sorted.join(',')) {
-              addedOrUpdated++;
-            }
-            mergedByDate.set(d.date, { ...d, numbers: sorted });
-          }
+  if (typeof fetch !== 'undefined') {
+    try {
+      const res = await fetch('/api/draws', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game: 'winforitalia', action: 'sync' })
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const payload = await res.json();
+        if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
+          serverDraws = payload.draws;
+          persistedToGitHub = Boolean(payload?.persistedToGitHub);
         }
-        const merged = Array.from(mergedByDate.values()).sort((a, b) => {
-          const cmp = b.date.localeCompare(a.date);
-          if (cmp !== 0) return cmp;
-          return b.contestNumber - a.contestNumber;
-        });
-        saveWinForItaliaDraws(merged);
-        return {
-          draws: merged,
-          addedOrUpdated,
-          latestDate: merged[0]?.date || ''
-        };
       }
+    } catch {
+      // Fallback below
     }
-  } catch {
-    // Offline fallback uses local archive
+  }
+
+  if (serverDraws.length === 0) {
+    serverDraws = await fetchExternalWinForItaliaBase();
+  }
+
+  const cloudDraws = (await fetchCloudWinForItaliaDraws().catch(() => null)) || [];
+  const merged = normalizeWinForItaliaDrawList([...current, ...serverDraws, ...cloudDraws]);
+
+  let addedOrUpdated = 0;
+  const newlyFound: WinForItaliaDraw[] = [];
+  for (const d of merged) {
+    const sig = `${d.date}|${d.id}|${d.numbers.join(',')}`;
+    if (!prevKeys.has(sig)) {
+      addedOrUpdated++;
+      newlyFound.push(d);
+    }
+  }
+
+  if (merged.length > 0) {
+    saveWinForItaliaDraws(merged);
+  }
+
+  let persistedToCloud = false;
+  if (newlyFound.length > 0) {
+    persistedToCloud = await upsertManyCloudWinForItaliaDraws(newlyFound).catch(() => false);
   }
 
   return {
-    draws: current,
-    addedOrUpdated: 0,
-    latestDate: current[0]?.date || ''
+    draws: merged,
+    addedOrUpdated,
+    latestDate: merged[0]?.date || '',
+    persistedToGitHub,
+    persistedToCloud
+  };
+}
+
+/**
+ * Cancella l'archivio locale + delta Cloud Firestore di Win for Italia / Win for Life (6/40)
+ * e ripristina l'intero storico ufficiale reale da Sisal/archivi ufficiali + Repo GitHub esterno.
+ */
+export async function resetAndRestoreWinForItaliaArchive(): Promise<{
+  draws: WinForItaliaDraw[];
+  count: number;
+  latestDate: string;
+  oldestDate: string;
+  persistedToGitHub: boolean;
+}> {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem(WIN_FOR_ITALIA_STORAGE_KEY);
+      localStorage.removeItem(LEGACY_WIN_FOR_ITALIA_STORAGE_KEY_V2);
+      localStorage.removeItem(LEGACY_WIN_FOR_ITALIA_STORAGE_KEY);
+    } catch {
+      // Ignore
+    }
+  }
+  await clearCloudCustomDraws('winforitalia').catch(() => false);
+
+  let restoredRaw: unknown[] = [];
+  let persistedToGitHub = false;
+
+  if (typeof fetch !== 'undefined') {
+    try {
+      const res = await fetch('/api/draws', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game: 'winforitalia', action: 'reset_restore' })
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const payload = await res.json();
+        if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
+          restoredRaw = payload.draws;
+          persistedToGitHub = Boolean(payload?.persistedToGitHub);
+        }
+      }
+    } catch {
+      // Fallback below
+    }
+  }
+
+  if (restoredRaw.length === 0) {
+    restoredRaw = await fetchExternalWinForItaliaBase();
+  }
+
+  const cleanRestored = normalizeWinForItaliaDrawList(restoredRaw);
+  if (cleanRestored.length > 0) {
+    saveWinForItaliaDraws(cleanRestored);
+  }
+
+  return {
+    draws: cleanRestored,
+    count: cleanRestored.length,
+    latestDate: cleanRestored[0]?.date || '',
+    oldestDate: cleanRestored[cleanRestored.length - 1]?.date || '',
+    persistedToGitHub
+  };
+}
+
+/**
+ * Import Win for Italia / Win for Life (6/40) draws from JSON or CSV and persist
+ * across localStorage, Cloud Firestore, and External GitHub repo.
+ */
+export async function importWinForItaliaDraws(
+  content: string,
+  isCsv: boolean
+): Promise<{ draws: WinForItaliaDraw[]; importedCount: number; persistedToGitHub: boolean }> {
+  const current = loadWinForItaliaDraws();
+  const prevKeys = new Set(current.map((d) => `${d.date}|${d.numbers.join(',')}`));
+  const incoming: unknown[] = [];
+
+  if (isCsv) {
+    const lines = content.trim().split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || /^[a-zA-Z]/.test(line) && !line.toUpperCase().startsWith('WFI-')) continue;
+      const parts = line.split(/[;,]/).map((p) => p.trim());
+      // Format: Concorso,Anno,Data,Ora,N1,N2,N3,N4,N5,N6
+      if (parts.length >= 10) {
+        const id = parts[0];
+        const dateRaw = parts[2];
+        const isoDate = /^\d{2}\/\d{2}\/\d{4}$/.test(dateRaw)
+          ? `${dateRaw.slice(6, 10)}-${dateRaw.slice(3, 5)}-${dateRaw.slice(0, 2)}`
+          : dateRaw;
+        const nums = parts.slice(4, 10).map((n) => parseInt(n, 10));
+        const m = id.match(/(\d+)$/);
+        incoming.push({
+          id,
+          contestNumber: m ? parseInt(m[1], 10) : i + 1,
+          year: parseInt(isoDate.slice(0, 4), 10) || 2026,
+          date: isoDate,
+          time: parts[3] || '20:00',
+          numbers: nums
+        });
+      }
+    }
+  } else {
+    const parsed = JSON.parse(content);
+    const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.draws) ? parsed.draws : [];
+    incoming.push(...list);
+  }
+
+  const validIncoming = normalizeWinForItaliaDrawList(incoming);
+  const merged = normalizeWinForItaliaDrawList([...current, ...validIncoming]);
+  saveWinForItaliaDraws(merged);
+
+  const importedDraws = merged.filter((d) => !prevKeys.has(`${d.date}|${d.numbers.join(',')}`));
+
+  let persistedToGitHub = false;
+  if (validIncoming.length > 0) {
+    await upsertManyCloudWinForItaliaDraws(validIncoming).catch(() => {});
+    if (typeof fetch !== 'undefined') {
+      persistedToGitHub = await fetch('/api/draws', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game: 'winforitalia', action: 'import', draws: validIncoming })
+      })
+        .then(async (res) => {
+          if (!res.ok) return false;
+          const data = await res.json().catch(() => null);
+          return Boolean(data?.persistedToGitHub);
+        })
+        .catch(() => false);
+    }
+  }
+
+  return {
+    draws: merged,
+    importedCount: importedDraws.length,
+    persistedToGitHub
   };
 }
 

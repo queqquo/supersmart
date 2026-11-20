@@ -658,6 +658,18 @@ async function startServer() {
     }
   });
 
+  app.all('/api/draws', async (req, res) => {
+    try {
+      const mod = await import('./api/draws.js');
+      return mod.default(req, res);
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Draws API error'
+      });
+    }
+  });
+
   app.get('/api/draws/official-sync', async (_req, res) => {
     try {
       const superEnalottoFile = path.resolve(process.cwd(), 'src', 'data', 'superenalotto.json');

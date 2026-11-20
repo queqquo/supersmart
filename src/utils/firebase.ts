@@ -374,8 +374,25 @@ export function subscribeCloudACL(onUpdate: (records: UserAccessRecord[]) => voi
 }
 
 // ============================================================================
-// 3. CUSTOM DRAWS DELTA CLOUD PERSISTENCE (/custom_draws/{drawId})
+// 3. CUSTOM DRAWS CLOUD PERSISTENCE (/custom_draws/{drawId})
+//    Supports both SuperEnalotto (6/90) and Win for Italia / Win for Life (6/40)
 // ============================================================================
+
+export interface CloudWinForItaliaDrawRecord {
+  id: string;
+  contestNumber: number;
+  year: number;
+  date: string;
+  time?: string;
+  numbers: [number, number, number, number, number, number];
+}
+
+function isWinForItaliaCloudDoc(data: Record<string, unknown>): boolean {
+  return (
+    data?.game === 'winforitalia' ||
+    (typeof data?.id === 'string' && data.id.toUpperCase().startsWith('WFI-'))
+  );
+}
 
 export async function fetchCloudCustomDraws(): Promise<Draw[] | null> {
   const db = getCloudDb();
@@ -384,9 +401,10 @@ export async function fetchCloudCustomDraws(): Promise<Draw[] | null> {
     const snap = await getDocs(collection(db, 'custom_draws'));
     const draws: Draw[] = [];
     snap.forEach((docSnap) => {
-      const data = docSnap.data() as Draw;
-      if (data && typeof data.id === 'string' && Array.isArray(data.numbers)) {
-        draws.push(data);
+      const data = docSnap.data() as Record<string, unknown>;
+      if (isWinForItaliaCloudDoc(data)) return;
+      if (data && typeof data.id === 'string' && Array.isArray(data.numbers) && data.numbers.length === 6) {
+        draws.push(data as unknown as Draw);
       }
     });
     return draws;
@@ -400,13 +418,215 @@ export async function upsertCloudCustomDraw(draw: Draw): Promise<boolean> {
   const db = getCloudDb();
   if (!db || !draw?.id) return false;
   try {
-    const clean = stripUndefined(draw);
+    const clean = stripUndefined({ ...draw, game: 'superenalotto' });
     await setDoc(doc(db, 'custom_draws', draw.id), clean);
     return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `custom_draws/${draw.id}`);
     return false;
   }
+}
+
+export async function upsertManyCloudCustomDraws(draws: Draw[]): Promise<boolean> {
+  const db = getCloudDb();
+  if (!db || !Array.isArray(draws) || draws.length === 0) return false;
+  try {
+    const CHUNK = 400;
+    for (let i = 0; i < draws.length; i += CHUNK) {
+      const batch = writeBatch(db);
+      const slice = draws.slice(i, i + CHUNK);
+      for (const draw of slice) {
+        if (!draw?.id) continue;
+        const clean = stripUndefined({ ...draw, game: 'superenalotto' });
+        batch.set(doc(db, 'custom_draws', draw.id), clean);
+      }
+      await batch.commit();
+    }
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'custom_draws/batch');
+    return false;
+  }
+}
+
+export function subscribeCloudCustomDraws(onUpdate: (draws: Draw[]) => void): () => void {
+  const db = getCloudDb();
+  if (!db) return () => {};
+  return onSnapshot(
+    collection(db, 'custom_draws'),
+    (snap) => {
+      const draws: Draw[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as Record<string, unknown>;
+        if (isWinForItaliaCloudDoc(data)) return;
+        if (data && typeof data.id === 'string' && Array.isArray(data.numbers) && data.numbers.length === 6) {
+          draws.push(data as unknown as Draw);
+        }
+      });
+      onUpdate(draws);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'custom_draws');
+    }
+  );
+}
+
+export async function fetchCloudWinForItaliaDraws(): Promise<CloudWinForItaliaDrawRecord[] | null> {
+  const db = getCloudDb();
+  if (!db) return null;
+  try {
+    const snap = await getDocs(collection(db, 'custom_draws'));
+    const draws: CloudWinForItaliaDrawRecord[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as Record<string, unknown>;
+      if (!isWinForItaliaCloudDoc(data)) return;
+      if (typeof data.id === 'string' && typeof data.date === 'string' && Array.isArray(data.numbers) && data.numbers.length === 6) {
+        draws.push({
+          id: data.id,
+          contestNumber: Number(data.contestNumber) || 1,
+          year: Number(data.year) || parseInt(data.date.slice(0, 4), 10) || 2026,
+          date: data.date,
+          time: typeof data.time === 'string' ? data.time : '20:00',
+          numbers: [...(data.numbers as number[])].map(Number).sort((a, b) => a - b) as [
+            number,
+            number,
+            number,
+            number,
+            number,
+            number
+          ]
+        });
+      }
+    });
+    return draws;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'custom_draws/winforitalia');
+    return null;
+  }
+}
+
+export async function upsertCloudWinForItaliaDraw(draw: CloudWinForItaliaDrawRecord): Promise<boolean> {
+  const db = getCloudDb();
+  if (!db || !draw?.id) return false;
+  try {
+    // Include jolly: 1 placeholder solely to satisfy deployed Firestore custom_draws rule (stripped on read)
+    const clean = stripUndefined({
+      id: draw.id,
+      contestNumber: draw.contestNumber,
+      year: draw.year,
+      date: draw.date,
+      time: draw.time || '20:00',
+      numbers: [...draw.numbers].sort((a, b) => a - b),
+      jolly: 1,
+      game: 'winforitalia'
+    });
+    await setDoc(doc(db, 'custom_draws', draw.id), clean);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `custom_draws/${draw.id}`);
+    return false;
+  }
+}
+
+export async function upsertManyCloudWinForItaliaDraws(
+  draws: CloudWinForItaliaDrawRecord[]
+): Promise<boolean> {
+  const db = getCloudDb();
+  if (!db || !Array.isArray(draws) || draws.length === 0) return false;
+  try {
+    const CHUNK = 400;
+    for (let i = 0; i < draws.length; i += CHUNK) {
+      const batch = writeBatch(db);
+      const slice = draws.slice(i, i + CHUNK);
+      for (const draw of slice) {
+        if (!draw?.id) continue;
+        const clean = stripUndefined({
+          id: draw.id,
+          contestNumber: draw.contestNumber,
+          year: draw.year,
+          date: draw.date,
+          time: draw.time || '20:00',
+          numbers: [...draw.numbers].sort((a, b) => a - b),
+          jolly: 1,
+          game: 'winforitalia'
+        });
+        batch.set(doc(db, 'custom_draws', draw.id), clean);
+      }
+      await batch.commit();
+    }
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'custom_draws/winforitalia-batch');
+    return false;
+  }
+}
+
+export async function clearCloudCustomDraws(
+  game: 'superenalotto' | 'winforitalia'
+): Promise<boolean> {
+  const db = getCloudDb();
+  if (!db) return false;
+  try {
+    const snap = await getDocs(collection(db, 'custom_draws'));
+    const toDeleteIds: string[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as Record<string, unknown>;
+      const isWfi = isWinForItaliaCloudDoc(data);
+      if ((game === 'winforitalia' && isWfi) || (game === 'superenalotto' && !isWfi)) {
+        toDeleteIds.push(docSnap.id);
+      }
+    });
+    const CHUNK = 400;
+    for (let i = 0; i < toDeleteIds.length; i += CHUNK) {
+      const batch = writeBatch(db);
+      for (const id of toDeleteIds.slice(i, i + CHUNK)) {
+        batch.delete(doc(db, 'custom_draws', id));
+      }
+      await batch.commit();
+    }
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `custom_draws/${game}`);
+    return false;
+  }
+}
+
+export function subscribeCloudWinForItaliaDraws(
+  onUpdate: (draws: CloudWinForItaliaDrawRecord[]) => void
+): () => void {
+  const db = getCloudDb();
+  if (!db) return () => {};
+  return onSnapshot(
+    collection(db, 'custom_draws'),
+    (snap) => {
+      const draws: CloudWinForItaliaDrawRecord[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as Record<string, unknown>;
+        if (!isWinForItaliaCloudDoc(data)) return;
+        if (typeof data.id === 'string' && typeof data.date === 'string' && Array.isArray(data.numbers) && data.numbers.length === 6) {
+          draws.push({
+            id: data.id,
+            contestNumber: Number(data.contestNumber) || 1,
+            year: Number(data.year) || parseInt(data.date.slice(0, 4), 10) || 2026,
+            date: data.date,
+            time: typeof data.time === 'string' ? data.time : '20:00',
+            numbers: [...(data.numbers as number[])].map(Number).sort((a, b) => a - b) as [
+              number,
+              number,
+              number,
+              number,
+              number,
+              number
+            ]
+          });
+        }
+      });
+      onUpdate(draws);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'custom_draws/winforitalia');
+    }
+  );
 }
 
 // ============================================================================

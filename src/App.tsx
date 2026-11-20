@@ -33,6 +33,7 @@ import {
 import {
   loadDraws,
   loadAndMergeEstrazioniSisal,
+  validateAndDeduplicateDraws,
   insertDraw,
   saveDraws,
   loadSavedPlays,
@@ -75,13 +76,16 @@ import {
   testFirestoreConnection,
   subscribeCloudPlays,
   subscribeCloudDeletedPlayIds,
-  subscribeCloudACL
+  subscribeCloudACL,
+  subscribeCloudCustomDraws,
+  subscribeCloudWinForItaliaDraws
 } from './utils/firebase';
 import {
   WinForItaliaDraw,
   loadWinForItaliaDraws,
   saveWinForItaliaDraws,
-  syncWinForItaliaDrawsFromServer
+  loadAndMergeWinForItaliaDraws,
+  normalizeWinForItaliaDrawList
 } from './utils/winForItalia';
 
 export default function App() {
@@ -117,18 +121,20 @@ export default function App() {
   const [acl, setAcl] = useState<UserAccessRecord[]>(() => loadACL());
   const [session, setSession] = useState<AuthSession | null>(() => loadAuthSession());
 
-  // All'avvio dell'app: fetch di /data/estrazioni_sisal.json e merge deduplicato con localStorage
+  // All'avvio dell'app: carica gli archivi dal repo GitHub esterno + Cloud Firestore (persistenza cross-browser/dispositivo)
   useEffect(() => {
     testFirestoreConnection().catch(() => {});
     loadAndMergeEstrazioniSisal()
       .then((mergedDraws) => {
-        setDraws(mergedDraws);
+        if (mergedDraws.length > 0) {
+          setDraws(mergedDraws);
+        }
       })
       .catch(() => {});
-    syncWinForItaliaDrawsFromServer()
-      .then((res) => {
-        if (res.draws.length > 0) {
-          setWinForItaliaDraws(res.draws);
+    loadAndMergeWinForItaliaDraws()
+      .then((mergedWfi) => {
+        if (mergedWfi.length > 0) {
+          setWinForItaliaDraws(mergedWfi);
         }
       })
       .catch(() => {
@@ -184,10 +190,32 @@ export default function App() {
       }
     });
 
+    const unsubCustomDraws = subscribeCloudCustomDraws((cloudDraws) => {
+      if (cloudDraws.length > 0) {
+        setDraws((prevDraws) => {
+          const merged = validateAndDeduplicateDraws([...cloudDraws, ...prevDraws]);
+          saveDraws(merged);
+          return merged;
+        });
+      }
+    });
+
+    const unsubWfiDraws = subscribeCloudWinForItaliaDraws((cloudWfi) => {
+      if (cloudWfi.length > 0) {
+        setWinForItaliaDraws((prevWfi) => {
+          const merged = normalizeWinForItaliaDrawList([...prevWfi, ...cloudWfi]);
+          saveWinForItaliaDraws(merged);
+          return merged;
+        });
+      }
+    });
+
     return () => {
       unsubDeletedPlays();
       unsubPlays();
       unsubAcl();
+      unsubCustomDraws();
+      unsubWfiDraws();
     };
   }, []);
 

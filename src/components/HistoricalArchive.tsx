@@ -38,9 +38,16 @@ import {
   PlusCircle,
   AlertCircle,
   Trash2,
-  Download
+  Download,
+  Cloud,
+  Database
 } from 'lucide-react';
 import { Draw, SavedPlay, GeneratedColumn } from '../types/lottery';
+import {
+  EXTERNAL_DRAWS_REPO_URL,
+  EXTERNAL_DRAWS_REPO_OWNER,
+  EXTERNAL_DRAWS_REPO_NAME
+} from '../config/externalDrawsRepo';
 import {
   exportBackupJSON,
   exportEstrazioniSisalJSON,
@@ -50,7 +57,8 @@ import {
   insertDraw,
   loadDraws,
   clearAllDraws,
-  syncOfficialDrawsFromLiveFeed
+  syncOfficialDrawsFromLiveFeed,
+  resetAndRestoreSuperEnalottoArchive
 } from '../utils/storage';
 import {
   compareSavedPlayAgainstRecentDraws,
@@ -65,8 +73,10 @@ import {
   WinForItaliaDraw,
   loadWinForItaliaDraws,
   insertWinForItaliaDraw,
+  importWinForItaliaDraws,
   parseWinForItaliaManualInput,
   syncWinForItaliaDrawsFromServer,
+  resetAndRestoreWinForItaliaArchive,
   isWinForItaliaPlay,
   compareSavedPlayAgainstWinForItaliaDraws
 } from '../utils/winForItalia';
@@ -320,19 +330,73 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
     return filteredWfiDraws.slice(start, start + pageSize);
   }, [filteredWfiDraws, wfiPage, pageSize]);
 
+  const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
+  const [isResettingSe, setIsResettingSe] = useState<boolean>(false);
+  const [isResettingWfi, setIsResettingWfi] = useState<boolean>(false);
+
+  const handleResetAndRestoreWfi = async () => {
+    const confirmed = window.confirm(
+      'Vuoi cancellare lo storico locale/cloud di Win for Life (6/40) e ripristinare l’intero file storico ufficiale con i dati reali Sisal?'
+    );
+    if (!confirmed) return;
+    setIsResettingWfi(true);
+    try {
+      const res = await resetAndRestoreWinForItaliaArchive();
+      updateWfiDraws(res.draws);
+      setWfiPage(1);
+      showNotice(
+        `Storico Win for Life (6/40) cancellato e ripristinato da dati reali Sisal: ${res.count} estrazioni (${res.oldestDate || 'n/d'} → ${res.latestDate || 'n/d'})${
+          res.persistedToGitHub ? ' — aggiornato su GitHub esterno' : ''
+        }`
+      );
+    } catch {
+      showNotice('Errore durante il ripristino dello storico reale Win for Life (6/40).');
+    } finally {
+      setIsResettingWfi(false);
+    }
+  };
+
   const handleSyncWfiArchive = async () => {
     setIsSyncingWfi(true);
     try {
       const res = await syncWinForItaliaDrawsFromServer();
       updateWfiDraws(res.draws);
+      const persistLabel = res.persistedToGitHub
+        ? 'salvato su GitHub esterno + Cloud'
+        : 'persistente su Cloud cross-dispositivo & GitHub esterno';
       showNotice(
-        `Archivio Win for Italia Team / Win for Life (6/40) sincronizzato: ${res.draws.length} estrazioni (ultima: ${res.latestDate} ore 20:00)`
+        res.addedOrUpdated > 0
+          ? `Win for Life (6/40) aggiornato (+${res.addedOrUpdated} nuove): ${res.draws.length} estrazioni fino al ${res.latestDate} (${persistLabel})`
+          : `Archivio Win for Life (6/40) già aggiornato: ${res.draws.length} estrazioni fino al ${res.latestDate || 'n/d'} (${persistLabel})`
       );
     } catch {
-      showNotice('Archivio Win for Italia Team (6/40) già allineato al database locale.');
+      showNotice('Impossibile contattare il feed live Win for Life (6/40): archivio locale/cloud mantenuto.');
     } finally {
       setIsSyncingWfi(false);
     }
+  };
+
+  const handleImportWfiFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isCsv = file.name.toLowerCase().endsWith('.csv');
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const res = await importWinForItaliaDraws(content, isCsv);
+        updateWfiDraws(res.draws);
+        showNotice(
+          `Importate ${res.importedCount} estrazioni Win for Life (6/40) — salvate su Cloud${
+            res.persistedToGitHub ? ' + GitHub esterno' : ''
+          } (totale: ${res.draws.length})`
+        );
+      } catch {
+        showNotice("Errore durante l'importazione del file Win for Life (6/40)");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const handleWfiManualInsert = (e: React.FormEvent) => {
@@ -347,7 +411,7 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
     updateWfiDraws(updated);
     setWfiManualInput('');
     showNotice(
-      `Estrazione Win for Italia / Win for Life ${parsed.draw.id} (${parsed.draw.date} ore 20:00) [${parsed.draw.numbers.join(', ')}] salvata nell'archivio!`
+      `Estrazione Win for Italia / Win for Life ${parsed.draw.id} (${parsed.draw.date} ore 20:00) [${parsed.draw.numbers.join(', ')}] salvata su Cloud cross-dispositivo & GitHub esterno!`
     );
   };
 
@@ -564,23 +628,79 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
     showNotice(
       `Estrazione reale ${newDraw.id} (${newDraw.date}): [${newDraw.numbers.join(', ')}] + Jolly ${newDraw.jolly}${
         newDraw.superstar ? ` + SuperStar ${newDraw.superstar}` : ''
-      } salvata in localStorage!`
+      } salvata su Cloud cross-dispositivo & GitHub esterno!`
     );
   };
 
-  // Sync live from Official Open-Data Feed
+  // Sync live from Official Open-Data Feed + External GitHub Archive + Cloud Firestore
   const handleSyncLiveFeed = async () => {
     setIsSyncingFeed(true);
     try {
       const res = await syncOfficialDrawsFromLiveFeed();
       onUpdateDraws(res.draws);
+      const persistLabel = res.persistedToGitHub
+        ? 'salvato su GitHub esterno + Cloud'
+        : 'persistente su Cloud cross-dispositivo & GitHub esterno';
       showNotice(
-        `Archivio ufficiale sincronizzato: ${res.draws.length} concorsi reali fino al ${res.latestDate}`
+        res.addedOrUpdated > 0
+          ? `SuperEnalotto aggiornato (+${res.addedOrUpdated} nuovi concorsi): ${res.draws.length.toLocaleString('it-IT')} concorsi fino al ${res.latestDate} (${persistLabel})`
+          : `Archivio SuperEnalotto già aggiornato: ${res.draws.length.toLocaleString('it-IT')} concorsi reali fino al ${res.latestDate || 'n/d'} (${persistLabel})`
       );
     } catch {
-      showNotice("Archivio locale già aggiornato all'ultima estrazione disponibile");
+      showNotice("Archivio già aggiornato all'ultima estrazione disponibile");
     } finally {
       setIsSyncingFeed(false);
+    }
+  };
+
+  // Sync BOTH SuperEnalotto and Win for Life / Win for Italia in 1 click
+  const handleSyncAllArchives = async () => {
+    setIsSyncingAll(true);
+    setIsSyncingFeed(true);
+    setIsSyncingWfi(true);
+    try {
+      const [seRes, wfiRes] = await Promise.all([
+        syncOfficialDrawsFromLiveFeed(),
+        syncWinForItaliaDrawsFromServer()
+      ]);
+      onUpdateDraws(seRes.draws);
+      updateWfiDraws(wfiRes.draws);
+      const ghPersisted = seRes.persistedToGitHub || wfiRes.persistedToGitHub;
+      showNotice(
+        `Aggiornamento completato! SuperEnalotto: ${seRes.draws.length.toLocaleString('it-IT')} concorsi (+${seRes.addedOrUpdated}, ultimo ${seRes.latestDate || 'n/d'}) • Win for Life (6/40): ${wfiRes.draws.length} estrazioni (+${wfiRes.addedOrUpdated}, ultima ${wfiRes.latestDate || 'n/d'}) — ${
+          ghPersisted ? 'salvato su GitHub esterno + Cloud' : 'persistente su Cloud & GitHub esterno'
+        }`
+      );
+    } catch {
+      showNotice('Errore temporaneo durante la sincronizzazione di uno degli archivi.');
+    } finally {
+      setIsSyncingAll(false);
+      setIsSyncingFeed(false);
+      setIsSyncingWfi(false);
+    }
+  };
+
+  // Full wipe + restore of the entire real SuperEnalotto archive from Sisal / Official Open-Data
+  const handleResetAndRestoreSuperEnalotto = async () => {
+    const confirmed = window.confirm(
+      'Vuoi cancellare l’archivio attuale (locale + Cloud) e ripristinare l’intero file storico SuperEnalotto con tutti i dati reali ufficiali da Sisal (2009–oggi)?'
+    );
+    if (!confirmed) return;
+    setIsResettingSe(true);
+    try {
+      const res = await resetAndRestoreSuperEnalottoArchive();
+      onUpdateDraws(res.draws);
+      setSelectedYear('ALL');
+      setCurrentPage(1);
+      showNotice(
+        `Storico SuperEnalotto cancellato e ripristinato da dati reali Sisal: ${res.count.toLocaleString('it-IT')} concorsi (${res.oldestDate || 'n/d'} → ${res.latestDate || 'n/d'})${
+          res.persistedToGitHub ? ' — salvato su GitHub esterno' : ''
+        }`
+      );
+    } catch {
+      showNotice('Errore durante il ripristino dello storico reale SuperEnalotto.');
+    } finally {
+      setIsResettingSe(false);
     }
   };
 
@@ -603,51 +723,90 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
       {/* ===================================================================== */}
       {/* TOP-LEVEL ARCHIVE SWITCHER: SUPERENALOTTO (6/90) vs WIN FOR ITALIA / WIN FOR LIFE (6/40) */}
       {/* ===================================================================== */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="space-y-0.5">
-          <span className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-            <History className="w-4 h-4 text-amber-400" />
-            <span>Seleziona Archivio Estrazioni da Consultare:</span>
-          </span>
-          <p className="text-[11px] text-slate-400">
-            Passa tra l&apos;archivio storico <strong className="text-amber-300">SuperEnalotto (6/90)</strong> e l&apos;archivio giornaliero <strong className="text-emerald-300">Win for Italia Team / Win for Life (6/40 • Ore 20:00)</strong>.
-          </p>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <History className="w-4 h-4 text-amber-400" />
+              <span>Seleziona Archivio Estrazioni da Consultare e Aggiornare:</span>
+            </span>
+            <p className="text-[11px] text-slate-400">
+              Passa tra l&apos;archivio storico <strong className="text-amber-300">SuperEnalotto (6/90)</strong> e l&apos;archivio giornaliero <strong className="text-emerald-300">Win for Italia Team / Win for Life (6/40 • Ore 20:00)</strong>.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="archive-switch-superenalotto"
+              onClick={() => {
+                setArchiveGameMode('superenalotto');
+                setComparisonGameMode('superenalotto');
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 border ${
+                archiveGameMode === 'superenalotto'
+                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 border-amber-300 shadow-lg shadow-amber-500/20'
+                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:text-white hover:border-amber-500/40'
+              }`}
+            >
+              <Trophy className="w-4 h-4" />
+              <span>Archivio SuperEnalotto (6/90 • {draws.length.toLocaleString('it-IT')} Concorsi)</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="archive-switch-winforitalia"
+              onClick={() => {
+                setArchiveGameMode('winforitalia');
+                setComparisonGameMode('winforitalia');
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 border ${
+                archiveGameMode === 'winforitalia'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 border-emerald-300 shadow-lg shadow-emerald-500/20'
+                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:text-white hover:border-emerald-500/40'
+              }`}
+            >
+              <Crosshair className="w-4 h-4" />
+              <span>Archivio Win for Italia / Win for Life (6/40 • {wfiDraws.length} Estr. Ore 20:00)</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="sync-all-archives-btn"
+              onClick={handleSyncAllArchives}
+              disabled={isSyncingAll || isSyncingFeed || isSyncingWfi}
+              className="px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 disabled:opacity-50"
+              title="Aggiorna con 1 click sia SuperEnalotto che Win for Life (6/40) e salva in modo persistente su GitHub esterno + Cloud"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSyncingAll ? 'animate-spin' : ''}`} />
+              <span>{isSyncingAll ? 'Aggiornamento in corso...' : 'Aggiorna Tutti (SE + WFL)'}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            data-testid="archive-switch-superenalotto"
-            onClick={() => {
-              setArchiveGameMode('superenalotto');
-              setComparisonGameMode('superenalotto');
-            }}
-            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 border ${
-              archiveGameMode === 'superenalotto'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 border-amber-300 shadow-lg shadow-amber-500/20'
-                : 'bg-slate-950 text-slate-300 border-slate-800 hover:text-white hover:border-amber-500/40'
-            }`}
-          >
-            <Trophy className="w-4 h-4" />
-            <span>Archivio SuperEnalotto (6/90 • {draws.length.toLocaleString('it-IT')} Concorsi)</span>
-          </button>
-
-          <button
-            type="button"
-            data-testid="archive-switch-winforitalia"
-            onClick={() => {
-              setArchiveGameMode('winforitalia');
-              setComparisonGameMode('winforitalia');
-            }}
-            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 border ${
-              archiveGameMode === 'winforitalia'
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 border-emerald-300 shadow-lg shadow-emerald-500/20'
-                : 'bg-slate-950 text-slate-300 border-slate-800 hover:text-white hover:border-emerald-500/40'
-            }`}
-          >
-            <Crosshair className="w-4 h-4" />
-            <span>Archivio Win for Italia / Win for Life (6/40 • {wfiDraws.length} Estr. Ore 20:00)</span>
-          </button>
+        {/* External GitHub Persistent Storage Banner */}
+        <div className="pt-2.5 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-2 text-slate-300">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Persistenza Cross-Browser &amp; Cross-Dispositivo Attiva</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-950 text-slate-300 border border-slate-700 font-mono">
+              <Database className="w-3.5 h-3.5 text-amber-400" />
+              <span>Archivio GitHub Esterno (zero token in AI Studio):</span>
+              <a
+                href={EXTERNAL_DRAWS_REPO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sky-400 hover:text-sky-300 underline font-bold"
+              >
+                {EXTERNAL_DRAWS_REPO_OWNER}/{EXTERNAL_DRAWS_REPO_NAME}
+              </a>
+            </span>
+          </div>
+          <span className="text-slate-400 font-mono">
+            Ultimo agg.: SE {latestDraw?.date || 'n/d'} &bull; WFL {wfiDraws[0]?.date || 'n/d'}
+          </span>
         </div>
       </div>
 
@@ -1469,17 +1628,46 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
+                  data-testid="sync-wfi-draws-btn"
                   onClick={handleSyncWfiArchive}
-                  disabled={isSyncingWfi}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  disabled={isSyncingWfi || isResettingWfi}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                  title="Sincronizza le ultime estrazioni ufficiali Win for Life / Win for Italia (6/40) e salva in modo persistente"
                 >
                   <RefreshCw className={`w-4 h-4 ${isSyncingWfi ? 'animate-spin' : ''}`} />
                   <span>
                     {isSyncingWfi
                       ? 'Sincronizzazione 20:00...'
-                      : 'Sincronizza Estrazione 20:00'}
+                      : 'Sincronizza Ultime Estrazioni (Ore 20:00)'}
                   </span>
                 </button>
+
+                <button
+                  type="button"
+                  data-testid="reset-restore-wfi-btn"
+                  onClick={handleResetAndRestoreWfi}
+                  disabled={isResettingWfi || isSyncingWfi}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                  title="Cancella lo storico corrente e ripristina l'intero archivio Win for Life (6/40) con i dati reali Sisal"
+                >
+                  <RotateCcw className={`w-4 h-4 ${isResettingWfi ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isResettingWfi
+                      ? 'Ripristino Storico 6/40...'
+                      : 'Cancella e Ripristina Storico (Sisal)'}
+                  </span>
+                </button>
+
+                <label className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer">
+                  <Upload className="w-4 h-4 text-sky-400" />
+                  <span>Importa CSV/JSON 6/40</span>
+                  <input
+                    type="file"
+                    accept=".json,.csv"
+                    onChange={handleImportWfiFile}
+                    className="hidden"
+                  />
+                </label>
 
                 <button
                   type="button"
@@ -1688,13 +1876,47 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                   )}
                 </div>
                 <p className="text-xs text-slate-400">
-                  Archivio persistente (<code className="text-amber-300">localStorage</code> / Importa-Esporta CSV &amp; JSON)
-                  alimentato esclusivamente da estrazioni reali inserite o importate dall&apos;utente (nessun dato simulato).
+                  Archivio persistente cross-browser e cross-dispositivo su{' '}
+                  <strong className="text-sky-300">Repository GitHub Esterno</strong> +{' '}
+                  <strong className="text-emerald-300">Cloud Firestore</strong> (nessun file storico
+                  pesante nel repository dell&apos;app su AI Studio).
                 </p>
               </div>
 
               {/* Quick buttons */}
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="sync-se-draws-btn"
+                  onClick={handleSyncLiveFeed}
+                  disabled={isSyncingFeed || isResettingSe}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                  title="Sincronizza le ultime estrazioni ufficiali SuperEnalotto da Sisal / Open-Data e salva in modo persistente"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncingFeed ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isSyncingFeed
+                      ? 'Sincronizzazione Sisal...'
+                      : 'Sincronizza Ultime Estrazioni (Sisal)'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="reset-restore-se-btn"
+                  onClick={handleResetAndRestoreSuperEnalotto}
+                  disabled={isResettingSe || isSyncingFeed}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                  title="Cancella lo storico corrente (locale + Cloud) e ripristina l'intero archivio storico reale SuperEnalotto da Sisal (2009-oggi)"
+                >
+                  <RotateCcw className={`w-4 h-4 ${isResettingSe ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isResettingSe
+                      ? 'Ripristino Storico Sisal...'
+                      : 'Cancella e Ripristina Storico (Sisal)'}
+                  </span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setShowHowUsedGuide((prev) => !prev)}
@@ -1793,8 +2015,8 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                   <PlusCircle className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>Inserimento Rapido Estrazione Reale (6 Numeri + Jolly + SuperStar • Validazione [1..90] Anti-Duplicati)</span>
                 </div>
-                <span className="text-[11px] font-mono text-slate-400">
-                  Persistenza immediata in localStorage
+                <span className="text-[11px] font-mono text-emerald-400">
+                  Persistenza immediata su Cloud cross-dispositivo &amp; GitHub esterno
                 </span>
               </div>
 

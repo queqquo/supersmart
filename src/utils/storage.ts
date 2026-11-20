@@ -13,6 +13,7 @@ import {
   UserSimulationStateRecord
 } from '../types/lottery';
 import { validateRealDrawInput, drawToSisalRecord } from './combinatorics';
+import { EXTERNAL_SUPERENALOTTO_RAW_URL } from '../config/externalDrawsRepo';
 import {
   fetchCloudPlays,
   upsertCloudPlay,
@@ -21,6 +22,8 @@ import {
   fetchCloudDeletedPlayIds,
   fetchCloudCustomDraws,
   upsertCloudCustomDraw,
+  upsertManyCloudCustomDraws,
+  clearCloudCustomDraws,
   fetchCloudUserSystem,
   upsertCloudUserSystem,
   fetchCloudUserSimulation,
@@ -524,30 +527,55 @@ export function loadDraws(): Draw[] {
 }
 
 /**
- * All'avvio dell'app, esegue il fetch di `/data/estrazioni_sisal.json` e lo unisce
- * (merge deduplicato per numero di concorso e data) con eventuali estrazioni reali salvate
- * dall'utente in `localStorage`.
- * Se entrambi sono vuoti (`draws.length === 0`), restituisce `[]`.
+ * Carica lo storico ufficiale SuperEnalotto dal repository GitHub esterno
+ * (via API Vercel `/api/draws?game=superenalotto` o fallback diretto GitHub Raw),
+ * unendolo alle estrazioni salvate su Cloud Firestore e in localStorage.
+ * Nessun file storico pesante è più incluso nel repo dell'app (zero spreco token su AI Studio).
  */
-export async function loadAndMergeEstrazioniSisal(): Promise<Draw[]> {
-  const localDraws = loadDraws();
-  let staticSisalRecords: unknown[] = [];
+async function fetchExternalSuperEnalottoBase(): Promise<unknown[]> {
+  if (typeof fetch === 'undefined') return [];
 
   try {
-    if (typeof fetch !== 'undefined') {
-      const res = await fetch('/data/estrazioni_sisal.json', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          staticSisalRecords = data;
-        }
+    const apiRes = await fetch('/api/draws?game=superenalotto', { cache: 'no-store' });
+    const ct = apiRes.headers.get('content-type') || '';
+    if (apiRes.ok && ct.includes('application/json')) {
+      const payload = await apiRes.json();
+      if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
+        return payload.draws;
       }
     }
   } catch {
-    // Se offline o ambiente di test senza server HTTP, usa solo localDraws
+    // Fallback to direct external GitHub Raw URL below
   }
 
-  const merged = validateAndDeduplicateDraws([...localDraws, ...staticSisalRecords]);
+  try {
+    const rawRes = await fetch(`${EXTERNAL_SUPERENALOTTO_RAW_URL}?t=${Date.now()}`, {
+      cache: 'no-store'
+    });
+    if (rawRes.ok) {
+      const parsed = await rawRes.json();
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed?.draws)) return parsed.draws;
+    }
+  } catch {
+    // Offline fallback
+  }
+
+  return [];
+}
+
+export async function loadAndMergeEstrazioniSisal(): Promise<Draw[]> {
+  const localDraws = loadDraws();
+  const [externalRecords, cloudDraws] = await Promise.all([
+    fetchExternalSuperEnalottoBase(),
+    fetchCloudCustomDraws().catch(() => null)
+  ]);
+
+  const merged = validateAndDeduplicateDraws([
+    ...(cloudDraws || []),
+    ...externalRecords,
+    ...localDraws
+  ]);
   if (merged.length > 0) {
     saveDraws(merged);
   }
@@ -555,22 +583,259 @@ export async function loadAndMergeEstrazioniSisal(): Promise<Draw[]> {
 }
 
 /**
- * Sincronizzazione manuale su richiesta dell'utente da `/data/estrazioni_sisal.json` e Cloud Firestore
+ * Sincronizzazione live SuperEnalotto:
+ * 1) Invoca POST /api/draws (legge repo GitHub esterno + feed live ufficiali + committa su GitHub se configurato)
+ * 2) Fallback diretto feed Open-Data delpinsky + repo GitHub esterno
+ * 3) Persiste i nuovi delta anche su Cloud Firestore per persistenza immediata su ogni browser/dispositivo
  */
 export async function syncOfficialDrawsFromLiveFeed(): Promise<{
   draws: Draw[];
   addedOrUpdated: number;
   latestDate: string;
+  persistedToGitHub: boolean;
+  persistedToCloud: boolean;
 }> {
   const current = loadDraws();
-  const prevCount = current.length;
-  const merged = await loadAndMergeEstrazioniSisal();
+  const prevKeys = new Set(current.map((d) => `${d.date}|${d.id}|${d.numbers.join(',')}`));
+
+  let serverDraws: unknown[] = [];
+  let persistedToGitHub = false;
+
+  if (typeof fetch !== 'undefined') {
+    try {
+      const res = await fetch('/api/draws', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game: 'superenalotto', action: 'sync' })
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const payload = await res.json();
+        if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
+          serverDraws = payload.draws;
+          persistedToGitHub = Boolean(payload?.persistedToGitHub);
+        }
+      }
+    } catch {
+      // Fallback below
+    }
+  }
+
+  let externalBase: unknown[] = [];
+  if (serverDraws.length === 0 && typeof fetch !== 'undefined') {
+    externalBase = await fetchExternalSuperEnalottoBase();
+    try {
+      const directRes = await fetch(
+        `https://raw.githubusercontent.com/delpinsky/Superenalotto/main/storico-estrazioni-superenalotto.json?t=${Date.now()}`,
+        { cache: 'no-store' }
+      );
+      if (directRes.ok) {
+        const data = await directRes.json();
+        const rawDraws = Array.isArray(data?.draws)
+          ? data.draws.filter((d: { date?: string }) => d && d.date && d.date >= '2009-01-01')
+          : [];
+        rawDraws.sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+        const byYear: Record<number, number> = {};
+        serverDraws = rawDraws.map(
+          (d: {
+            date: string;
+            nums: number[];
+            jolly?: number | null;
+            ss?: number | null;
+            concorso?: number;
+          }) => {
+            const year = parseInt(d.date.slice(0, 4), 10);
+            byYear[year] = (byYear[year] || 0) + 1;
+            const contestNumber =
+              typeof d.concorso === 'number' && d.concorso > 0 ? d.concorso : byYear[year];
+            return {
+              id: `${year}-${String(contestNumber).padStart(3, '0')}`,
+              contestNumber,
+              year,
+              date: d.date,
+              numbers: [...d.nums].map(Number).sort((a, b) => a - b),
+              jolly: Number(d.jolly) || 1,
+              superstar: Number(d.ss) || undefined
+            };
+          }
+        );
+      }
+    } catch {
+      // Ignore if offline
+    }
+  }
+
+  const cloudDraws = (await fetchCloudCustomDraws().catch(() => null)) || [];
+  const merged = validateAndDeduplicateDraws([
+    ...cloudDraws,
+    ...serverDraws,
+    ...externalBase,
+    ...current
+  ]);
+
+  let addedOrUpdated = 0;
+  const newlyFound: Draw[] = [];
+  for (const d of merged) {
+    const sig = `${d.date}|${d.id}|${d.numbers.join(',')}`;
+    if (!prevKeys.has(sig)) {
+      addedOrUpdated++;
+      newlyFound.push(d);
+    }
+  }
+
+  if (merged.length > 0) {
+    saveDraws(merged);
+  }
+
+  // Persist newly discovered draws (beyond base archive) to Cloud Firestore so every browser/device sees them
+  let persistedToCloud = false;
+  if (newlyFound.length > 0 && newlyFound.length <= 200) {
+    persistedToCloud = await upsertManyCloudCustomDraws(newlyFound).catch(() => false);
+  }
 
   return {
     draws: merged,
-    addedOrUpdated: Math.max(0, merged.length - prevCount),
-    latestDate: merged[0]?.date || ''
+    addedOrUpdated,
+    latestDate: merged[0]?.date || '',
+    persistedToGitHub,
+    persistedToCloud
   };
+}
+
+/**
+ * Cancella completamente lo storico locale + i delta Cloud Firestore SuperEnalotto
+ * e ripristina l'intero archivio reale ufficiale da Sisal / Open-Data + Repo GitHub esterno.
+ */
+export async function resetAndRestoreSuperEnalottoArchive(): Promise<{
+  draws: Draw[];
+  count: number;
+  latestDate: string;
+  oldestDate: string;
+  persistedToGitHub: boolean;
+}> {
+  clearAllDraws();
+  await clearCloudCustomDraws('superenalotto').catch(() => false);
+
+  let restoredRaw: unknown[] = [];
+  let persistedToGitHub = false;
+
+  if (typeof fetch !== 'undefined') {
+    try {
+      const res = await fetch('/api/draws', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game: 'superenalotto', action: 'reset_restore' })
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const payload = await res.json();
+        if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
+          restoredRaw = payload.draws;
+          persistedToGitHub = Boolean(payload?.persistedToGitHub);
+        }
+      }
+    } catch {
+      // Fallback below
+    }
+  }
+
+  if (restoredRaw.length === 0 && typeof fetch !== 'undefined') {
+    const externalBase = await fetchExternalSuperEnalottoBase();
+    let liveFeed: unknown[] = [];
+    try {
+      const directRes = await fetch(
+        `https://raw.githubusercontent.com/delpinsky/Superenalotto/main/storico-estrazioni-superenalotto.json?t=${Date.now()}`,
+        { cache: 'no-store' }
+      );
+      if (directRes.ok) {
+        const data = await directRes.json();
+        const rawDraws = Array.isArray(data?.draws)
+          ? data.draws.filter((d: { date?: string }) => d && d.date && d.date >= '2009-01-01')
+          : [];
+        rawDraws.sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+        const byYear: Record<number, number> = {};
+        liveFeed = rawDraws.map(
+          (d: {
+            date: string;
+            nums: number[];
+            jolly?: number | null;
+            ss?: number | null;
+            concorso?: number;
+          }) => {
+            const year = parseInt(d.date.slice(0, 4), 10);
+            byYear[year] = (byYear[year] || 0) + 1;
+            const contestNumber =
+              typeof d.concorso === 'number' && d.concorso > 0 ? d.concorso : byYear[year];
+            return {
+              id: `${year}-${String(contestNumber).padStart(3, '0')}`,
+              contestNumber,
+              year,
+              date: d.date,
+              numbers: [...d.nums].map(Number).sort((a, b) => a - b),
+              jolly: Number(d.jolly) || 1,
+              superstar: Number(d.ss) || undefined
+            };
+          }
+        );
+      }
+    } catch {
+      // Fallback to externalBase only
+    }
+    restoredRaw = [...liveFeed, ...externalBase];
+  }
+
+  const cleanRestored = validateAndDeduplicateDraws(restoredRaw);
+  if (cleanRestored.length > 0) {
+    saveDraws(cleanRestored);
+  }
+
+  return {
+    draws: cleanRestored,
+    count: cleanRestored.length,
+    latestDate: cleanRestored[0]?.date || '',
+    oldestDate: cleanRestored[cleanRestored.length - 1]?.date || '',
+    persistedToGitHub
+  };
+}
+
+/**
+ * Persiste una lista di estrazioni importate/modificate su Cloud Firestore e repo GitHub esterno
+ */
+export async function persistSuperEnalottoDrawsRemote(
+  drawsToPersist: Draw[],
+  action: 'upsert' | 'import' = 'import'
+): Promise<{ persistedToGitHub: boolean; persistedToCloud: boolean }> {
+  const valid = validateAndDeduplicateDraws(drawsToPersist);
+  if (valid.length === 0) {
+    return { persistedToGitHub: false, persistedToCloud: false };
+  }
+
+  const cloudPromise =
+    valid.length <= 250
+      ? upsertManyCloudCustomDraws(valid).catch(() => false)
+      : upsertManyCloudCustomDraws(valid.slice(0, 250)).catch(() => false);
+
+  const githubPromise =
+    typeof fetch !== 'undefined'
+      ? fetch('/api/draws', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            action === 'upsert' && valid.length === 1
+              ? { game: 'superenalotto', action: 'upsert', draw: valid[0] }
+              : { game: 'superenalotto', action: 'import', draws: valid }
+          )
+        })
+          .then(async (res) => {
+            if (!res.ok) return false;
+            const data = await res.json().catch(() => null);
+            return Boolean(data?.persistedToGitHub);
+          })
+          .catch(() => false)
+      : Promise.resolve(false);
+
+  const [persistedToCloud, persistedToGitHub] = await Promise.all([cloudPromise, githubPromise]);
+  return { persistedToGitHub, persistedToCloud };
 }
 
 /**
@@ -619,6 +884,13 @@ export function insertDraw(newDraw: Draw): Draw[] {
   const merged = validateAndDeduplicateDraws([validatedDraw, ...current]);
   saveDraws(merged);
   upsertCloudCustomDraw(validatedDraw).catch(() => {});
+  if (typeof fetch !== 'undefined') {
+    fetch('/api/draws', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game: 'superenalotto', action: 'upsert', draw: validatedDraw })
+    }).catch(() => {});
+  }
   return merged;
 }
 
@@ -1096,6 +1368,9 @@ export function importBackupJSON(jsonString: string): { importedDraws: number; i
     const merged = validateAndDeduplicateDraws([...current, ...validIncoming]);
     importedDraws = Math.max(0, merged.length - prevCount);
     saveDraws(merged);
+    if (validIncoming.length > 0) {
+      persistSuperEnalottoDrawsRemote(validIncoming, 'import').catch(() => {});
+    }
   }
 
   if (parsed && !Array.isArray(parsed)) {
@@ -1137,6 +1412,39 @@ export function importDrawsCSV(csvString: string): number {
   for (let i = startIdx; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
+
+    // Support format: DD/MM/YYYY;YYYY-NNN;n1, n2, n3, n4, n5, n6;jolly;superstar
+    const semiParts = line.split(';');
+    if (semiParts.length >= 4 && /^\d{2}\/\d{2}\/\d{4}$/.test(semiParts[0].trim())) {
+      const [dd, mm, yyyy] = semiParts[0].trim().split('/');
+      const isoDate = `${yyyy}-${mm}-${dd}`;
+      const rawId = semiParts[1].trim();
+      const nums = (semiParts[2].match(/\d+/g) || []).map((n) => parseInt(n, 10));
+      const jolly = parseInt((semiParts[3] || '').trim(), 10);
+      const superstar =
+        semiParts[4] && semiParts[4].trim() !== '' ? parseInt(semiParts[4].trim(), 10) : NaN;
+      const contestNumber = rawId.includes('-')
+        ? parseInt(rawId.split('-')[1], 10)
+        : parseInt(rawId, 10);
+      const year = parseInt(yyyy, 10);
+      const check = validateRealDrawInput({
+        id: rawId.includes('-') ? rawId : `${year}-${String(contestNumber).padStart(3, '0')}`,
+        concorso: contestNumber,
+        contestNumber,
+        year,
+        data: isoDate,
+        date: isoDate,
+        sestina: nums,
+        numbers: nums,
+        jolly,
+        superstar
+      });
+      if (check.valid && check.draw) {
+        validIncoming.push(check.draw);
+      }
+      continue;
+    }
+
     const parts = line.split(/[;,]/);
     if (parts.length >= 10) {
       const rawIdOrConcorso = parts[0].trim();
@@ -1178,5 +1486,8 @@ export function importDrawsCSV(csvString: string): number {
 
   const merged = validateAndDeduplicateDraws([...current, ...validIncoming]);
   saveDraws(merged);
+  if (validIncoming.length > 0) {
+    persistSuperEnalottoDrawsRemote(validIncoming, 'import').catch(() => {});
+  }
   return Math.max(0, merged.length - prevCount);
 }
