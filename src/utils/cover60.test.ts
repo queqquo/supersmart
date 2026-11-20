@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { SavedPlay } from '../types/lottery';
-import { buildGeneratedColumn } from './combinatorics';
-import { COVER60_COST, COVER60_ODDS, COVER60_TOTAL_DRAWS, generateCover60, getCover60History } from './cover60';
+import type { Draw, SavedPlay } from '../types/lottery';
+import { buildGeneratedColumn, calculateNumberStatistics } from './combinatorics';
+import { COVER60_COST, COVER60_FREQUENCY_WINDOW, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60History } from './cover60';
 
 test('Copertura 60 generates ten sorted base columns and sixty globally distinct numbers', () => {
   assert.equal(COVER60_COST, 10);
@@ -64,6 +64,42 @@ test('A full six-number duplicate causes a retry; sharing five numbers alone doe
   assert.deepEqual(next[0].numbers, [1, 2, 3, 4, 5, 90]);
   assert.equal(new Set(next.flatMap(c => c.numbers)).size, 60);
   assert.equal(generateCover60(forbidden, (universe) => [...universe]), null);
+});
+
+test('Weighted selection favors both delay and recent frequency without excluding other numbers', () => {
+  const universe = Array.from({ length: 90 }, (_, i) => i + 1);
+  const stats = Object.fromEntries(universe.map(n => [n, {
+    currentDelay: n === 89 ? 20 : 0,
+    frequencyK: n === 90 ? 5 : 0,
+  }]));
+  // Same random variate for 62 numbers competing for 60 places. The two
+  // weighted numbers win places even though they are last in the input.
+  let i = 0;
+  const shuffle = createCover60WeightedShuffle(stats, () => ++i <= 58 || i >= 89 ? 0.5 : 0.9);
+  const columns = generateCover60(undefined, shuffle);
+  assert.ok(columns);
+  const selected = columns.flatMap(c => c.numbers);
+  assert.equal(new Set(selected).size, 60);
+  assert.ok(selected.includes(89));
+  assert.ok(selected.includes(90));
+  assert.ok(selected.includes(1));
+  // Positive base weight lets even a number with no bonus rank first.
+  i = 0;
+  const alternate = createCover60WeightedShuffle(stats, () => ++i === 88 ? 0.01 : 0.5)(universe);
+  assert.ok(alternate.includes(88));
+});
+
+test('Frequency ignores draws outside the 36-contest window, while delay uses all available draws', () => {
+  const draws: Draw[] = Array.from({ length: 38 }, (_, i) => ({
+    id: `2026-${i + 1}`, year: 2026, contestNumber: i + 1,
+    date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10),
+    numbers: [i < 2 ? 1 : 7, 2, 3, 4, 5, 6], jolly: 8,
+  }));
+  const stats = calculateNumberStatistics(draws, COVER60_FREQUENCY_WINDOW);
+  assert.equal(stats[1].frequencyK, 0);
+  assert.equal(stats[1].currentDelay, 36);
+  assert.equal(stats[7].frequencyK, 36);
+  assert.equal(stats[7].currentDelay, 0);
 });
 
 test('Exact coverage counts match inclusion-exclusion over disjoint columns', () => {

@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { BookmarkPlus, Copy, ShieldCheck, Shuffle } from 'lucide-react';
-import type { Draw, GeneratedColumn, SavedPlay } from '../types/lottery';
-import { COVER60_COST, COVER60_HISTORY_LIMIT, COVER60_ODDS, COVER60_TOTAL_DRAWS, generateCover60, getCover60History } from '../utils/cover60';
+import type { Draw, GeneratedColumn, NumberStat, SavedPlay } from '../types/lottery';
+import { COVER60_COST, COVER60_FREQUENCY_WINDOW, COVER60_HISTORY_LIMIT, COVER60_MIN_DRAWS, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60History } from '../utils/cover60';
 
 const pct = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 5 });
 const whole = new Intl.NumberFormat('it-IT');
 const secondary = 'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-emerald-300';
 
-export function Cover60Panel({ latestDraw, savedPlays, onSavePlay }: {
+export function Cover60Panel({ latestDraw, drawCount, numberStatsMap, savedPlays, onSavePlay }: {
   latestDraw?: Draw;
+  drawCount: number;
+  numberStatsMap: Readonly<Record<number, NumberStat>>;
   savedPlays: readonly SavedPlay[];
   onSavePlay: (play: SavedPlay) => void;
 }) {
@@ -18,12 +20,18 @@ export function Cover60Panel({ latestDraw, savedPlays, onSavePlay }: {
   const [generationError, setGenerationError] = useState(false);
   const [saved, setSaved] = useState(false);
   const [manualCopy, setManualCopy] = useState(false);
+  const [selectionNote, setSelectionNote] = useState<string>();
+  const weighted = drawCount >= COVER60_MIN_DRAWS;
+  const frequencyWindow = Math.min(drawCount, COVER60_FREQUENCY_WINDOW);
   const text = columns.map(({ numbers }) => numbers.map(n => String(n).padStart(2, '0')).join(' - ')).join('\n');
 
   function generate() {
     const { forbidden, checkedPlays } = getCover60History(savedPlays);
-    const next = generateCover60(forbidden);
+    const next = generateCover60(forbidden, weighted ? createCover60WeightedShuffle(numberStatsMap) : undefined);
     setColumns(next ?? []);
+    setSelectionNote(!next ? undefined : weighted
+      ? `Selezione pesata: ritardo attuale e frequenza nelle ultime ${frequencyWindow} estrazioni.`
+      : 'Selezione casuale uniforme: archivio insufficiente.');
     setSaved(false);
     setManualCopy(false);
     setGenerationError(!next);
@@ -60,7 +68,7 @@ export function Cover60Panel({ latestDraw, savedPlays, onSavePlay }: {
       poolNumbers: columns.flatMap(column => column.numbers).sort((a, b) => a - b),
       columns,
       status: 'IN_ATTESA',
-      manualNote: 'Copertura 60 (10 sestine base, senza sovrapposizioni)'
+      manualNote: ['Copertura 60 (10 sestine base, senza sovrapposizioni)', selectionNote].filter(Boolean).join(' · ')
     });
     setSaved(true);
     setStatus('Sestine aggiunte a Verifica & Bilancio. Nessun acquisto effettuato.');
@@ -78,6 +86,15 @@ export function Cover60Panel({ latestDraw, savedPlays, onSavePlay }: {
           <span className="block text-xs text-emerald-200">Costo per concorso</span>
           <strong className="font-mono text-lg text-white">10,00 €</strong>
         </div>
+      </div>
+      <div className="space-y-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-200">
+        <p className="font-semibold">Selezione dei 60 numeri</p>
+        <p data-testid="cover60-selection" aria-live="polite" className="text-xs leading-relaxed">
+          {selectionNote || (weighted
+            ? `Il ritardo attuale e la frequenza nelle ultime ${frequencyWindow} estrazioni pesano allo stesso modo. Nessun numero è escluso a priori.`
+            : `Con meno di ${COVER60_MIN_DRAWS} estrazioni caricate, la selezione è casuale uniforme.`)}
+        </p>
+        <p className="text-xs text-slate-400">Le statistiche storiche non aumentano le probabilità di vincita.</p>
       </div>
       <button type="button" data-testid="cover60-generate" onClick={generate}
         className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950 hover:bg-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 sm:w-auto">

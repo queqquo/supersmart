@@ -1,10 +1,12 @@
-import type { GeneratedColumn, SavedPlay } from '../types/lottery';
-import { buildGeneratedColumn, fisherYatesCryptoShuffle } from './combinatorics';
+import type { GeneratedColumn, NumberStat, SavedPlay } from '../types/lottery';
+import { buildGeneratedColumn, fisherYatesCryptoShuffle, getCryptoRandomFloat } from './combinatorics';
 import { isWinForItaliaPlay } from './winForItalia';
 
 export const COVER60_COST = 10;
 export const COVER60_TOTAL_DRAWS = 622_614_630;
 export const COVER60_HISTORY_LIMIT = 10;
+export const COVER60_FREQUENCY_WINDOW = 36;
+export const COVER60_MIN_DRAWS = 2;
 const COVER60_MAX_ATTEMPTS = 20;
 const universe = Array.from({ length: 90 }, (_, i) => i + 1);
 const emptyHistory = new Set<string>();
@@ -45,6 +47,27 @@ export function getCover60History(plays: readonly SavedPlay[]) {
     if (checked) checkedPlays++;
   }
   return { forbidden, checkedPlays };
+}
+
+export function createCover60WeightedShuffle(
+  stats: Readonly<Record<number, Pick<NumberStat, 'currentDelay' | 'frequencyK'>>>,
+  rng = getCryptoRandomFloat,
+): (items: readonly number[]) => number[] {
+  const maxDelay = Math.max(1, ...universe.map(n => stats[n].currentDelay));
+  const maxFrequency = Math.max(1, ...universe.map(n => stats[n].frequencyK));
+  const weights = universe.map(n => 1 + 0.5 * (
+    stats[n].currentDelay / maxDelay + stats[n].frequencyK / maxFrequency
+  ));
+
+  // Exponential race: weighted sampling without replacement. Sorted arrival times
+  // supply all 60 picks; a separate shuffle mixes them before forming columns.
+  return items => {
+    const pool = items.map(n => ({ n, arrival: -Math.log1p(-rng()) / weights[n - 1] }))
+      .sort((a, b) => a.arrival - b.arrival)
+      .slice(0, 60)
+      .map(({ n }) => n);
+    return fisherYatesCryptoShuffle(pool);
+  };
 }
 
 export function generateCover60(
