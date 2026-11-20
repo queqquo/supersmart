@@ -1,16 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { BookmarkPlus, Copy, ShieldCheck, Shuffle } from 'lucide-react';
-import type { Draw, GeneratedColumn, NumberStat, SavedPlay } from '../types/lottery';
-import { COVER60_COST, COVER60_FREQUENCY_WINDOW, COVER60_HISTORY_LIMIT, COVER60_MIN_DRAWS, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60History } from '../utils/cover60';
+import type { Draw, GeneratedColumn, SavedPlay } from '../types/lottery';
+import { COVER60_ARCHIVE_YEARS, COVER60_COST, COVER60_HISTORY_LIMIT, COVER60_MIN_DRAWS, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60ArchiveStats, getCover60History } from '../utils/cover60';
 
 const pct = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 5 });
 const whole = new Intl.NumberFormat('it-IT');
+const formatDate = (date: string) => date.split('-').reverse().join('/');
 const secondary = 'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-emerald-300';
 
-export function Cover60Panel({ latestDraw, drawCount, numberStatsMap, savedPlays, onSavePlay }: {
-  latestDraw?: Draw;
-  drawCount: number;
-  numberStatsMap: Readonly<Record<number, NumberStat>>;
+export function Cover60Panel({ draws, savedPlays, onSavePlay }: {
+  draws: readonly Draw[];
   savedPlays: readonly SavedPlay[];
   onSavePlay: (play: SavedPlay) => void;
 }) {
@@ -21,17 +20,20 @@ export function Cover60Panel({ latestDraw, drawCount, numberStatsMap, savedPlays
   const [saved, setSaved] = useState(false);
   const [manualCopy, setManualCopy] = useState(false);
   const [selectionNote, setSelectionNote] = useState<string>();
+  const latestDraw = draws[0];
+  const { start, end, drawCount, stats } = useMemo(() => getCover60ArchiveStats(draws), [draws]);
   const weighted = drawCount >= COVER60_MIN_DRAWS;
-  const frequencyWindow = Math.min(drawCount, COVER60_FREQUENCY_WINDOW);
+  const archivePeriod = start && end ? `dal ${formatDate(start)} al ${formatDate(end)}` : '';
+  const archiveSummary = `${whole.format(drawCount)} estrazioni ${archivePeriod}`;
   const text = columns.map(({ numbers }) => numbers.map(n => String(n).padStart(2, '0')).join(' - ')).join('\n');
 
   function generate() {
     const { forbidden, checkedPlays } = getCover60History(savedPlays);
-    const next = generateCover60(forbidden, weighted ? createCover60WeightedShuffle(numberStatsMap) : undefined);
+    const next = generateCover60(forbidden, weighted ? createCover60WeightedShuffle(stats) : undefined);
     setColumns(next ?? []);
     setSelectionNote(!next ? undefined : weighted
-      ? `Selezione pesata: ritardo attuale e frequenza nelle ultime ${frequencyWindow} estrazioni.`
-      : 'Selezione casuale uniforme: archivio insufficiente.');
+      ? `Selezione pesata sugli ultimi ${COVER60_ARCHIVE_YEARS} anni: ${archiveSummary}.`
+      : `Selezione casuale uniforme: meno di ${COVER60_MIN_DRAWS} estrazioni nel periodo.`);
     setSaved(false);
     setManualCopy(false);
     setGenerationError(!next);
@@ -89,10 +91,11 @@ export function Cover60Panel({ latestDraw, drawCount, numberStatsMap, savedPlays
       </div>
       <div className="space-y-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-200">
         <p className="font-semibold">Selezione dei 60 numeri</p>
+        <p className="text-xs leading-relaxed">Ritardo e frequenza hanno lo stesso peso. Si usano gli ultimi {COVER60_ARCHIVE_YEARS} anni a partire dall’ultima estrazione in archivio, senza escludere alcun numero a priori.</p>
         <p data-testid="cover60-selection" aria-live="polite" className="text-xs leading-relaxed">
           {selectionNote || (weighted
-            ? `Il ritardo attuale e la frequenza nelle ultime ${frequencyWindow} estrazioni pesano allo stesso modo. Nessun numero è escluso a priori.`
-            : `Con meno di ${COVER60_MIN_DRAWS} estrazioni caricate, la selezione è casuale uniforme.`)}
+            ? `Archivio disponibile: ${archiveSummary}.`
+            : `Con meno di ${COVER60_MIN_DRAWS} estrazioni nel periodo, la selezione è casuale uniforme.`)}
         </p>
         <p className="text-xs text-slate-400">Le statistiche storiche non aumentano le probabilità di vincita.</p>
       </div>

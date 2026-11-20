@@ -69,7 +69,6 @@ import {
 import { subscribeCloudUserSystem } from '../utils/firebase';
 import { EvolutionarySliderTrainer } from './EvolutionarySliderTrainer';
 import { Cover60Panel } from './Cover60Panel';
-import { COVER60_FREQUENCY_WINDOW } from '../utils/cover60';
 
 interface SystemGeneratorProps {
   userEmail: string;
@@ -91,7 +90,6 @@ interface SystemGeneratorProps {
 
 export const SystemGenerator: React.FC<SystemGeneratorProps> = (props) => {
   const [view, setView] = useState<'reduced' | 'cover60'>('reduced');
-  const numberStatsMap = useMemo(() => calculateNumberStatistics(props.draws, COVER60_FREQUENCY_WINDOW), [props.draws]);
   const options = [
     { id: 'reduced', label: 'Sistemi ridotti' },
     { id: 'cover60', label: 'Copertura 60 · 10 €' }
@@ -107,16 +105,15 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = (props) => {
           </button>
         ))}
       </div>
-      <div hidden={view !== 'reduced'}><ReducedSystemGenerator {...props} numberStatsMap={numberStatsMap} /></div>
-      <div hidden={view !== 'cover60'}><Cover60Panel latestDraw={props.draws[0]} drawCount={props.draws.length} numberStatsMap={numberStatsMap} savedPlays={props.savedPlays} onSavePlay={props.onSavePlay} /></div>
+      <div hidden={view !== 'reduced'}><ReducedSystemGenerator {...props} /></div>
+      <div hidden={view !== 'cover60'}><Cover60Panel draws={props.draws} savedPlays={props.savedPlays} onSavePlay={props.onSavePlay} /></div>
     </div>
   );
 };
 
-const ReducedSystemGenerator: React.FC<SystemGeneratorProps & { numberStatsMap: Record<number, NumberStat> }> = ({
+const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
   userEmail,
   draws,
-  numberStatsMap,
   weights,
   onUpdateWeights,
   filters,
@@ -277,9 +274,11 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps & { numberStatsMap: 
     }
   };
 
-  // Recalculate scored ranking whenever weights or shared stats change
+  const numberStatsMap = useMemo(() => calculateNumberStatistics(draws, 36), [draws]);
+
+  // Recalculate scored ranking whenever weights or stats change
   const scoredNumbers = useMemo(() => {
-    return scoreAllNumbers(numberStatsMap, weights, COVER60_FREQUENCY_WINDOW);
+    return scoreAllNumbers(numberStatsMap, weights, 36);
   }, [numberStatsMap, weights]);
 
   // Map number -> updated NumberStat with live compositeScore

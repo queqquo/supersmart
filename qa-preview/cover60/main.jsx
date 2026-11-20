@@ -5,11 +5,11 @@ import { DEFAULT_FILTERS, DEFAULT_WEIGHTS } from '../../src/utils/storage';
 import '../preview.css';
 
 const archiveSize = new URLSearchParams(window.location.search).get('archivio');
-const draws = Array.from({ length: archiveSize === 'breve' ? 3 : archiveSize === 'minimo' ? 1 : 40 }, (_, i) => ({
+const draws = Array.from({ length: archiveSize === 'breve' ? 3 : archiveSize === 'minimo' ? 2 : 40 }, (_, i) => ({
   id: `2026-${185 - i}`,
   contestNumber: 185 - i,
   year: 2026,
-  date: new Date(Date.UTC(2026, 10, 19 - i)).toISOString().slice(0, 10),
+  date: new Date(Date.UTC(2026, 10, 19 - i * (archiveSize === 'minimo' ? 731 : 19))).toISOString().slice(0, 10),
   numbers: Array.from({ length: 6 }, (_, j) => 1 + (i * 13 + j * 17) % 90).sort((a, b) => a - b),
   jolly: 2,
   superstar: 8,

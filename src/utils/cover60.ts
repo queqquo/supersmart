@@ -1,15 +1,16 @@
-import type { GeneratedColumn, NumberStat, SavedPlay } from '../types/lottery';
+import type { Draw, GeneratedColumn, SavedPlay } from '../types/lottery';
 import { buildGeneratedColumn, fisherYatesCryptoShuffle, getCryptoRandomFloat } from './combinatorics';
 import { isWinForItaliaPlay } from './winForItalia';
 
 export const COVER60_COST = 10;
 export const COVER60_TOTAL_DRAWS = 622_614_630;
 export const COVER60_HISTORY_LIMIT = 10;
-export const COVER60_FREQUENCY_WINDOW = 36;
+export const COVER60_ARCHIVE_YEARS = 2;
 export const COVER60_MIN_DRAWS = 2;
 const COVER60_MAX_ATTEMPTS = 20;
 const universe = Array.from({ length: 90 }, (_, i) => i + 1);
 const emptyHistory = new Set<string>();
+type Cover60NumberStat = { currentDelay: number; frequency: number };
 
 // Counts for "at least one column reaches the threshold", not exact prize tiers.
 // Enumerating the number of hits in each of ten groups of six, plus 30 unused numbers,
@@ -49,14 +50,40 @@ export function getCover60History(plays: readonly SavedPlay[]) {
   return { forbidden, checkedPlays };
 }
 
+export function getCover60ArchiveStats(draws: readonly Draw[]) {
+  // Anchor the window to the latest available contest so the displayed period
+  // and results remain reproducible for the same archive, even when offline.
+  const end = draws.reduce<string | null>((latest, draw) =>
+    latest === null || draw.date > latest ? draw.date : latest, null);
+  let start: string | null = null;
+  if (end) {
+    const [year, month, day] = end.split('-').map(Number);
+    const firstYear = year - COVER60_ARCHIVE_YEARS;
+    const lastDayOfMonth = new Date(Date.UTC(firstYear, month, 0)).getUTCDate();
+    start = new Date(Date.UTC(firstYear, month - 1, Math.min(day, lastDayOfMonth))).toISOString().slice(0, 10);
+  }
+  const recent = start === null ? [] : draws.filter(draw => draw.date >= start)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.contestNumber - a.contestNumber);
+  const stats: Record<number, Cover60NumberStat> = Object.fromEntries(universe.map(n =>
+    [n, { currentDelay: recent.length, frequency: 0 }]
+  ));
+  for (const [index, draw] of recent.entries()) {
+    for (const n of draw.numbers) {
+      if (stats[n].frequency === 0) stats[n].currentDelay = index;
+      stats[n].frequency++;
+    }
+  }
+  return { start, end, drawCount: recent.length, stats };
+}
+
 export function createCover60WeightedShuffle(
-  stats: Readonly<Record<number, Pick<NumberStat, 'currentDelay' | 'frequencyK'>>>,
+  stats: Readonly<Record<number, Cover60NumberStat>>,
   rng = getCryptoRandomFloat,
 ): (items: readonly number[]) => number[] {
   const maxDelay = Math.max(1, ...universe.map(n => stats[n].currentDelay));
-  const maxFrequency = Math.max(1, ...universe.map(n => stats[n].frequencyK));
+  const maxFrequency = Math.max(1, ...universe.map(n => stats[n].frequency));
   const weights = universe.map(n => 1 + 0.5 * (
-    stats[n].currentDelay / maxDelay + stats[n].frequencyK / maxFrequency
+    stats[n].currentDelay / maxDelay + stats[n].frequency / maxFrequency
   ));
 
   // Exponential race: weighted sampling without replacement. Sorted arrival times

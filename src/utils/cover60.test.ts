@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Draw, SavedPlay } from '../types/lottery';
-import { buildGeneratedColumn, calculateNumberStatistics } from './combinatorics';
-import { COVER60_COST, COVER60_FREQUENCY_WINDOW, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60History } from './cover60';
+import { buildGeneratedColumn } from './combinatorics';
+import { COVER60_COST, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60ArchiveStats, getCover60History } from './cover60';
 
 test('Copertura 60 generates ten sorted base columns and sixty globally distinct numbers', () => {
   assert.equal(COVER60_COST, 10);
@@ -70,7 +70,7 @@ test('Weighted selection favors both delay and recent frequency without excludin
   const universe = Array.from({ length: 90 }, (_, i) => i + 1);
   const stats = Object.fromEntries(universe.map(n => [n, {
     currentDelay: n === 89 ? 20 : 0,
-    frequencyK: n === 90 ? 5 : 0,
+    frequency: n === 90 ? 5 : 0,
   }]));
   // Same random variate for 62 numbers competing for 60 places. The two
   // weighted numbers win places even though they are last in the input.
@@ -89,17 +89,43 @@ test('Weighted selection favors both delay and recent frequency without excludin
   assert.ok(alternate.includes(88));
 });
 
-test('Frequency ignores draws outside the 36-contest window, while delay uses all available draws', () => {
-  const draws: Draw[] = Array.from({ length: 38 }, (_, i) => ({
-    id: `2026-${i + 1}`, year: 2026, contestNumber: i + 1,
-    date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10),
-    numbers: [i < 2 ? 1 : 7, 2, 3, 4, 5, 6], jolly: 8,
-  }));
-  const stats = calculateNumberStatistics(draws, COVER60_FREQUENCY_WINDOW);
-  assert.equal(stats[1].frequencyK, 0);
-  assert.equal(stats[1].currentDelay, 36);
-  assert.equal(stats[7].frequencyK, 36);
-  assert.equal(stats[7].currentDelay, 0);
+function archiveDraw(date: string, first: number, contestNumber = 1): Draw {
+  return {
+    id: `${date}-${contestNumber}`, year: Number(date.slice(0, 4)), contestNumber,
+    date, numbers: [first, 2, 3, 4, 5, 6], jolly: 8,
+  };
+}
+
+test('Delay and frequency both use a rolling two-calendar-year window, including its first day', () => {
+  const draws = [
+    archiveDraw('2024-11-18', 1),
+    archiveDraw('2026-11-19', 7),
+    archiveDraw('2024-11-19', 9),
+    archiveDraw('2025-01-01', 7),
+  ];
+  const { start, end, drawCount, stats } = getCover60ArchiveStats(draws);
+  assert.equal(start, '2024-11-19');
+  assert.equal(end, '2026-11-19');
+  assert.equal(drawCount, 3);
+  assert.deepEqual(stats[1], { frequency: 0, currentDelay: 3 });
+  assert.deepEqual(stats[7], { frequency: 2, currentDelay: 0 });
+  assert.deepEqual(stats[9], { frequency: 1, currentDelay: 2 });
+  assert.deepEqual(stats[8], { frequency: 0, currentDelay: 3 }); // Jolly is not counted.
+});
+
+test('A leap-day end date clamps to February 28, and an empty archive has no dates', () => {
+  const { start, drawCount, stats } = getCover60ArchiveStats([
+    archiveDraw('2024-02-29', 1, 1),
+    archiveDraw('2022-02-27', 7),
+    archiveDraw('2022-02-28', 9),
+    archiveDraw('2024-02-29', 10, 2),
+  ]);
+  assert.equal(start, '2022-02-28');
+  assert.equal(drawCount, 3);
+  assert.equal(stats[10].currentDelay, 0);
+  assert.equal(stats[1].currentDelay, 1);
+  assert.equal(getCover60ArchiveStats([]).end, null);
+  assert.equal(getCover60ArchiveStats([]).drawCount, 0);
 });
 
 test('Exact coverage counts match inclusion-exclusion over disjoint columns', () => {
