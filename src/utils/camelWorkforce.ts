@@ -211,13 +211,19 @@ export function selectProportionalLowHighPool(
  */
 function buildAntiCrowdResonanceFunnel(
   scoredNumbers: ReturnType<typeof scoreAllNumbers>,
-  poolSizeV: number
+  poolSizeV: number,
+  hasRealDraws: boolean
 ): FunnelPoolSelectionResult {
-  const pureRankedNumbers = [...scoredNumbers]
-    .sort((a, b) => b.compositeScore - a.compositeScore || a.number - b.number)
-    .map((s) => s.number);
+  const pureRankedNumbers = [...scoredNumbers].sort(
+    (a, b) => b.compositeScore - a.compositeScore || a.number - b.number
+  );
 
-  return selectFunnelPool30To12(pureRankedNumbers, poolSizeV);
+  return selectFunnelPool30To12(
+    pureRankedNumbers,
+    poolSizeV,
+    undefined,
+    hasRealDraws ? 'real_archive_weighted' : 'pure_uniform'
+  );
 }
 
 /**
@@ -227,7 +233,8 @@ function buildAntiCrowdResonanceFunnel(
 function buildConsensusHybridFunnel(
   wfPool: number[],
   geneticScored: ReturnType<typeof scoreAllNumbers>,
-  poolSizeV: number
+  poolSizeV: number,
+  hasRealDraws: boolean
 ): FunnelPoolSelectionResult {
   const wfSet = new Set(wfPool);
   const rankMap = new Map<number, number>();
@@ -244,9 +251,14 @@ function buildConsensusHybridFunnel(
 
   const mergedRanked = Array.from(rankMap.entries())
     .sort((a, b) => b[1] - a[1])
-    .map((e) => e[0]);
+    .map(([number, score]) => ({ number, score }));
 
-  return selectFunnelPool30To12(mergedRanked, poolSizeV);
+  return selectFunnelPool30To12(
+    mergedRanked,
+    poolSizeV,
+    undefined,
+    hasRealDraws ? 'real_archive_weighted' : 'pure_uniform'
+  );
 }
 
 /**
@@ -395,11 +407,23 @@ export function runCamelWorkforcePipeline(params: {
     wfRes.mappedScoringWeights,
     36
   );
+  const wfScoreByNum = new Map(wfScoredForWindow.map((s) => [s.number, s.compositeScore]));
   const wfRanked25 = [
-    ...wfRes.recommendedPool,
-    ...wfScoredForWindow.map((s) => s.number).filter((n) => !wfRes.recommendedPool.includes(n))
+    ...wfRes.recommendedPool.map((n, idx) => ({
+      number: n,
+      compositeScore: (wfScoreByNum.get(n) ?? 0.5) + (wfRes.recommendedPool.length - idx) * 0.05
+    })),
+    ...wfScoredForWindow
+      .filter((s) => !wfRes.recommendedPool.includes(s.number))
+      .map((s) => ({ number: s.number, compositeScore: s.compositeScore }))
   ];
-  const wfFunnel = selectFunnelPool30To12(wfRanked25, clampedV);
+  const hasRealDraws = draws.length > 0;
+  const wfFunnel = selectFunnelPool30To12(
+    wfRanked25,
+    clampedV,
+    undefined,
+    hasRealDraws ? 'real_archive_weighted' : 'pure_uniform'
+  );
   const wfProportionalPool = wfFunnel.top12Numbers;
   const wfMs = Math.max(1, Math.round(performance.now() - tWf0));
 
@@ -461,8 +485,13 @@ export function runCamelWorkforcePipeline(params: {
     }
   }
   const geneticScored = scoreAllNumbers(statsMap, geneticWeights, 36);
-  const consensusFunnel = buildConsensusHybridFunnel(wfProportionalPool, geneticScored, clampedV);
-  const antiCrowdFunnel = buildAntiCrowdResonanceFunnel(geneticScored, clampedV);
+  const consensusFunnel = buildConsensusHybridFunnel(
+    wfProportionalPool,
+    geneticScored,
+    clampedV,
+    hasRealDraws
+  );
+  const antiCrowdFunnel = buildAntiCrowdResonanceFunnel(geneticScored, clampedV, hasRealDraws);
   const consensusPool = consensusFunnel.top12Numbers;
   const antiCrowdPool = antiCrowdFunnel.top12Numbers;
   const genMs = Math.max(1, Math.round(performance.now() - tGen0));
@@ -657,8 +686,12 @@ export function runCamelWorkforcePipeline(params: {
       Math.min(35, ((roiClamped + 60) / 180) * 18 + Math.min(17, hitsBonus)).toFixed(1)
     );
     // 4. Monte Carlo Bayesian Urn Resilience (max 10)
+    // Calibrated against the true SuperEnalotto 6/90 theoretical EV on 500 draws (~ -0.69 €/sestina for 1€ play, -1.00 € for SuperStar 1.50€)
     const mcNet = mcSim.weeklySystemPnL.meanSingleDrawNetPerSestina;
-    const mcComponent = Number(Math.max(0, Math.min(10, (mcNet + 1.0) * 5.5)).toFixed(1));
+    const expectedBaselineNet = playMode === 'superstar' ? -1.0 : -0.69;
+    const mcComponent = Number(
+      Math.max(0, Math.min(10, 5.0 + (mcNet - expectedBaselineNet) * 14)).toFixed(1)
+    );
 
     const camelCompositeScore = Number(
       Math.min(
@@ -691,7 +724,7 @@ export function runCamelWorkforcePipeline(params: {
       monteCarloMax: 10,
       monteCarloDetail: `Urna Bayesiana 500 conc.: media ${mcNet >= 0 ? '+' : ''}${mcNet.toFixed(
         2
-      )}€/sestina`
+      )}€/sestina (benchmark teorico ${expectedBaselineNet.toFixed(2)}€)`
     };
 
     const poolReasons = buildPoolNumberReasons(

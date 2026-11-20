@@ -1370,22 +1370,32 @@ export function selectFunnelPool30To12(
 ): FunnelPoolSelectionResult {
   const clampedTargetSize = Math.min(30, Math.max(6, Math.round(targetSize || 12)));
 
-  // Costruiamo la mappa dei pesi reali se disponibili e se non siamo in modalità pura
+  // Estrai i candidati ordinati (e relativi pesi statistici se disponibili)
   const weightMap: Record<number, number> = {};
+  const rankedInputNumbers: number[] = [];
+  const seenInput = new Set<number>();
   let hasVariedScores = false;
   let firstScore: number | null = null;
 
   for (const item of scoredOrRankedInput || []) {
-    if (typeof item === 'object' && item !== null && 'number' in item) {
-      const n = item.number;
-      const rawScore =
+    let n = 0;
+    let rawScore: number | null = null;
+    if (typeof item === 'number') {
+      n = item;
+    } else if (typeof item === 'object' && item !== null && 'number' in item) {
+      n = item.number;
+      rawScore =
         typeof item.compositeScore === 'number'
           ? item.compositeScore
           : typeof (item as { score?: number }).score === 'number'
           ? (item as { score: number }).score
           : 0;
-      if (n >= 1 && n <= 90) {
-        weightMap[n] = 1.0 + Math.max(0, rawScore) * 0.75;
+    }
+    if (Number.isInteger(n) && n >= 1 && n <= 90 && !seenInput.has(n)) {
+      seenInput.add(n);
+      rankedInputNumbers.push(n);
+      if (rawScore !== null) {
+        weightMap[n] = rawScore;
         if (firstScore === null) firstScore = rawScore;
         else if (Math.abs(rawScore - firstScore) > 1e-6) hasVariedScores = true;
       }
@@ -1395,42 +1405,103 @@ export function selectFunnelPool30To12(
   const universe90: number[] = [];
   for (let n = 1; n <= 90; n++) universe90.push(n);
 
-  let pool30: number[];
+  // 1) Costruisci i 25 candidati Statistici/Genetici (se forniti) o casuali se input vuoto
+  const geneticCandidates: number[] = [];
+  if (rankedInputNumbers.length > 0) {
+    for (const n of rankedInputNumbers) {
+      if (geneticCandidates.length >= 25) break;
+      geneticCandidates.push(n);
+    }
+  }
+  if (geneticCandidates.length < 25) {
+    const missingPool = fisherYatesCryptoShuffle(
+      universe90.filter((n) => !geneticCandidates.includes(n))
+    );
+    for (const n of missingPool) {
+      if (geneticCandidates.length >= 25) break;
+      geneticCandidates.push(n);
+    }
+  }
+
+  // 2) Estrai i 5 numeri CAOS dai restanti 65 numeri (1..90 esclusi i 25 candidati) via Fisher-Yates Crypto RNG
+  const geneticSet = new Set(geneticCandidates);
+  const remaining65 = universe90.filter((n) => !geneticSet.has(n));
+  const chaosNumbers = fisherYatesCryptoShuffle(remaining65).slice(0, 5);
+  const chaosSet = new Set(chaosNumbers);
+
+  // 3) Arena completa a 30 candidati (25 Genetici/WF + 5 Caos) che competono TUTTI alla pari per i Top V
+  const pool30 = [...geneticCandidates, ...chaosNumbers];
+
   let top12Numbers: number[];
 
-  if (mode === 'real_archive_weighted' && hasVariedScores) {
-    // Campionamento ponderato senza reinserimento su tutti i 90 numeri (nessun numero escluso, zero vincoli decina)
-    const remaining = [...universe90];
-    const picked30: number[] = [];
-    for (let k = 0; k < 30 && remaining.length > 0; k++) {
+  if (mode === 'real_archive_weighted' && (hasVariedScores || rankedInputNumbers.length >= 25)) {
+    // Normalizza i pesi dei 25 candidati tra [1.0 .. 2.2] e assegna ai 5 Caos un peso competitivo (1.55)
+    // in modo che i Caos competano realmente e possano entrare nel pool finale (~1-3 Caos in media su 12)
+    const geneticRawScores = geneticCandidates.map((n, idx) =>
+      hasVariedScores && typeof weightMap[n] === 'number'
+        ? weightMap[n]
+        : (25 - idx) / 25
+    );
+    const minS = Math.min(...geneticRawScores);
+    const maxS = Math.max(...geneticRawScores);
+    const span = Math.max(1e-6, maxS - minS);
+
+    const arenaWeightMap: Record<number, number> = {};
+    geneticCandidates.forEach((n, idx) => {
+      const norm01 = (geneticRawScores[idx] - minS) / span; // 0..1
+      arenaWeightMap[n] = 1.0 + norm01 * 1.2; // 1.0 .. 2.2
+    });
+    for (const cn of chaosNumbers) {
+      arenaWeightMap[cn] = 1.55; // Competitivo con la fascia medio-alta dei candidati
+    }
+
+    // Campionamento ponderato senza reinserimento su TUTTI e 30 i candidati (25 + 5 Caos)
+    const remaining = [...pool30];
+    const picked: number[] = [];
+    for (let k = 0; k < clampedTargetSize && remaining.length > 0; k++) {
       let totalW = 0;
       for (let i = 0; i < remaining.length; i++) {
-        totalW += weightMap[remaining[i]] ?? 1.0;
+        totalW += arenaWeightMap[remaining[i]] ?? 1.0;
       }
       let thresh = rng() * totalW;
       let chosenIdx = remaining.length - 1;
       for (let i = 0; i < remaining.length; i++) {
-        thresh -= weightMap[remaining[i]] ?? 1.0;
+        thresh -= arenaWeightMap[remaining[i]] ?? 1.0;
         if (thresh <= 0) {
           chosenIdx = i;
           break;
         }
       }
-      picked30.push(remaining[chosenIdx]);
+      picked.push(remaining[chosenIdx]);
       remaining[chosenIdx] = remaining[remaining.length - 1];
       remaining.pop();
     }
-    pool30 = picked30;
-    top12Numbers = picked30.slice(0, clampedTargetSize).sort((a, b) => a - b);
-  } else {
-    // Modalità Equiprobabile Pura (Fisher-Yates con crypto.getRandomValues su 1..90)
-    const shuffled = fisherYatesCryptoShuffle(universe90);
-    pool30 = shuffled.slice(0, 30);
-    top12Numbers = pool30.slice(0, clampedTargetSize).sort((a, b) => a - b);
+    top12Numbers = picked.sort((a, b) => a - b);
+
+    // Calcola score trasparente (60..100 pt) per la visualizzazione nelle card CAMEL
+    const baseScored = scorePool30InPureCompetition(pool30).map((item) => {
+      const w = arenaWeightMap[item.num] ?? 1.0;
+      const normalizedPts = chaosSet.has(item.num)
+        ? 78
+        : Math.round(60 + ((w - 1.0) / 1.2) * 40);
+      return {
+        ...item,
+        score: normalizedPts
+      };
+    });
+
+    return {
+      geneticCandidates,
+      chaosNumbers,
+      pool30,
+      scoredPool: baseScored,
+      top12Numbers
+    };
   }
 
-  const geneticCandidates = pool30.slice(0, 25);
-  const chaosNumbers = pool30.slice(25, 30);
+  // Modalità Equiprobabile Pura: mescola TUTTI e 30 i candidati (inclusi i 5 Caos!) e seleziona Top V
+  const shuffledArena = fisherYatesCryptoShuffle(pool30);
+  top12Numbers = shuffledArena.slice(0, clampedTargetSize).sort((a, b) => a - b);
   const scoredPool = scorePool30InPureCompetition(pool30);
 
   return {

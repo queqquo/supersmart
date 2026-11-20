@@ -278,7 +278,7 @@ test('buildGeneratedColumn, parseManualSestineText, createManualSavedPlay, and a
   assert.equal(updated.result?.netReturn, 100.0);
 });
 
-test('Zero Mock Data & Sisal Schema: public/data/estrazioni_sisal.json is [], validateRealDrawInput & exportEstrazioniSisalJSON enforce strict Sisal schema', async () => {
+test('Zero Mock Data & External Archive Schema: no local heavy draw files in app repo, validateRealDrawInput & exportEstrazioniSisalJSON enforce strict Sisal schema', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
   const { generateFullHistoricalDataset, INITIAL_HISTORICAL_DRAWS } = await import('../data/seedDraws');
@@ -288,10 +288,10 @@ test('Zero Mock Data & Sisal Schema: public/data/estrazioni_sisal.json is [], va
   assert.equal(generateFullHistoricalDataset().length, 0);
   assert.equal(INITIAL_HISTORICAL_DRAWS.length, 0);
 
-  // Verify static public/data/estrazioni_sisal.json is initialized as empty array []
-  const sisalFilePath = path.resolve(process.cwd(), 'public/data/estrazioni_sisal.json');
-  const sisalRawContent = fs.readFileSync(sisalFilePath, 'utf-8').trim();
-  assert.deepEqual(JSON.parse(sisalRawContent), []);
+  // Verify heavy local draw files are removed (hosted in external GitHub repo)
+  assert.equal(fs.existsSync(path.resolve(process.cwd(), 'src/data/officialDraws.json')), false);
+  assert.equal(fs.existsSync(path.resolve(process.cwd(), 'src/data/superenalotto.json')), false);
+  assert.equal(fs.existsSync(path.resolve(process.cwd(), 'src/data/winforitalia.json')), false);
 
   // Valid real draw in official Sisal schema { concorso, data, sestina, jolly, superstar }
   const validRes = validateRealDrawInput({
