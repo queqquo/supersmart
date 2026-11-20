@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Bot,
   Sparkles,
@@ -19,7 +19,8 @@ import {
   Layers,
   Clock,
   Sliders,
-  Info
+  Info,
+  Lock
 } from 'lucide-react';
 import {
   Draw,
@@ -33,11 +34,21 @@ import {
   runCamelWorkforcePipeline,
   CamelWorkforceResult,
   CamelAgentId,
-  CamelPoolNumberReason
+  CamelPoolNumberReason,
+  UserCamelWorkforceRecord
 } from '../utils/camelWorkforce';
 import { getBalancedFunnelUiLabels } from '../utils/combinatorics';
+import {
+  loadUserCamelWorkforce,
+  cacheUserCamelWorkforceLocally,
+  saveUserCamelWorkforce,
+  syncUserCamelWorkforce,
+  getUserCamelStorageKey
+} from '../utils/storage';
+import { subscribeCloudUserCamelWorkforce } from '../utils/firebase';
 
 interface CamelWorkforceLabProps {
+  userEmail: string;
   draws: Draw[];
   filters: FilterOptions;
   coverageTarget: CoverageTarget;
@@ -91,6 +102,7 @@ const TAG_COLOR_BADGE: Record<CamelPoolNumberReason['tagColor'], string> = {
 };
 
 export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
+  userEmail,
   draws,
   filters,
   coverageTarget,
@@ -98,48 +110,195 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
   onApplyToGenerator,
   onSavePlay
 }) => {
+  const initialSavedRecord = useMemo(
+    () => loadUserCamelWorkforce(userEmail),
+    [userEmail]
+  );
+
   const maxHistoricalDraws = Math.max(1, draws.length);
-  const [poolSizeV, setPoolSizeV] = useState<number>(12);
-  const [historicalDrawsWindow, setHistoricalDrawsWindow] = useState<number>(200);
-  const [budgetEuro, setBudgetEuro] = useState<number>(10);
-  const [playMode, setPlayMode] = useState<PlayMode>('pure_coverage');
-  const [workforceResult, setWorkforceResult] = useState<CamelWorkforceResult | null>(null);
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string>('');
+  const [poolSizeV, setPoolSizeV] = useState<number>(
+    () => initialSavedRecord?.poolSizeV ?? 12
+  );
+  const [historicalDrawsWindow, setHistoricalDrawsWindow] = useState<number>(
+    () => initialSavedRecord?.historicalDrawsWindow ?? 200
+  );
+  const [budgetEuro, setBudgetEuro] = useState<number>(
+    () => initialSavedRecord?.budgetEuro ?? 10
+  );
+  const [playMode, setPlayMode] = useState<PlayMode>(
+    () => initialSavedRecord?.playMode ?? 'pure_coverage'
+  );
+  const [localCoverageTarget, setLocalCoverageTarget] = useState<CoverageTarget>(
+    () => initialSavedRecord?.coverageTarget ?? coverageTarget
+  );
+  const [workforceResult, setWorkforceResult] = useState<CamelWorkforceResult | null>(
+    () => initialSavedRecord?.workforceResult ?? null
+  );
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>(
+    () =>
+      initialSavedRecord?.selectedCandidateId ||
+      initialSavedRecord?.workforceResult?.winnerCandidate?.id ||
+      ''
+  );
+  const [lastGeneratedAt, setLastGeneratedAt] = useState<string | null>(
+    () =>
+      initialSavedRecord?.updatedAt ??
+      initialSavedRecord?.workforceResult?.executedAt ??
+      null
+  );
+  const [hasPendingChanges, setHasPendingChanges] = useState<boolean>(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(() => !initialSavedRecord);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
-  const executeWorkforce = (
-    v = poolSizeV,
-    b = budgetEuro,
-    pm = playMode,
-    ct = coverageTarget,
-    hw = historicalDrawsWindow
-  ) => {
-    const safeWindow = Math.min(maxHistoricalDraws, Math.max(1, Math.round(hw || 200)));
+  const lastAppliedTimeRef = useRef<number>(
+    initialSavedRecord ? new Date(initialSavedRecord.updatedAt || 0).getTime() : 0
+  );
+
+  const applySavedRecordToState = (rec: UserCamelWorkforceRecord) => {
+    const recTime = new Date(rec.updatedAt || rec.workforceResult.executedAt || 0).getTime();
+    lastAppliedTimeRef.current = Number.isFinite(recTime) ? recTime : Date.now();
+    setPoolSizeV(rec.poolSizeV);
+    setHistoricalDrawsWindow(rec.historicalDrawsWindow);
+    setBudgetEuro(rec.budgetEuro);
+    setPlayMode(rec.playMode);
+    setLocalCoverageTarget(rec.coverageTarget);
+    setWorkforceResult(rec.workforceResult);
+    setSelectedCandidateId(
+      rec.selectedCandidateId || rec.workforceResult.winnerCandidate.id
+    );
+    setLastGeneratedAt(rec.updatedAt || rec.workforceResult.executedAt);
+    setHasPendingChanges(false);
+  };
+
+  // Synchronize this user's locked CAMEL analysis across LocalStorage, Server, and Cloud Firestore.
+  // NEVER auto-generates numbers on mount, tab change, draws update, or new browser/session/device.
+  useEffect(() => {
+    let active = true;
+    const localRec = loadUserCamelWorkforce(userEmail);
+
+    if (localRec) {
+      applySavedRecordToState(localRec);
+      setIsSyncingCloud(false);
+    } else {
+      lastAppliedTimeRef.current = 0;
+      setIsSyncingCloud(true);
+    }
+
+    syncUserCamelWorkforce(userEmail)
+      .then((syncedRec) => {
+        if (!active) return;
+        if (syncedRec) {
+          const syncedTime = new Date(syncedRec.updatedAt || 0).getTime();
+          if (lastAppliedTimeRef.current === 0 || syncedTime > lastAppliedTimeRef.current) {
+            applySavedRecordToState(syncedRec);
+          }
+        }
+        setIsSyncingCloud(false);
+      })
+      .catch(() => {
+        if (active) setIsSyncingCloud(false);
+      });
+
+    const unsubCloud = subscribeCloudUserCamelWorkforce(userEmail, (cloudRec) => {
+      if (!active || !cloudRec) return;
+      const cloudTime = new Date(cloudRec.updatedAt || 0).getTime();
+      if (lastAppliedTimeRef.current === 0 || cloudTime > lastAppliedTimeRef.current) {
+        cacheUserCamelWorkforceLocally(cloudRec);
+        applySavedRecordToState(cloudRec);
+        setIsSyncingCloud(false);
+      }
+    });
+
+    const storageKey = getUserCamelStorageKey(userEmail);
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (!active) return;
+      if (e.key && e.key !== storageKey) return;
+      const updatedLocal = loadUserCamelWorkforce(userEmail);
+      if (updatedLocal) {
+        const updatedTime = new Date(updatedLocal.updatedAt || 0).getTime();
+        if (lastAppliedTimeRef.current === 0 || updatedTime > lastAppliedTimeRef.current) {
+          applySavedRecordToState(updatedLocal);
+          setIsSyncingCloud(false);
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
+
+    return () => {
+      active = false;
+      unsubCloud();
+      window.removeEventListener('storage', handleStorageEvent);
+    };
+  }, [userEmail]);
+
+  const markPendingChanges = () => {
+    if (workforceResult) {
+      setHasPendingChanges(true);
+    }
+  };
+
+  // Explicit generation ONLY when user clicks "Estrai Nuovi N Numeri Equi"
+  const executeWorkforce = () => {
+    const safeWindow = Math.min(
+      maxHistoricalDraws,
+      Math.max(1, Math.round(historicalDrawsWindow || 200))
+    );
+    setHistoricalDrawsWindow(safeWindow);
     setIsRunning(true);
     setTimeout(() => {
       const res = runCamelWorkforcePipeline({
         draws,
-        poolSizeV: v,
+        poolSizeV,
         historicalDrawsWindow: safeWindow,
-        budgetEuro: b,
-        playMode: pm,
-        coverageTarget: ct,
+        budgetEuro,
+        playMode,
+        coverageTarget: localCoverageTarget,
         baseFilters: filters
       });
+      const nowIso = res.executedAt || new Date().toISOString();
+      lastAppliedTimeRef.current = new Date(nowIso).getTime();
       setWorkforceResult(res);
       setSelectedCandidateId(res.winnerCandidate.id);
+      setLastGeneratedAt(nowIso);
+      setHasPendingChanges(false);
+      setIsSyncingCloud(false);
       setIsRunning(false);
       setSavedSuccess(false);
+
+      saveUserCamelWorkforce({
+        userEmail,
+        updatedAt: nowIso,
+        poolSizeV,
+        historicalDrawsWindow: safeWindow,
+        budgetEuro,
+        playMode,
+        coverageTarget: localCoverageTarget,
+        selectedCandidateId: res.winnerCandidate.id,
+        workforceResult: res
+      });
     }, 20);
   };
 
-  useEffect(() => {
-    if (draws.length > 0 && !workforceResult) {
-      executeWorkforce(poolSizeV, budgetEuro, playMode, coverageTarget, 200);
+  const handleSelectCandidate = (candidateId: string) => {
+    setSelectedCandidateId(candidateId);
+    if (workforceResult) {
+      const existingLocal = loadUserCamelWorkforce(userEmail);
+      cacheUserCamelWorkforceLocally({
+        userEmail,
+        updatedAt: existingLocal?.updatedAt || lastGeneratedAt || workforceResult.executedAt,
+        poolSizeV: existingLocal?.poolSizeV ?? workforceResult.poolSizeV,
+        historicalDrawsWindow:
+          existingLocal?.historicalDrawsWindow ?? workforceResult.historicalDrawsWindow,
+        budgetEuro: existingLocal?.budgetEuro ?? workforceResult.budgetEuro,
+        playMode: existingLocal?.playMode ?? workforceResult.playMode,
+        coverageTarget: existingLocal?.coverageTarget ?? workforceResult.coverageTarget,
+        selectedCandidateId: candidateId,
+        workforceResult
+      });
     }
-  }, [draws.length]);
+  };
 
   const activeCandidate =
     workforceResult?.candidates.find((c) => c.id === selectedCandidateId) ||
@@ -153,7 +312,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
       ...workforceResult.readyPreset,
       id: `camel-preset-${Date.now()}`,
       appliedAt: new Date().toISOString(),
-      coverageTarget,
+      coverageTarget: workforceResult.coverageTarget,
       highProbabilityNumbers: bestCol0
         ? [
             bestCol0.numbers[0],
@@ -225,6 +384,22 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30">
                 Synology DS215+ Ready (Zero-RAM Overhead)
               </span>
+              {workforceResult && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  <span>
+                    Bloccato per {userEmail}
+                    {lastGeneratedAt
+                      ? ` • ${new Date(lastGeneratedAt).toLocaleString('it-IT', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}`
+                      : ''}
+                  </span>
+                </span>
+              )}
             </div>
             <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">
               Sistema Multi-Agente CAMEL per Sistemi Ridotti Ottimali
@@ -238,9 +413,11 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
 
           <button
             type="button"
-            onClick={() => executeWorkforce()}
+            onClick={executeWorkforce}
             disabled={isRunning}
-            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-sm shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer shrink-0 transition-all active:scale-95"
+            className={`px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-sm shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer shrink-0 transition-all active:scale-95 ${
+              hasPendingChanges ? 'ring-2 ring-amber-300 ring-offset-2 ring-offset-slate-950' : ''
+            }`}
           >
             <Play className="w-4 h-4 fill-slate-950" />
             <span>
@@ -294,13 +471,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                       type="button"
                       onClick={() => {
                         setHistoricalDrawsWindow(clampedPreset);
-                        executeWorkforce(
-                          poolSizeV,
-                          budgetEuro,
-                          playMode,
-                          coverageTarget,
-                          clampedPreset
-                        );
+                        markPendingChanges();
                       }}
                       className={`px-2 py-1 rounded text-xs font-mono font-bold cursor-pointer transition-colors ${
                         isActive
@@ -319,7 +490,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                 <input
                   type="range"
                   min={1}
-                  max={maxHistoricalDraws}
+                  max={Math.max(maxHistoricalDraws, historicalDrawsWindow)}
                   value={historicalDrawsWindow}
                   onChange={(e) => {
                     const nextVal = Math.min(
@@ -327,58 +498,22 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                       Math.max(1, Number(e.target.value) || 1)
                     );
                     setHistoricalDrawsWindow(nextVal);
+                    markPendingChanges();
                   }}
-                  onMouseUp={() =>
-                    executeWorkforce(
-                      poolSizeV,
-                      budgetEuro,
-                      playMode,
-                      coverageTarget,
-                      historicalDrawsWindow
-                    )
-                  }
-                  onTouchEnd={() =>
-                    executeWorkforce(
-                      poolSizeV,
-                      budgetEuro,
-                      playMode,
-                      coverageTarget,
-                      historicalDrawsWindow
-                    )
-                  }
                   className="w-24 sm:w-32 accent-indigo-500 cursor-pointer"
                   title="Trascina per scegliere il numero di estrazioni storiche (da 1 al massimo storico)"
                 />
                 <input
                   type="number"
                   min={1}
-                  max={maxHistoricalDraws}
+                  max={Math.max(maxHistoricalDraws, historicalDrawsWindow)}
                   value={historicalDrawsWindow}
                   onChange={(e) => {
                     const raw = parseInt(e.target.value, 10);
                     if (Number.isNaN(raw)) return;
                     const clamped = Math.min(maxHistoricalDraws, Math.max(1, raw));
                     setHistoricalDrawsWindow(clamped);
-                  }}
-                  onBlur={() =>
-                    executeWorkforce(
-                      poolSizeV,
-                      budgetEuro,
-                      playMode,
-                      coverageTarget,
-                      historicalDrawsWindow
-                    )
-                  }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      executeWorkforce(
-                        poolSizeV,
-                        budgetEuro,
-                        playMode,
-                        coverageTarget,
-                        historicalDrawsWindow
-                      );
-                    }
+                    markPendingChanges();
                   }}
                   className="w-16 bg-slate-950 text-amber-300 font-mono font-bold text-xs px-2 py-1 rounded border border-slate-700 text-center focus:outline-none focus:border-indigo-400"
                 />
@@ -400,13 +535,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                     type="button"
                     onClick={() => {
                       setPoolSizeV(v);
-                      executeWorkforce(
-                        v,
-                        budgetEuro,
-                        playMode,
-                        coverageTarget,
-                        historicalDrawsWindow
-                      );
+                      markPendingChanges();
                     }}
                     className={`px-2 py-1 rounded text-xs font-mono font-bold cursor-pointer ${
                       poolSizeV === v
@@ -430,13 +559,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                     type="button"
                     onClick={() => {
                       setBudgetEuro(b);
-                      executeWorkforce(
-                        poolSizeV,
-                        b,
-                        playMode,
-                        coverageTarget,
-                        historicalDrawsWindow
-                      );
+                      markPendingChanges();
                     }}
                     className={`px-2 py-1 rounded text-xs font-mono font-bold cursor-pointer ${
                       budgetEuro === b
@@ -457,17 +580,12 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    setLocalCoverageTarget('terni');
                     onUpdateCoverageTarget('terni');
-                    executeWorkforce(
-                      poolSizeV,
-                      budgetEuro,
-                      playMode,
-                      'terni',
-                      historicalDrawsWindow
-                    );
+                    markPendingChanges();
                   }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
-                    coverageTarget === 'terni'
+                    localCoverageTarget === 'terni'
                       ? 'bg-sky-500 text-slate-950 font-extrabold'
                       : 'bg-slate-900 text-slate-400 hover:text-white'
                   }`}
@@ -477,17 +595,12 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    setLocalCoverageTarget('ambi');
                     onUpdateCoverageTarget('ambi');
-                    executeWorkforce(
-                      poolSizeV,
-                      budgetEuro,
-                      playMode,
-                      'ambi',
-                      historicalDrawsWindow
-                    );
+                    markPendingChanges();
                   }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
-                    coverageTarget === 'ambi'
+                    localCoverageTarget === 'ambi'
                       ? 'bg-amber-500 text-slate-950 font-extrabold'
                       : 'bg-slate-900 text-slate-400 hover:text-white'
                   }`}
@@ -505,13 +618,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                   type="button"
                   onClick={() => {
                     setPlayMode('pure_coverage');
-                    executeWorkforce(
-                      poolSizeV,
-                      budgetEuro,
-                      'pure_coverage',
-                      coverageTarget,
-                      historicalDrawsWindow
-                    );
+                    markPendingChanges();
                   }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
                     playMode === 'pure_coverage'
@@ -525,13 +632,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                   type="button"
                   onClick={() => {
                     setPlayMode('superstar');
-                    executeWorkforce(
-                      poolSizeV,
-                      budgetEuro,
-                      'superstar',
-                      coverageTarget,
-                      historicalDrawsWindow
-                    );
+                    markPendingChanges();
                   }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer ${
                     playMode === 'superstar'
@@ -544,8 +645,68 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
               </div>
             </div>
           </div>
+
+          {hasPendingChanges && workforceResult && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Parametri modificati: i numeri e le analisi CAMEL attuali restano bloccati per{' '}
+                  <strong>{userEmail}</strong> (anche su altri browser o dispositivi) finché non
+                  clicchi su <strong>{getBalancedFunnelUiLabels(poolSizeV).recalcButton}</strong>.
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {!workforceResult && isSyncingCloud && (
+        <div className="bg-slate-900/90 border border-indigo-500/30 rounded-2xl p-8 text-center space-y-2 shadow-lg">
+          <div className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+            <Bot className="w-6 h-6 animate-pulse" />
+          </div>
+          <h3 className="text-base font-bold text-white">
+            Sincronizzazione analisi CAMEL dal cloud...
+          </h3>
+          <p className="text-xs text-slate-400 max-w-lg mx-auto">
+            Recupero degli ultimi numeri bloccati per <strong>{userEmail}</strong> così da
+            mantenerli identici su ogni browser, sessione o dispositivo senza rigenerarli.
+          </p>
+        </div>
+      )}
+
+      {!workforceResult && !isSyncingCloud && (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center space-y-4 shadow-lg">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            <Lock className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-extrabold text-white">
+              Nessuna analisi CAMEL generata per {userEmail}
+            </h3>
+            <p className="text-xs text-slate-400 max-w-xl mx-auto">
+              I numeri e le analisi CAMEL non vengono mai rigenerati automaticamente al cambio
+              sezione o all&apos;accesso da altri browser/dispositivi. Imposta i parametri qui sopra
+              e clicca su <strong>{getBalancedFunnelUiLabels(poolSizeV).recalcButton}</strong> per
+              avviare la Workforce e bloccare i risultati nel cloud.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={executeWorkforce}
+            disabled={isRunning}
+            className="mx-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-sm shadow-xl shadow-amber-500/20 inline-flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+          >
+            <Play className="w-4 h-4 fill-slate-950" />
+            <span>
+              {isRunning
+                ? 'Agenti in Esecuzione...'
+                : getBalancedFunnelUiLabels(poolSizeV).recalcButton}
+            </span>
+          </button>
+        </div>
+      )}
 
       {workforceResult && (
         <>
@@ -679,7 +840,7 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
                     return (
                       <div
                         key={cand.id}
-                        onClick={() => setSelectedCandidateId(cand.id)}
+                        onClick={() => handleSelectCandidate(cand.id)}
                         className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2.5 flex flex-col justify-between ${
                           isSelected
                             ? 'bg-slate-950 border-amber-400 ring-2 ring-amber-400/20 shadow-lg'

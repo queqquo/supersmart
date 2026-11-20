@@ -525,4 +525,21 @@ test('runCamelWorkforcePipeline works cleanly both with empty archive (Equiproba
   const labels12 = getBalancedFunnelUiLabels(12);
   assert.equal(labels12.title, 'Selezione Equa 12 Numeri (Fisher-Yates Crypto RNG)');
   assert.equal(labels12.recalcButton, 'Estrai Nuovi 12 Numeri Equi');
+
+  const { compactCamelWorkforceResult, hydrateCamelWorkforceResult } = await import(
+    './camelWorkforce'
+  );
+  const compacted = compactCamelWorkforceResult(resEmpty);
+  assert.equal(compacted.winnerCandidateId, resEmpty.winnerCandidate.id);
+  const hydrated = hydrateCamelWorkforceResult(JSON.parse(JSON.stringify(compacted)));
+  assert.ok(hydrated);
+  assert.equal(hydrated.runId, resEmpty.runId);
+  assert.equal(hydrated.agents.length, 5);
+  assert.equal(hydrated.candidates.length, 3);
+  assert.equal(hydrated.winnerCandidate.id, resEmpty.winnerCandidate.id);
+  assert.deepEqual(hydrated.winnerCandidate.poolNumbers, resEmpty.winnerCandidate.poolNumbers);
+  assert.deepEqual(
+    hydrated.winnerCandidate.systemResult.columns,
+    resEmpty.winnerCandidate.systemResult.columns
+  );
 });

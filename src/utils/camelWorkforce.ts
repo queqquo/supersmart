@@ -147,6 +147,193 @@ export interface CamelWorkforceResult {
   aiSynthesisComment?: string;
 }
 
+export interface PersistedCamelWorkforceResult
+  extends Omit<CamelWorkforceResult, 'agents' | 'winnerCandidate'> {
+  winnerCandidateId: string;
+}
+
+export interface UserCamelWorkforceRecord {
+  userEmail: string;
+  updatedAt: string;
+  poolSizeV: number;
+  historicalDrawsWindow: number;
+  budgetEuro: number;
+  playMode: PlayMode;
+  coverageTarget: CoverageTarget;
+  selectedCandidateId?: string;
+  workforceResult: CamelWorkforceResult;
+}
+
+/**
+ * Compact a CamelWorkforceResult for lightweight cross-browser persistence (localStorage, Server, Cloud Firestore).
+ * Strips static agent profiles, duplicate winnerCandidate object, and large historical winningContests arrays
+ * while preserving 100% of the numbers, sestine, score breakdowns, pool reasons, tierCounts, and dialogue transcript.
+ */
+export function compactCamelWorkforceResult(
+  result: CamelWorkforceResult
+): PersistedCamelWorkforceResult {
+  const { agents: _agents, winnerCandidate, candidates, ...rest } = result;
+  const compactCandidates: CamelSystemCandidate[] = candidates.map((cand) => ({
+    ...cand,
+    historicalBacktest: {
+      ...cand.historicalBacktest,
+      winningContests: []
+    }
+  }));
+
+  return {
+    ...rest,
+    candidates: compactCandidates,
+    winnerCandidateId: winnerCandidate?.id || compactCandidates[0]?.id || ''
+  };
+}
+
+/**
+ * Re-hydrate a persisted (compact or full) CamelWorkforceResult back into a complete CamelWorkforceResult.
+ */
+export function hydrateCamelWorkforceResult(raw: unknown): CamelWorkforceResult | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Partial<CamelWorkforceResult & PersistedCamelWorkforceResult>;
+
+  if (!Array.isArray(obj.candidates) || obj.candidates.length === 0) {
+    return null;
+  }
+
+  const validCandidates: CamelSystemCandidate[] = [];
+  for (const cand of obj.candidates) {
+    if (
+      !cand ||
+      typeof cand !== 'object' ||
+      typeof cand.id !== 'string' ||
+      !Array.isArray(cand.poolNumbers) ||
+      !cand.systemResult ||
+      !Array.isArray(cand.systemResult.columns) ||
+      cand.systemResult.columns.length === 0
+    ) {
+      continue;
+    }
+    validCandidates.push({
+      ...cand,
+      chaosNumbersInjected: Array.isArray(cand.chaosNumbersInjected)
+        ? cand.chaosNumbersInjected
+        : [],
+      poolReasons: Array.isArray(cand.poolReasons) ? cand.poolReasons : [],
+      historicalBacktest: cand.historicalBacktest
+        ? {
+            ...cand.historicalBacktest,
+            winningContests: Array.isArray(cand.historicalBacktest.winningContests)
+              ? cand.historicalBacktest.winningContests
+              : []
+          }
+        : {
+            totalContestsEvaluated: 0,
+            sestineCount: cand.systemResult.columns.length,
+            costPerContest: cand.systemResult.columns.length,
+            totalHistoricalCost: 0,
+            totalEstimatedGrossWinnings: 0,
+            netHistoricalPnL: 0,
+            historicalRoiPct: 0,
+            averageAntiCrowdMultiplier: 1,
+            totalWinningContests: 0,
+            tierCounts: {
+              points2: 0,
+              points3: 0,
+              points4: 0,
+              points5: 0,
+              points5plus1: 0,
+              points6: 0,
+              superstarHits: 0
+            },
+            winningContests: [],
+            executionTimeMs: 0
+          }
+    });
+  }
+
+  if (validCandidates.length === 0) return null;
+
+  const winnerId =
+    typeof obj.winnerCandidateId === 'string' && obj.winnerCandidateId
+      ? obj.winnerCandidateId
+      : obj.winnerCandidate?.id || validCandidates[0].id;
+  const winnerCandidate =
+    validCandidates.find((c) => c.id === winnerId) || validCandidates[0];
+
+  const agents =
+    Array.isArray(obj.agents) && obj.agents.length > 0 ? obj.agents : CAMEL_AGENTS_ROSTER;
+  const dialogueTranscript = Array.isArray(obj.dialogueTranscript)
+    ? obj.dialogueTranscript
+    : [];
+
+  const poolSizeV =
+    typeof obj.poolSizeV === 'number' ? obj.poolSizeV : winnerCandidate.poolNumbers.length;
+  const historicalDrawsWindow =
+    typeof obj.historicalDrawsWindow === 'number' ? obj.historicalDrawsWindow : 200;
+  const maxHistoricalDraws =
+    typeof obj.maxHistoricalDraws === 'number' ? obj.maxHistoricalDraws : historicalDrawsWindow;
+  const budgetEuro =
+    typeof obj.budgetEuro === 'number' ? obj.budgetEuro : winnerCandidate.systemResult.columns.length;
+  const playMode: PlayMode =
+    obj.playMode === 'superstar' || obj.playMode === 'manual' ? obj.playMode : 'pure_coverage';
+  const coverageTarget: CoverageTarget = obj.coverageTarget === 'ambi' ? 'ambi' : 'terni';
+  const targetColumnsCount =
+    typeof obj.targetColumnsCount === 'number'
+      ? obj.targetColumnsCount
+      : winnerCandidate.systemResult.columns.length;
+
+  const bestCol0 = winnerCandidate.systemResult.columns[0];
+  const fallbackPreset: SimulationGeneratorPreset = {
+    id: `camel-preset-${obj.runId || 'hydrated'}`,
+    appliedAt: obj.executedAt || new Date().toISOString(),
+    simulatedDrawsCount: historicalDrawsWindow,
+    methodology: 'bayesian_hybrid_urn',
+    coverageTarget,
+    highProbabilityNumbers:
+      bestCol0 && bestCol0.numbers.length >= 6
+        ? [
+            bestCol0.numbers[0],
+            bestCol0.numbers[1],
+            bestCol0.numbers[2],
+            bestCol0.numbers[3],
+            bestCol0.numbers[4],
+            bestCol0.numbers[5]
+          ]
+        : undefined,
+    top12PoolNumbers: winnerCandidate.poolNumbers,
+    recommendedWeights: winnerCandidate.weightsUsed,
+    recommendedFilters: winnerCandidate.filtersUsed,
+    confidenceIndex: winnerCandidate.camelCompositeScore,
+    enforceTenEuroBudget: false,
+    sourceLabel: `CAMEL Workforce (${historicalDrawsWindow} estrazioni) • ${winnerCandidate.strategyName} (Score ${winnerCandidate.camelCompositeScore}/100)`
+  };
+
+  return {
+    runId: typeof obj.runId === 'string' ? obj.runId : `camel-run-hydrated`,
+    executedAt: typeof obj.executedAt === 'string' ? obj.executedAt : new Date().toISOString(),
+    totalExecutionTimeMs:
+      typeof obj.totalExecutionTimeMs === 'number' ? obj.totalExecutionTimeMs : 1,
+    poolSizeV,
+    historicalDrawsWindow,
+    maxHistoricalDraws,
+    lowNumbersCount:
+      typeof obj.lowNumbersCount === 'number' ? obj.lowNumbersCount : Math.round(poolSizeV / 3),
+    highNumbersCount:
+      typeof obj.highNumbersCount === 'number'
+        ? obj.highNumbersCount
+        : poolSizeV - Math.round(poolSizeV / 3),
+    budgetEuro,
+    playMode,
+    coverageTarget,
+    targetColumnsCount,
+    agents,
+    dialogueTranscript,
+    candidates: validCandidates,
+    winnerCandidate,
+    readyPreset: obj.readyPreset || fallbackPreset,
+    aiSynthesisComment: obj.aiSynthesisComment
+  };
+}
+
 export const CAMEL_AGENTS_ROSTER: CamelAgentProfile[] = [
   {
     id: 'coordinator',

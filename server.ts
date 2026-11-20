@@ -248,16 +248,18 @@ function removeUserRecordByAdmin(
   return ensureAdminInACL(acl).filter((r) => normalizeEmail(r.email) !== normTarget);
 }
 
-// Persistent server ACL, Plays, Deleted Play Tombstones, Per-User Systems, and Per-User Simulations state
+// Persistent server ACL, Plays, Deleted Play Tombstones, Per-User Systems, Simulations, and CAMEL Workforce state
 const PLAYS_FILE_PATH = path.join(DATA_DIR, 'plays.json');
 const DELETED_PLAYS_FILE_PATH = path.join(DATA_DIR, 'deleted_plays.json');
 const USER_SYSTEMS_FILE_PATH = path.join(DATA_DIR, 'user_systems.json');
 const USER_SIMULATIONS_FILE_PATH = path.join(DATA_DIR, 'user_simulations.json');
+const USER_CAMEL_FILE_PATH = path.join(DATA_DIR, 'user_camel.json');
 let memoryACL: UserAccessRecord[] = createInitialACL();
 let memoryPlays: Record<string, unknown>[] = [];
 let memoryDeletedPlayIds: Set<string> = new Set(['play-manual-1793562659204']);
 let memoryUserSystems: Record<string, Record<string, unknown>> = {};
 let memoryUserSimulations: Record<string, Record<string, unknown>> = {};
+let memoryUserCamel: Record<string, Record<string, unknown>> = {};
 
 function ensureDataDir(): void {
   try {
@@ -431,6 +433,40 @@ function writeServerUserSimulations(
   return memoryUserSimulations;
 }
 
+function readServerUserCamel(): Record<string, Record<string, unknown>> {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(USER_CAMEL_FILE_PATH)) {
+      const raw = fs.readFileSync(USER_CAMEL_FILE_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        memoryUserCamel = parsed;
+        return memoryUserCamel;
+      }
+    }
+  } catch (err) {
+    console.warn('Using in-memory UserCamel fallback:', err);
+  }
+  return memoryUserCamel;
+}
+
+function writeServerUserCamel(
+  records: Record<string, Record<string, unknown>>
+): Record<string, Record<string, unknown>> {
+  memoryUserCamel = records && typeof records === 'object' ? records : {};
+  ensureDataDir();
+  try {
+    fs.writeFileSync(
+      USER_CAMEL_FILE_PATH,
+      JSON.stringify(memoryUserCamel, null, 2),
+      'utf8'
+    );
+  } catch {
+    // Keep in memoryUserCamel if filesystem is read-only
+  }
+  return memoryUserCamel;
+}
+
 async function startServer() {
   const app = express();
   const httpServer = http.createServer(app);
@@ -441,6 +477,7 @@ async function startServer() {
   writeServerPlays(readServerPlays());
   readServerUserSystems();
   readServerUserSimulations();
+  readServerUserCamel();
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
@@ -485,6 +522,28 @@ async function startServer() {
     };
     writeServerUserSimulations(sims);
     res.json({ record: sims[emailKey] });
+  });
+
+  // --- Per-User CAMEL Workforce Endpoints ---
+  app.get('/api/user-camel/:email', (req, res) => {
+    const emailKey = normalizeEmail(req.params.email);
+    const camelRecords = readServerUserCamel();
+    res.json({ record: camelRecords[emailKey] || null });
+  });
+
+  app.put('/api/user-camel/:email', (req, res) => {
+    const emailKey = normalizeEmail(req.params.email);
+    const record = req.body?.record;
+    if (!emailKey || !record || typeof record !== 'object') {
+      res.status(400).json({ error: 'Analisi CAMEL utente non valida.' });
+      return;
+    }
+    const camelRecords = {
+      ...readServerUserCamel(),
+      [emailKey]: { ...record, userEmail: emailKey }
+    };
+    writeServerUserCamel(camelRecords);
+    res.json({ record: camelRecords[emailKey] });
   });
 
   // --- Shared Zero-Cost Plays History Endpoints ---

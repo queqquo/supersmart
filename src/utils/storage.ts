@@ -27,8 +27,15 @@ import {
   fetchCloudUserSystem,
   upsertCloudUserSystem,
   fetchCloudUserSimulation,
-  upsertCloudUserSimulation
+  upsertCloudUserSimulation,
+  fetchCloudUserCamelWorkforce,
+  upsertCloudUserCamelWorkforce
 } from './firebase';
+import {
+  UserCamelWorkforceRecord,
+  compactCamelWorkforceResult,
+  hydrateCamelWorkforceResult
+} from './camelWorkforce';
 
 const STORAGE_KEYS = {
   DRAWS: 'superenalotto_real_draws_v1',
@@ -38,7 +45,8 @@ const STORAGE_KEYS = {
   FILTERS: 'superenalotto_filter_options_v2',
   PIGGYBANK: 'superenalotto_piggybank_balance',
   USER_SYSTEM_PREFIX: 'superenalotto_user_system_v1_',
-  USER_SIMULATION_PREFIX: 'superenalotto_user_simulation_v1_'
+  USER_SIMULATION_PREFIX: 'superenalotto_user_simulation_v1_',
+  USER_CAMEL_PREFIX: 'superenalotto_user_camel_v1_'
 };
 
 function normalizeUserEmailKey(email: string): string {
@@ -279,6 +287,183 @@ export async function syncUserSimulationState(
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ record: best })
+    }).catch(() => {});
+  }
+
+  return best;
+}
+
+// ============================================================================
+// PER-USER CAMEL WORKFORCE PERSISTENCE (LocalStorage + Server + Cloud Firestore)
+// Ensures CAMEL numbers & analyses NEVER regenerate on tab switch or across
+// browsers, sessions, or devices — only on explicit "Estrai Nuovi N Numeri Equi".
+// ============================================================================
+
+export function getUserCamelStorageKey(userEmail: string): string {
+  return `${STORAGE_KEYS.USER_CAMEL_PREFIX}${normalizeUserEmailKey(userEmail)}`;
+}
+
+function normalizeStoredCamelRecord(
+  raw: unknown,
+  expectedEmail: string
+): UserCamelWorkforceRecord | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const recordEmail = normalizeUserEmailKey(String(obj.userEmail || ''));
+  if (!recordEmail || recordEmail !== expectedEmail) return null;
+
+  const hydrated = hydrateCamelWorkforceResult(obj.workforceResult);
+  if (!hydrated) return null;
+
+  const updatedAt =
+    typeof obj.updatedAt === 'string' && obj.updatedAt
+      ? obj.updatedAt
+      : hydrated.executedAt || new Date().toISOString();
+
+  return {
+    userEmail: expectedEmail,
+    updatedAt,
+    poolSizeV: typeof obj.poolSizeV === 'number' ? obj.poolSizeV : hydrated.poolSizeV,
+    historicalDrawsWindow:
+      typeof obj.historicalDrawsWindow === 'number'
+        ? obj.historicalDrawsWindow
+        : hydrated.historicalDrawsWindow,
+    budgetEuro: typeof obj.budgetEuro === 'number' ? obj.budgetEuro : hydrated.budgetEuro,
+    playMode:
+      obj.playMode === 'superstar' ||
+      obj.playMode === 'pure_coverage' ||
+      obj.playMode === 'manual'
+        ? obj.playMode
+        : hydrated.playMode,
+    coverageTarget:
+      obj.coverageTarget === 'ambi' || obj.coverageTarget === 'terni'
+        ? obj.coverageTarget
+        : hydrated.coverageTarget,
+    selectedCandidateId:
+      typeof obj.selectedCandidateId === 'string' && obj.selectedCandidateId
+        ? obj.selectedCandidateId
+        : hydrated.winnerCandidate.id,
+    workforceResult: hydrated
+  };
+}
+
+function serializeCamelRecordForStorage(record: UserCamelWorkforceRecord) {
+  const emailKey = normalizeUserEmailKey(record.userEmail);
+  return {
+    userEmail: emailKey,
+    updatedAt: record.updatedAt || record.workforceResult.executedAt || new Date().toISOString(),
+    poolSizeV: record.poolSizeV,
+    historicalDrawsWindow: record.historicalDrawsWindow,
+    budgetEuro: record.budgetEuro,
+    playMode: record.playMode,
+    coverageTarget: record.coverageTarget,
+    selectedCandidateId:
+      record.selectedCandidateId || record.workforceResult.winnerCandidate.id,
+    workforceResult: compactCamelWorkforceResult(record.workforceResult)
+  };
+}
+
+export function loadUserCamelWorkforce(userEmail: string): UserCamelWorkforceRecord | null {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  if (!emailKey) return null;
+  try {
+    const raw = localStorage.getItem(getUserCamelStorageKey(emailKey));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return normalizeStoredCamelRecord(parsed, emailKey);
+    }
+  } catch (e) {
+    console.warn('Error loading user CAMEL workforce from localStorage:', e);
+  }
+  return null;
+}
+
+export function cacheUserCamelWorkforceLocally(record: UserCamelWorkforceRecord): void {
+  const emailKey = normalizeUserEmailKey(record?.userEmail);
+  if (!emailKey || !record?.workforceResult) return;
+  try {
+    const compactPayload = serializeCamelRecordForStorage(record);
+    localStorage.setItem(getUserCamelStorageKey(emailKey), JSON.stringify(compactPayload));
+  } catch (e) {
+    console.error('Error caching user CAMEL workforce locally:', e);
+  }
+}
+
+export function saveUserCamelWorkforce(record: UserCamelWorkforceRecord): void {
+  const emailKey = normalizeUserEmailKey(record?.userEmail);
+  if (!emailKey || !record?.workforceResult) return;
+  const normalizedRecord: UserCamelWorkforceRecord = {
+    ...record,
+    userEmail: emailKey,
+    updatedAt: record.updatedAt || new Date().toISOString()
+  };
+  cacheUserCamelWorkforceLocally(normalizedRecord);
+  upsertCloudUserCamelWorkforce(normalizedRecord).catch(() => {});
+  const compactPayload = serializeCamelRecordForStorage(normalizedRecord);
+  fetch(`/api/user-camel/${encodeURIComponent(emailKey)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ record: compactPayload })
+  }).catch(() => {
+    // Ignore if offline or static deployment (Cloud Firestore handles cross-browser sync)
+  });
+}
+
+export async function syncUserCamelWorkforce(
+  userEmail: string
+): Promise<UserCamelWorkforceRecord | null> {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  if (!emailKey) return null;
+
+  const localRecord = loadUserCamelWorkforce(emailKey);
+
+  const [cloudRecord, serverRecord] = await Promise.all([
+    fetchCloudUserCamelWorkforce(emailKey),
+    fetch(`/api/user-camel/${encodeURIComponent(emailKey)}`)
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const data = await res.json();
+        return normalizeStoredCamelRecord(data?.record, emailKey);
+      })
+      .catch(() => null)
+  ]);
+
+  const candidates = [localRecord, serverRecord, cloudRecord].filter(
+    (r): r is UserCamelWorkforceRecord =>
+      Boolean(
+        r &&
+          normalizeUserEmailKey(r.userEmail) === emailKey &&
+          r.workforceResult &&
+          Array.isArray(r.workforceResult.candidates) &&
+          r.workforceResult.candidates.length > 0
+      )
+  );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort(
+    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+  );
+  const best = candidates[0];
+
+  cacheUserCamelWorkforceLocally(best);
+
+  const bestTime = new Date(best.updatedAt || 0).getTime();
+  const cloudTime = new Date(cloudRecord?.updatedAt || 0).getTime();
+  const serverTime = new Date(serverRecord?.updatedAt || 0).getTime();
+
+  if (!cloudRecord || bestTime > cloudTime) {
+    await upsertCloudUserCamelWorkforce(best);
+  }
+
+  if (!serverRecord || bestTime > serverTime) {
+    const compactPayload = serializeCamelRecordForStorage(best);
+    fetch(`/api/user-camel/${encodeURIComponent(emailKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record: compactPayload })
     }).catch(() => {});
   }
 

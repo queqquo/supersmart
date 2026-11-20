@@ -529,6 +529,8 @@ export default function App() {
 
         {activeTab === 'camel' && (
           <CamelWorkforceLab
+            key={session.email.toLowerCase()}
+            userEmail={session.email}
             draws={draws}
             filters={filters}
             coverageTarget={coverageTarget}

@@ -26,6 +26,11 @@ import {
   UserSimulationStateRecord
 } from '../types/lottery';
 import { UserAccessRecord, normalizeEmail, isPrimaryAdmin } from './auth';
+import {
+  UserCamelWorkforceRecord,
+  compactCamelWorkforceResult,
+  hydrateCamelWorkforceResult
+} from './camelWorkforce';
 
 export enum OperationType {
   CREATE = 'create',
@@ -785,6 +790,160 @@ export function subscribeCloudUserSimulation(
     },
     (error) => {
       handleFirestoreError(error, OperationType.GET, `user_simulations/${emailKey}`);
+    }
+  );
+}
+
+// ============================================================================
+// 6. PER-USER CAMEL WORKFORCE CLOUD PERSISTENCE (/user_systems/camel::{emailKey})
+//    Reuses the deployed user_systems collection with a disjoint `camel::` doc key
+//    and top-level winner `systemResult` so deployed Firestore rules accept writes
+//    immediately across browsers, sessions, and devices.
+// ============================================================================
+
+const CAMEL_CLOUD_DOC_PREFIX = 'camel::';
+
+function getCamelCloudDocId(userEmail: string): string {
+  const emailKey = normalizeEmail(userEmail);
+  if (!emailKey) return '';
+  const docId = `${CAMEL_CLOUD_DOC_PREFIX}${emailKey}`;
+  return docId.length <= 254 ? docId : '';
+}
+
+function parseCloudCamelDoc(
+  data: Record<string, unknown> | undefined,
+  expectedEmail: string
+): UserCamelWorkforceRecord | null {
+  if (!data || typeof data !== 'object') return null;
+  const rawOwner =
+    typeof data.ownerEmail === 'string'
+      ? data.ownerEmail
+      : typeof data.userEmail === 'string'
+      ? data.userEmail.replace(/^camel::/, '')
+      : '';
+  const ownerEmail = normalizeEmail(rawOwner);
+  if (!ownerEmail || ownerEmail !== expectedEmail) return null;
+
+  const hydrated = hydrateCamelWorkforceResult(data.camelWorkforce);
+  if (!hydrated) return null;
+
+  const updatedAt =
+    typeof data.updatedAt === 'string' && data.updatedAt
+      ? data.updatedAt
+      : hydrated.executedAt || new Date().toISOString();
+
+  return {
+    userEmail: expectedEmail,
+    updatedAt,
+    poolSizeV: typeof data.poolSizeV === 'number' ? data.poolSizeV : hydrated.poolSizeV,
+    historicalDrawsWindow:
+      typeof data.historicalDrawsWindow === 'number'
+        ? data.historicalDrawsWindow
+        : hydrated.historicalDrawsWindow,
+    budgetEuro: typeof data.budgetEuro === 'number' ? data.budgetEuro : hydrated.budgetEuro,
+    playMode:
+      data.playMode === 'superstar' ||
+      data.playMode === 'pure_coverage' ||
+      data.playMode === 'manual'
+        ? data.playMode
+        : hydrated.playMode,
+    coverageTarget:
+      data.coverageTarget === 'ambi' || data.coverageTarget === 'terni'
+        ? data.coverageTarget
+        : hydrated.coverageTarget,
+    selectedCandidateId:
+      typeof data.selectedCandidateId === 'string' && data.selectedCandidateId
+        ? data.selectedCandidateId
+        : hydrated.winnerCandidate.id,
+    workforceResult: hydrated
+  };
+}
+
+export async function fetchCloudUserCamelWorkforce(
+  userEmail: string
+): Promise<UserCamelWorkforceRecord | null> {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(userEmail);
+  const docId = getCamelCloudDocId(emailKey);
+  if (!db || !emailKey || !docId) return null;
+  try {
+    const snap = await getDoc(doc(db, 'user_systems', docId));
+    if (!snap.exists()) return null;
+    return parseCloudCamelDoc(snap.data() as Record<string, unknown>, emailKey);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `user_systems/${docId}`);
+    return null;
+  }
+}
+
+export async function upsertCloudUserCamelWorkforce(
+  record: UserCamelWorkforceRecord
+): Promise<boolean> {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(record?.userEmail || '');
+  const docId = getCamelCloudDocId(emailKey);
+  const winnerSys = record?.workforceResult?.winnerCandidate?.systemResult;
+  const winnerCols = winnerSys?.columns;
+  if (
+    !db ||
+    !emailKey ||
+    !docId ||
+    !record?.workforceResult ||
+    !Array.isArray(winnerCols) ||
+    winnerCols.length === 0
+  ) {
+    return false;
+  }
+  try {
+    const compactResult = compactCamelWorkforceResult(record.workforceResult);
+    const updatedAt = (record.updatedAt || new Date().toISOString()).slice(0, 64);
+    const clean = stripUndefined({
+      userEmail: docId,
+      ownerEmail: emailKey,
+      recordType: 'camel_workforce_v1',
+      updatedAt,
+      poolSizeV: record.poolSizeV,
+      historicalDrawsWindow: record.historicalDrawsWindow,
+      budgetEuro: record.budgetEuro,
+      playMode: record.playMode,
+      coverageTarget: record.coverageTarget,
+      selectedCandidateId: record.selectedCandidateId || compactResult.winnerCandidateId,
+      systemResult: {
+        poolNumbers: winnerSys.poolNumbers,
+        columns: winnerCols.slice(0, 200)
+      },
+      camelWorkforce: compactResult
+    });
+    await setDoc(doc(db, 'user_systems', docId), clean);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `user_systems/${docId}`);
+    return false;
+  }
+}
+
+export function subscribeCloudUserCamelWorkforce(
+  userEmail: string,
+  onUpdate: (record: UserCamelWorkforceRecord | null) => void
+): () => void {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(userEmail);
+  const docId = getCamelCloudDocId(emailKey);
+  if (!db || !emailKey || !docId) return () => {};
+  return onSnapshot(
+    doc(db, 'user_systems', docId),
+    (snap) => {
+      if (!snap.exists()) {
+        onUpdate(null);
+        return;
+      }
+      const parsed = parseCloudCamelDoc(snap.data() as Record<string, unknown>, emailKey);
+      if (parsed) {
+        onUpdate(parsed);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, `user_systems/${docId}`);
     }
   );
 }
