@@ -24,7 +24,8 @@ const offlinePreview = {
         setItem: (key, value) => { state.set(key, String(value)); },
         removeItem: key => { state.delete(key); }
       };
-      export const previewDatabase = undefined;`;
+      export const previewDatabase = undefined;
+      export const previewFetch = async () => new Response(null, { status: 404 });`;
     if (id === '\0preview:firebase') return firebaseFunctions.map(([, asyncPrefix, name]) => {
       const body = name.startsWith('subscribe') ? '() => {}' : 'null';
       return `export const ${name} = ${asyncPrefix || ''}() => ${body};`;
@@ -38,9 +39,10 @@ const offlinePreview = {
   },
   transform(code, id) {
     if (!/[\\/]src[\\/](?:components[\\/]WinForItaliaLab\.tsx|utils[\\/](?:storage|winForItalia|auth)\.ts)$/.test(id)) return;
+    const source = code.replace(/\blocalStorage\b/g, 'previewStorage').replace(/\bindexedDB\b/g, 'previewDatabase');
     return {
-      code: `import { previewStorage, previewDatabase } from 'virtual:preview-storage';\n` +
-        code.replace(/\blocalStorage\b/g, 'previewStorage').replace(/\bindexedDB\b/g, 'previewDatabase'),
+      code: `import { previewStorage, previewDatabase, previewFetch } from 'virtual:preview-storage';\n` +
+        (/[\\/]storage\.ts$/.test(id) ? source.replace(/\bfetch\(/g, 'previewFetch(') : source),
       map: null
     };
   },
@@ -49,11 +51,14 @@ const offlinePreview = {
   }
 };
 
-export default defineConfig({
-  root: fileURLToPath(new URL('./', import.meta.url)),
+export default defineConfig(({ mode }) => ({
+  root: fileURLToPath(new URL(mode === 'cover60' ? './cover60/' : './', import.meta.url)),
   base: './',
   publicDir: false,
   plugins: [offlinePreview, react(), tailwindcss()],
   server: { fs: { allow: [project] } },
-  build: { outDir: fileURLToPath(new URL('../../wfi-preview-dist/', import.meta.url)), emptyOutDir: true }
-});
+  build: {
+    outDir: fileURLToPath(new URL(mode === 'cover60' ? '../../cover60-preview-dist/' : '../../wfi-preview-dist/', import.meta.url)),
+    emptyOutDir: true
+  }
+}));

@@ -68,6 +68,7 @@ import {
 } from '../utils/storage';
 import { subscribeCloudUserSystem } from '../utils/firebase';
 import { EvolutionarySliderTrainer } from './EvolutionarySliderTrainer';
+import { Cover60Panel } from './Cover60Panel';
 
 interface SystemGeneratorProps {
   userEmail: string;
@@ -86,7 +87,30 @@ interface SystemGeneratorProps {
   onUpdateCoverageTarget?: (target: CoverageTarget) => void;
 }
 
-export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
+export const SystemGenerator: React.FC<SystemGeneratorProps> = (props) => {
+  const [view, setView] = useState<'reduced' | 'cover60'>('reduced');
+  const options = [
+    { id: 'reduced', label: 'Sistemi ridotti' },
+    { id: 'cover60', label: 'Copertura 60 · 10 €' }
+  ] as const;
+
+  return (
+    <div className="space-y-4">
+      <div role="group" aria-label="Modalità del generatore" className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900 p-1">
+        {options.map(({ id, label }) => (
+          <button key={id} type="button" aria-pressed={view === id} data-testid={`generator-mode-${id}`} onClick={() => setView(id)}
+            className={`rounded-lg px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-emerald-300 ${view === id ? 'bg-emerald-400 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div hidden={view !== 'reduced'}><ReducedSystemGenerator {...props} /></div>
+      <div hidden={view !== 'cover60'}><Cover60Panel latestDraw={props.draws[0]} onSavePlay={props.onSavePlay} /></div>
+    </div>
+  );
+};
+
+const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
   userEmail,
   draws,
   weights,
