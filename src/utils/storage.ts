@@ -29,13 +29,19 @@ import {
   fetchCloudUserSimulation,
   upsertCloudUserSimulation,
   fetchCloudUserCamelWorkforce,
-  upsertCloudUserCamelWorkforce
+  upsertCloudUserCamelWorkforce,
+  fetchCloudUserWinForItalia,
+  upsertCloudUserWinForItalia
 } from './firebase';
 import {
   UserCamelWorkforceRecord,
   compactCamelWorkforceResult,
   hydrateCamelWorkforceResult
 } from './camelWorkforce';
+import {
+  UserWinForItaliaRecord,
+  normalizeUserWinForItaliaRecord
+} from './winForItalia';
 
 const STORAGE_KEYS = {
   DRAWS: 'superenalotto_real_draws_v1',
@@ -46,7 +52,8 @@ const STORAGE_KEYS = {
   PIGGYBANK: 'superenalotto_piggybank_balance',
   USER_SYSTEM_PREFIX: 'superenalotto_user_system_v1_',
   USER_SIMULATION_PREFIX: 'superenalotto_user_simulation_v1_',
-  USER_CAMEL_PREFIX: 'superenalotto_user_camel_v1_'
+  USER_CAMEL_PREFIX: 'superenalotto_user_camel_v1_',
+  USER_WFI_PREFIX: 'superenalotto_user_winforitalia_v1_'
 };
 
 function normalizeUserEmailKey(email: string): string {
@@ -464,6 +471,128 @@ export async function syncUserCamelWorkforce(
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ record: compactPayload })
+    }).catch(() => {});
+  }
+
+  return best;
+}
+
+// ============================================================================
+// PER-USER WIN FOR ITALIA / WIN FOR LIFE (6/40) PERSISTENCE
+// (LocalStorage + Server + Cloud Firestore)
+// Ensures numbers & sestine NEVER change on tab switch, draw sync, or across
+// browsers/devices — ONLY when the user explicitly chooses to create/recalculate.
+// ============================================================================
+
+export function getUserWinForItaliaStorageKey(userEmail: string): string {
+  return `${STORAGE_KEYS.USER_WFI_PREFIX}${normalizeUserEmailKey(userEmail)}`;
+}
+
+export function loadUserWinForItaliaState(userEmail: string): UserWinForItaliaRecord | null {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  if (!emailKey) return null;
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const raw = localStorage.getItem(getUserWinForItaliaStorageKey(emailKey));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return normalizeUserWinForItaliaRecord(parsed, emailKey);
+    }
+  } catch (e) {
+    console.warn('Error loading user Win for Italia state from localStorage:', e);
+  }
+  return null;
+}
+
+export function cacheUserWinForItaliaStateLocally(record: UserWinForItaliaRecord): void {
+  const emailKey = normalizeUserEmailKey(record?.userEmail);
+  if (!emailKey || !record?.funnelResult || !record?.sniperSelection || !record?.reduced3System) {
+    return;
+  }
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(
+      getUserWinForItaliaStorageKey(emailKey),
+      JSON.stringify({ ...record, userEmail: emailKey })
+    );
+  } catch (e) {
+    console.error('Error caching user Win for Italia state locally:', e);
+  }
+}
+
+export function saveUserWinForItaliaState(record: UserWinForItaliaRecord): void {
+  const emailKey = normalizeUserEmailKey(record?.userEmail);
+  if (!emailKey || !record?.funnelResult || !record?.sniperSelection || !record?.reduced3System) {
+    return;
+  }
+  const normalizedRecord: UserWinForItaliaRecord = {
+    ...record,
+    userEmail: emailKey,
+    updatedAt: record.updatedAt || new Date().toISOString()
+  };
+  cacheUserWinForItaliaStateLocally(normalizedRecord);
+  upsertCloudUserWinForItalia(normalizedRecord).catch(() => {});
+  if (typeof fetch !== 'undefined') {
+    fetch(`/api/user-winforitalia/${encodeURIComponent(emailKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record: normalizedRecord })
+    }).catch(() => {
+      // Ignore if offline or static deployment (Cloud Firestore handles cross-browser sync)
+    });
+  }
+}
+
+export async function syncUserWinForItaliaState(
+  userEmail: string
+): Promise<UserWinForItaliaRecord | null> {
+  const emailKey = normalizeUserEmailKey(userEmail);
+  if (!emailKey) return null;
+
+  const localRecord = loadUserWinForItaliaState(emailKey);
+
+  const [cloudRecord, serverRecord] = await Promise.all([
+    fetchCloudUserWinForItalia(emailKey),
+    typeof fetch !== 'undefined'
+      ? fetch(`/api/user-winforitalia/${encodeURIComponent(emailKey)}`)
+          .then(async (res) => {
+            if (!res.ok) return null;
+            const data = await res.json();
+            return normalizeUserWinForItaliaRecord(data?.record, emailKey);
+          })
+          .catch(() => null)
+      : Promise.resolve(null)
+  ]);
+
+  const candidates = [localRecord, serverRecord, cloudRecord].filter(
+    (r): r is UserWinForItaliaRecord =>
+      Boolean(r && normalizeUserEmailKey(r.userEmail) === emailKey)
+  );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort(
+    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+  );
+  const best = candidates[0];
+
+  cacheUserWinForItaliaStateLocally(best);
+
+  const bestTime = new Date(best.updatedAt || 0).getTime();
+  const cloudTime = new Date(cloudRecord?.updatedAt || 0).getTime();
+  const serverTime = new Date(serverRecord?.updatedAt || 0).getTime();
+
+  if (!cloudRecord || bestTime > cloudTime) {
+    await upsertCloudUserWinForItalia(best);
+  }
+
+  if ((!serverRecord || bestTime > serverTime) && typeof fetch !== 'undefined') {
+    fetch(`/api/user-winforitalia/${encodeURIComponent(emailKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record: best })
     }).catch(() => {});
   }
 

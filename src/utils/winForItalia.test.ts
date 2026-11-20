@@ -273,5 +273,85 @@ test('loadWinForItaliaDraws contains official Sisal Concorso 53 (2026-11-19: 3, 
   assert.equal(userTicketEval.totalWinning, 0);
 });
 
+test('UserWinForItaliaRecord normalizes and persists exact locked sestine per user across round-trips', async () => {
+  const { normalizeUserWinForItaliaRecord } = await import('./winForItalia');
+  const {
+    loadUserWinForItaliaState,
+    cacheUserWinForItaliaStateLocally,
+    getUserWinForItaliaStorageKey
+  } = await import('./storage');
+
+  const history = makeFixtureHistory(53);
+  const { windowSize, stats } = calculateWinForItaliaStats(history);
+  const funnelResult = runWinForItaliaFunnel40To12(stats, () => 0.41);
+  const sniperSelection = selectSniperSestinaFromTop12(funnelResult.top12Numbers, stats);
+  const reduced3System = generateReduced3Columns(funnelResult.top9Numbers, stats);
+
+  const record = {
+    userEmail: 'Giuseppe.Vitiello@gmail.com',
+    updatedAt: '2026-11-20T18:55:00.000Z',
+    playMode: 'sniper' as const,
+    latestDrawIdAtGeneration: history[0].id,
+    windowSizeAtGeneration: windowSize,
+    funnelResult,
+    sniperSelection,
+    reduced3System
+  };
+
+  const roundTripped = normalizeUserWinForItaliaRecord(
+    JSON.parse(JSON.stringify(record)),
+    'giuseppe.vitiello@gmail.com'
+  );
+  assert.ok(roundTripped);
+  assert.equal(roundTripped.userEmail, 'giuseppe.vitiello@gmail.com');
+  assert.deepEqual(
+    roundTripped.sniperSelection.primarySestina.numbers,
+    sniperSelection.primarySestina.numbers
+  );
+  assert.deepEqual(
+    roundTripped.reduced3System.columns.map((c) => c.numbers),
+    reduced3System.columns.map((c) => c.numbers)
+  );
+
+  // Reject mismatched user email
+  assert.equal(
+    normalizeUserWinForItaliaRecord(record, 'altro.utente@gmail.com'),
+    null
+  );
+
+  // Verify localStorage persistence & per-user isolation
+  const memStore = new Map<string, string>();
+  const prevLocalStorage = (globalThis as unknown as { localStorage?: Storage }).localStorage;
+  (globalThis as unknown as { localStorage: Partial<Storage> }).localStorage = {
+    getItem: (k: string) => memStore.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      memStore.set(k, v);
+    },
+    removeItem: (k: string) => {
+      memStore.delete(k);
+    }
+  };
+  try {
+    cacheUserWinForItaliaStateLocally(roundTripped);
+    assert.ok(memStore.has(getUserWinForItaliaStorageKey('giuseppe.vitiello@gmail.com')));
+
+    const loaded = loadUserWinForItaliaState('giuseppe.vitiello@gmail.com');
+    assert.ok(loaded);
+    assert.deepEqual(
+      loaded.sniperSelection.primarySestina.numbers,
+      sniperSelection.primarySestina.numbers
+    );
+    assert.deepEqual(loaded.funnelResult.top12Numbers, funnelResult.top12Numbers);
+    assert.equal(loadUserWinForItaliaState('altro.utente@gmail.com'), null);
+  } finally {
+    if (prevLocalStorage === undefined) {
+      delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
+    } else {
+      (globalThis as unknown as { localStorage: Storage }).localStorage = prevLocalStorage;
+    }
+  }
+});
+
+
 
 

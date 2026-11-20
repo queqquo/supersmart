@@ -540,6 +540,6 @@ test('runCamelWorkforcePipeline works cleanly both with empty archive (Equiproba
   assert.deepEqual(hydrated.winnerCandidate.poolNumbers, resEmpty.winnerCandidate.poolNumbers);
   assert.deepEqual(
     hydrated.winnerCandidate.systemResult.columns,
-    resEmpty.winnerCandidate.systemResult.columns
+    JSON.parse(JSON.stringify(resEmpty.winnerCandidate.systemResult.columns))
   );
 });

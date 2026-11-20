@@ -248,18 +248,20 @@ function removeUserRecordByAdmin(
   return ensureAdminInACL(acl).filter((r) => normalizeEmail(r.email) !== normTarget);
 }
 
-// Persistent server ACL, Plays, Deleted Play Tombstones, Per-User Systems, Simulations, and CAMEL Workforce state
+// Persistent server ACL, Plays, Deleted Play Tombstones, Per-User Systems, Simulations, CAMEL Workforce, and Win for Italia state
 const PLAYS_FILE_PATH = path.join(DATA_DIR, 'plays.json');
 const DELETED_PLAYS_FILE_PATH = path.join(DATA_DIR, 'deleted_plays.json');
 const USER_SYSTEMS_FILE_PATH = path.join(DATA_DIR, 'user_systems.json');
 const USER_SIMULATIONS_FILE_PATH = path.join(DATA_DIR, 'user_simulations.json');
 const USER_CAMEL_FILE_PATH = path.join(DATA_DIR, 'user_camel.json');
+const USER_WFI_FILE_PATH = path.join(DATA_DIR, 'user_winforitalia.json');
 let memoryACL: UserAccessRecord[] = createInitialACL();
 let memoryPlays: Record<string, unknown>[] = [];
 let memoryDeletedPlayIds: Set<string> = new Set(['play-manual-1793562659204']);
 let memoryUserSystems: Record<string, Record<string, unknown>> = {};
 let memoryUserSimulations: Record<string, Record<string, unknown>> = {};
 let memoryUserCamel: Record<string, Record<string, unknown>> = {};
+let memoryUserWfi: Record<string, Record<string, unknown>> = {};
 
 function ensureDataDir(): void {
   try {
@@ -467,6 +469,40 @@ function writeServerUserCamel(
   return memoryUserCamel;
 }
 
+function readServerUserWfi(): Record<string, Record<string, unknown>> {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(USER_WFI_FILE_PATH)) {
+      const raw = fs.readFileSync(USER_WFI_FILE_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        memoryUserWfi = parsed;
+        return memoryUserWfi;
+      }
+    }
+  } catch (err) {
+    console.warn('Using in-memory UserWinForItalia fallback:', err);
+  }
+  return memoryUserWfi;
+}
+
+function writeServerUserWfi(
+  records: Record<string, Record<string, unknown>>
+): Record<string, Record<string, unknown>> {
+  memoryUserWfi = records && typeof records === 'object' ? records : {};
+  ensureDataDir();
+  try {
+    fs.writeFileSync(
+      USER_WFI_FILE_PATH,
+      JSON.stringify(memoryUserWfi, null, 2),
+      'utf8'
+    );
+  } catch {
+    // Keep in memoryUserWfi if filesystem is read-only
+  }
+  return memoryUserWfi;
+}
+
 async function startServer() {
   const app = express();
   const httpServer = http.createServer(app);
@@ -478,6 +514,7 @@ async function startServer() {
   readServerUserSystems();
   readServerUserSimulations();
   readServerUserCamel();
+  readServerUserWfi();
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
@@ -544,6 +581,28 @@ async function startServer() {
     };
     writeServerUserCamel(camelRecords);
     res.json({ record: camelRecords[emailKey] });
+  });
+
+  // --- Per-User Win for Italia / Win for Life (6/40) Endpoints ---
+  app.get('/api/user-winforitalia/:email', (req, res) => {
+    const emailKey = normalizeEmail(req.params.email);
+    const wfiRecords = readServerUserWfi();
+    res.json({ record: wfiRecords[emailKey] || null });
+  });
+
+  app.put('/api/user-winforitalia/:email', (req, res) => {
+    const emailKey = normalizeEmail(req.params.email);
+    const record = req.body?.record;
+    if (!emailKey || !record || typeof record !== 'object') {
+      res.status(400).json({ error: 'Stato Win for Italia utente non valido.' });
+      return;
+    }
+    const wfiRecords = {
+      ...readServerUserWfi(),
+      [emailKey]: { ...record, userEmail: emailKey }
+    };
+    writeServerUserWfi(wfiRecords);
+    res.json({ record: wfiRecords[emailKey] });
   });
 
   // --- Shared Zero-Cost Plays History Endpoints ---

@@ -31,6 +31,7 @@ import {
   compactCamelWorkforceResult,
   hydrateCamelWorkforceResult
 } from './camelWorkforce';
+import type { UserWinForItaliaRecord } from './winForItalia';
 
 export enum OperationType {
   CREATE = 'create',
@@ -947,4 +948,195 @@ export function subscribeCloudUserCamelWorkforce(
     }
   );
 }
+
+// ============================================================================
+// 7. PER-USER WIN FOR ITALIA / WIN FOR LIFE CLOUD PERSISTENCE (/user_systems/wfi::{emailKey})
+//    Reuses the deployed user_systems collection with a disjoint `wfi::` doc key
+//    and top-level `systemResult` so deployed Firestore rules accept writes
+//    immediately across browsers, sessions, and devices.
+// ============================================================================
+
+const WFI_CLOUD_DOC_PREFIX = 'wfi::';
+
+function getWinForItaliaCloudDocId(userEmail: string): string {
+  const emailKey = normalizeEmail(userEmail);
+  if (!emailKey) return '';
+  const docId = `${WFI_CLOUD_DOC_PREFIX}${emailKey}`;
+  return docId.length <= 254 ? docId : '';
+}
+
+function parseCloudWinForItaliaDoc(
+  data: Record<string, unknown> | undefined,
+  expectedEmail: string
+): UserWinForItaliaRecord | null {
+  if (!data || typeof data !== 'object') return null;
+  const rawOwner =
+    typeof data.ownerEmail === 'string'
+      ? data.ownerEmail
+      : typeof data.userEmail === 'string'
+      ? data.userEmail.replace(/^wfi::/, '')
+      : '';
+  const ownerEmail = normalizeEmail(rawOwner);
+  if (!ownerEmail || ownerEmail !== expectedEmail) return null;
+
+  const payload = data.winForItalia as Record<string, unknown> | undefined;
+  if (!payload || typeof payload !== 'object') return null;
+
+  const funnel = payload.funnelResult as UserWinForItaliaRecord['funnelResult'] | undefined;
+  const sniper = payload.sniperSelection as UserWinForItaliaRecord['sniperSelection'] | undefined;
+  const reduced3 = payload.reduced3System as UserWinForItaliaRecord['reduced3System'] | undefined;
+
+  if (
+    !funnel ||
+    !Array.isArray(funnel.top12Numbers) ||
+    funnel.top12Numbers.length !== 12 ||
+    !Array.isArray(funnel.top9Numbers) ||
+    funnel.top9Numbers.length !== 9 ||
+    !Array.isArray(funnel.scoredPool16) ||
+    funnel.scoredPool16.length !== 16 ||
+    !sniper?.primarySestina ||
+    !Array.isArray(sniper.primarySestina.numbers) ||
+    sniper.primarySestina.numbers.length !== 6 ||
+    !sniper?.alternative2 ||
+    !sniper?.alternative3 ||
+    !reduced3 ||
+    !Array.isArray(reduced3.columns) ||
+    reduced3.columns.length !== 3
+  ) {
+    return null;
+  }
+
+  const updatedAt =
+    typeof data.updatedAt === 'string' && data.updatedAt
+      ? data.updatedAt
+      : new Date().toISOString();
+
+  return {
+    userEmail: expectedEmail,
+    updatedAt,
+    playMode: payload.playMode === 'reduced3' ? 'reduced3' : 'sniper',
+    latestDrawIdAtGeneration:
+      typeof payload.latestDrawIdAtGeneration === 'string'
+        ? payload.latestDrawIdAtGeneration
+        : '',
+    windowSizeAtGeneration:
+      typeof payload.windowSizeAtGeneration === 'number' ? payload.windowSizeAtGeneration : 0,
+    funnelResult: funnel,
+    sniperSelection: sniper,
+    reduced3System: reduced3
+  };
+}
+
+export async function fetchCloudUserWinForItalia(
+  userEmail: string
+): Promise<UserWinForItaliaRecord | null> {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(userEmail);
+  const docId = getWinForItaliaCloudDocId(emailKey);
+  if (!db || !emailKey || !docId) return null;
+  try {
+    const snap = await getDoc(doc(db, 'user_systems', docId));
+    if (!snap.exists()) return null;
+    return parseCloudWinForItaliaDoc(snap.data() as Record<string, unknown>, emailKey);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `user_systems/${docId}`);
+    return null;
+  }
+}
+
+export async function upsertCloudUserWinForItalia(
+  record: UserWinForItaliaRecord
+): Promise<boolean> {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(record?.userEmail || '');
+  const docId = getWinForItaliaCloudDocId(emailKey);
+  const primaryNums = record?.sniperSelection?.primarySestina?.numbers;
+  if (
+    !db ||
+    !emailKey ||
+    !docId ||
+    !record?.funnelResult ||
+    !record?.sniperSelection ||
+    !record?.reduced3System ||
+    !Array.isArray(primaryNums) ||
+    primaryNums.length !== 6
+  ) {
+    return false;
+  }
+  try {
+    const updatedAt = (record.updatedAt || new Date().toISOString()).slice(0, 64);
+    const activeColumns =
+      record.playMode === 'reduced3'
+        ? record.reduced3System.columns.map((c, idx) => ({
+            id: idx + 1,
+            numbers: [...c.numbers],
+            sum: c.sum,
+            evens: c.evenCount,
+            odds: c.oddCount
+          }))
+        : [
+            {
+              id: 1,
+              numbers: [...primaryNums],
+              sum: record.sniperSelection.primarySestina.sum,
+              evens: record.sniperSelection.primarySestina.evenCount,
+              odds: record.sniperSelection.primarySestina.oddCount
+            }
+          ];
+
+    const clean = stripUndefined({
+      userEmail: docId,
+      ownerEmail: emailKey,
+      recordType: 'winforitalia_v1',
+      updatedAt,
+      systemResult: {
+        poolNumbers:
+          record.playMode === 'reduced3'
+            ? [...record.funnelResult.top9Numbers]
+            : [...record.funnelResult.top12Numbers],
+        columns: activeColumns
+      },
+      winForItalia: {
+        playMode: record.playMode,
+        latestDrawIdAtGeneration: record.latestDrawIdAtGeneration,
+        windowSizeAtGeneration: record.windowSizeAtGeneration,
+        funnelResult: record.funnelResult,
+        sniperSelection: record.sniperSelection,
+        reduced3System: record.reduced3System
+      }
+    });
+    await setDoc(doc(db, 'user_systems', docId), clean);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `user_systems/${docId}`);
+    return false;
+  }
+}
+
+export function subscribeCloudUserWinForItalia(
+  userEmail: string,
+  onUpdate: (record: UserWinForItaliaRecord | null) => void
+): () => void {
+  const db = getCloudDb();
+  const emailKey = normalizeEmail(userEmail);
+  const docId = getWinForItaliaCloudDocId(emailKey);
+  if (!db || !emailKey || !docId) return () => {};
+  return onSnapshot(
+    doc(db, 'user_systems', docId),
+    (snap) => {
+      if (!snap.exists()) {
+        onUpdate(null);
+        return;
+      }
+      const parsed = parseCloudWinForItaliaDoc(snap.data() as Record<string, unknown>, emailKey);
+      if (parsed) {
+        onUpdate(parsed);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, `user_systems/${docId}`);
+    }
+  );
+}
+
 

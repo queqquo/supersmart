@@ -542,6 +542,8 @@ export default function App() {
 
         {activeTab === 'winforitalia' && (
           <WinForItaliaLab
+            key={session.email.toLowerCase()}
+            userEmail={session.email}
             onSavePlay={handleSavePlay}
             draws={winForItaliaDraws}
             onUpdateDraws={handleUpdateWinForItaliaDraws}

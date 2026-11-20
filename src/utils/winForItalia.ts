@@ -1692,3 +1692,120 @@ export function compareSavedPlayAgainstWinForItaliaDraws(
   };
 }
 
+// ============================================================================
+// PER-USER LOCKED WIN FOR ITALIA / WIN FOR LIFE (6/40) PERSISTENCE RECORD
+// ============================================================================
+
+export type WinForItaliaPlayMode = 'sniper' | 'reduced3';
+
+export interface UserWinForItaliaRecord {
+  userEmail: string;
+  updatedAt: string;
+  playMode: WinForItaliaPlayMode;
+  latestDrawIdAtGeneration: string;
+  windowSizeAtGeneration: number;
+  funnelResult: WinForItaliaFunnelResult;
+  sniperSelection: WinForItaliaSniperSelection;
+  reduced3System: WinForItaliaReduced3System;
+}
+
+function isValidWinForItaliaNumbersList(arr: unknown, expectedLen: number): arr is number[] {
+  if (!Array.isArray(arr) || arr.length !== expectedLen) return false;
+  const seen = new Set<number>();
+  for (const val of arr) {
+    const n = Number(val);
+    if (!Number.isInteger(n) || n < 1 || n > 40 || seen.has(n)) return false;
+    seen.add(n);
+  }
+  return true;
+}
+
+function isValidRankedSestina(raw: unknown): raw is WinForItaliaRankedSestina {
+  if (!raw || typeof raw !== 'object') return false;
+  const obj = raw as Record<string, unknown>;
+  return (
+    isValidWinForItaliaNumbersList(obj.numbers, 6) &&
+    typeof obj.rank === 'number' &&
+    typeof obj.totalScore === 'number' &&
+    typeof obj.sum === 'number' &&
+    typeof obj.evenCount === 'number' &&
+    typeof obj.oddCount === 'number'
+  );
+}
+
+export function normalizeUserWinForItaliaRecord(
+  raw: unknown,
+  expectedEmail: string
+): UserWinForItaliaRecord | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const expectedNorm = String(expectedEmail || '').trim().toLowerCase();
+  const rawEmail = String(obj.ownerEmail || obj.userEmail || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^wfi::/, '');
+
+  if (!expectedNorm || !rawEmail || rawEmail !== expectedNorm) return null;
+
+  const funnel = obj.funnelResult as WinForItaliaFunnelResult | undefined;
+  const sniper = obj.sniperSelection as WinForItaliaSniperSelection | undefined;
+  const reduced3 = obj.reduced3System as WinForItaliaReduced3System | undefined;
+
+  if (
+    !funnel ||
+    typeof funnel !== 'object' ||
+    !isValidWinForItaliaNumbersList(funnel.top12Numbers, 12) ||
+    !isValidWinForItaliaNumbersList(funnel.top9Numbers, 9) ||
+    !Array.isArray(funnel.scoredPool16) ||
+    funnel.scoredPool16.length !== 16 ||
+    !Array.isArray(funnel.chaos3)
+  ) {
+    return null;
+  }
+
+  if (
+    !sniper ||
+    typeof sniper !== 'object' ||
+    !isValidRankedSestina(sniper.primarySestina) ||
+    !isValidRankedSestina(sniper.alternative2) ||
+    !isValidRankedSestina(sniper.alternative3)
+  ) {
+    return null;
+  }
+
+  if (
+    !reduced3 ||
+    typeof reduced3 !== 'object' ||
+    !isValidWinForItaliaNumbersList(reduced3.top9Numbers, 9) ||
+    !Array.isArray(reduced3.columns) ||
+    reduced3.columns.length !== 3 ||
+    !reduced3.columns.every((c) => isValidRankedSestina(c))
+  ) {
+    return null;
+  }
+
+  const playMode: WinForItaliaPlayMode =
+    obj.playMode === 'reduced3' ? 'reduced3' : 'sniper';
+
+  const updatedAt =
+    typeof obj.updatedAt === 'string' && obj.updatedAt
+      ? obj.updatedAt
+      : new Date().toISOString();
+
+  return {
+    userEmail: expectedNorm,
+    updatedAt,
+    playMode,
+    latestDrawIdAtGeneration:
+      typeof obj.latestDrawIdAtGeneration === 'string' ? obj.latestDrawIdAtGeneration : '',
+    windowSizeAtGeneration:
+      typeof obj.windowSizeAtGeneration === 'number' && obj.windowSizeAtGeneration >= 0
+        ? obj.windowSizeAtGeneration
+        : 0,
+    funnelResult: funnel,
+    sniperSelection: sniper,
+    reduced3System: reduced3
+  };
+}
+
+

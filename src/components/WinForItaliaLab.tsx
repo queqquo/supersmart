@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Crosshair,
   RefreshCw,
@@ -22,13 +22,15 @@ import {
   Award,
   TrendingUp,
   Grid,
-  ShieldCheck
+  ShieldCheck,
+  Lock
 } from 'lucide-react';
 import { SavedPlay } from '../types/lottery';
 import {
   WinForItaliaDraw,
-  WinForItaliaFunnelResult,
   WinForItaliaRankedSestina,
+  WinForItaliaPlayMode,
+  UserWinForItaliaRecord,
   WIN_FOR_ITALIA_PRIZES,
   WIN_FOR_ITALIA_UI_LABELS,
   WIN_FOR_ITALIA_REDUCED3_UI_LABELS,
@@ -42,8 +44,17 @@ import {
   generateReduced3Columns,
   runWinForItaliaWeeklyMonteCarlo
 } from '../utils/winForItalia';
+import {
+  loadUserWinForItaliaState,
+  cacheUserWinForItaliaStateLocally,
+  saveUserWinForItaliaState,
+  syncUserWinForItaliaState,
+  getUserWinForItaliaStorageKey
+} from '../utils/storage';
+import { subscribeCloudUserWinForItalia } from '../utils/firebase';
 
 interface WinForItaliaLabProps {
+  userEmail: string;
   onSavePlay: (play: SavedPlay) => void;
   draws?: WinForItaliaDraw[];
   onUpdateDraws?: (draws: WinForItaliaDraw[]) => void;
@@ -56,10 +67,10 @@ const DECADE_LABELS: Record<number, string> = {
   3: 'Decina 31–40'
 };
 
-const WFI_LOCKED_FUNNEL_STORAGE_KEY = 'winforitalia_locked_funnel_v1';
 const WFI_PLAY_MODE_STORAGE_KEY = 'winforitalia_play_mode_v1';
 
 export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
+  userEmail,
   onSavePlay,
   draws: externalDraws,
   onUpdateDraws
@@ -73,8 +84,23 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     }
   };
 
+  // Load existing persisted per-user Win for Italia / Win for Life state (if any)
+  const initialSavedRecord = useMemo(
+    () => loadUserWinForItaliaState(userEmail),
+    [userEmail]
+  );
+
+  // Locked state: funnel + sniper sestine + reduced 3 sestine.
+  // NEVER auto-generates on mount, tab switch, new draws sync, or across browsers/devices.
+  // Changes ONLY when the user explicitly clicks the button to create/recalculate sestine.
+  const [lockedState, setLockedState] = useState<UserWinForItaliaRecord | null>(
+    () => initialSavedRecord ?? null
+  );
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(() => !initialSavedRecord);
+
   // Mode Switcher: 'sniper' (2,00 € - 1 Sestina) | 'reduced3' (6,00 € - 3 Sestine su 9 numeri)
-  const [playMode, setPlayMode] = useState<'sniper' | 'reduced3'>(() => {
+  const [playMode, setPlayMode] = useState<WinForItaliaPlayMode>(() => {
+    if (initialSavedRecord?.playMode) return initialSavedRecord.playMode;
     try {
       const saved = localStorage.getItem(WFI_PLAY_MODE_STORAGE_KEY);
       if (saved === 'reduced3' || saved === 'sniper') return saved;
@@ -84,12 +110,97 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     return 'sniper';
   });
 
-  const handleSelectPlayMode = (nextMode: 'sniper' | 'reduced3') => {
+  const lastAppliedTimeRef = useRef<number>(
+    initialSavedRecord ? new Date(initialSavedRecord.updatedAt || 0).getTime() : 0
+  );
+
+  const applySavedRecordToState = (rec: UserWinForItaliaRecord) => {
+    const recTime = new Date(rec.updatedAt || 0).getTime();
+    lastAppliedTimeRef.current = Number.isFinite(recTime) ? recTime : Date.now();
+    setLockedState(rec);
+    setPlayMode(rec.playMode);
+    try {
+      localStorage.setItem(WFI_PLAY_MODE_STORAGE_KEY, rec.playMode);
+    } catch {
+      // Ignore
+    }
+  };
+
+  // Synchronize this user's locked Win for Italia state across LocalStorage, Server, and Cloud Firestore
+  useEffect(() => {
+    let active = true;
+    const localRec = loadUserWinForItaliaState(userEmail);
+
+    if (localRec) {
+      applySavedRecordToState(localRec);
+      setIsSyncingCloud(false);
+    } else {
+      lastAppliedTimeRef.current = 0;
+      setIsSyncingCloud(true);
+    }
+
+    syncUserWinForItaliaState(userEmail)
+      .then((syncedRec) => {
+        if (!active) return;
+        if (syncedRec) {
+          const syncedTime = new Date(syncedRec.updatedAt || 0).getTime();
+          if (lastAppliedTimeRef.current === 0 || syncedTime > lastAppliedTimeRef.current) {
+            applySavedRecordToState(syncedRec);
+          }
+        }
+        setIsSyncingCloud(false);
+      })
+      .catch(() => {
+        if (active) setIsSyncingCloud(false);
+      });
+
+    const unsubCloud = subscribeCloudUserWinForItalia(userEmail, (cloudRec) => {
+      if (!active || !cloudRec) return;
+      const cloudTime = new Date(cloudRec.updatedAt || 0).getTime();
+      if (lastAppliedTimeRef.current === 0 || cloudTime > lastAppliedTimeRef.current) {
+        cacheUserWinForItaliaStateLocally(cloudRec);
+        applySavedRecordToState(cloudRec);
+        setIsSyncingCloud(false);
+      }
+    });
+
+    const storageKey = getUserWinForItaliaStorageKey(userEmail);
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (!active) return;
+      if (e.key && e.key !== storageKey) return;
+      const updatedLocal = loadUserWinForItaliaState(userEmail);
+      if (updatedLocal) {
+        const updatedTime = new Date(updatedLocal.updatedAt || 0).getTime();
+        if (lastAppliedTimeRef.current === 0 || updatedTime > lastAppliedTimeRef.current) {
+          applySavedRecordToState(updatedLocal);
+          setIsSyncingCloud(false);
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
+
+    return () => {
+      active = false;
+      unsubCloud();
+      window.removeEventListener('storage', handleStorageEvent);
+    };
+  }, [userEmail]);
+
+  const handleSelectPlayMode = (nextMode: WinForItaliaPlayMode) => {
     setPlayMode(nextMode);
     try {
       localStorage.setItem(WFI_PLAY_MODE_STORAGE_KEY, nextMode);
     } catch {
       // Ignore
+    }
+    // Switching view mode never changes any locked numbers; only updates the view preference locally
+    if (lockedState) {
+      const updatedLocal: UserWinForItaliaRecord = {
+        ...lockedState,
+        playMode: nextMode
+      };
+      setLockedState(updatedLocal);
+      cacheUserWinForItaliaStateLocally(updatedLocal);
     }
   };
 
@@ -110,85 +221,70 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   const [copiedRank, setCopiedRank] = useState<number | 'all3' | null>(null);
   const [savedToast, setSavedToast] = useState<string | null>(null);
 
-  // 1. Dynamic Historical Window: Math.min(history.length, 50)
+  // 1. Dynamic Historical Window: Math.min(history.length, 50) (used for archive stats and ONLY when user clicks Create Sestina)
   const { windowSize, stats } = useMemo(() => {
     return calculateWinForItaliaStats(history);
   }, [history]);
 
-  // 2. Balanced Funnel 40 -> 16 (13 Genetic + 3 Chaos) -> Top 12 & Top 9 (Persisted in localStorage until user clicks Ricalcola)
-  const [funnelResult, setFunnelResult] = useState<WinForItaliaFunnelResult>(() => {
-    try {
-      const raw = localStorage.getItem(WFI_LOCKED_FUNNEL_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as {
-          latestDrawId?: string;
-          funnel?: WinForItaliaFunnelResult;
-        };
-        if (
-          parsed?.funnel &&
-          parsed.latestDrawId === (history[0]?.id || '') &&
-          Array.isArray(parsed.funnel.top12Numbers) &&
-          parsed.funnel.top12Numbers.length === 12 &&
-          Array.isArray(parsed.funnel.top9Numbers) &&
-          parsed.funnel.top9Numbers.length === 9
-        ) {
-          return parsed.funnel;
-        }
-      }
-    } catch {
-      // Ignore storage error
-    }
-    const generated = runWinForItaliaFunnel40To12(stats, Math.random);
-    try {
-      localStorage.setItem(
-        WFI_LOCKED_FUNNEL_STORAGE_KEY,
-        JSON.stringify({ latestDrawId: history[0]?.id || '', funnel: generated })
-      );
-    } catch {
-      // Ignore
-    }
-    return generated;
-  });
+  // 2. Explicit generation ONLY when the user chooses to create/recalculate sestine
+  const handleCreateOrRecalculateSestina = () => {
+    const generatedFunnel = runWinForItaliaFunnel40To12(stats, Math.random);
+    const generatedSniper = selectSniperSestinaFromTop12(generatedFunnel.top12Numbers, stats);
+    const generatedReduced3 = generateReduced3Columns(generatedFunnel.top9Numbers, stats);
+    const nowIso = new Date().toISOString();
 
-  const handleRecalculateFunnel = () => {
-    const generated = runWinForItaliaFunnel40To12(stats, Math.random);
-    setFunnelResult(generated);
-    try {
-      localStorage.setItem(
-        WFI_LOCKED_FUNNEL_STORAGE_KEY,
-        JSON.stringify({ latestDrawId: history[0]?.id || '', funnel: generated })
-      );
-    } catch {
-      // Ignore
-    }
+    const newRecord: UserWinForItaliaRecord = {
+      userEmail: userEmail.trim().toLowerCase(),
+      updatedAt: nowIso,
+      playMode,
+      latestDrawIdAtGeneration: history[0]?.id || '',
+      windowSizeAtGeneration: windowSize,
+      funnelResult: generatedFunnel,
+      sniperSelection: generatedSniper,
+      reduced3System: generatedReduced3
+    };
+
+    lastAppliedTimeRef.current = new Date(nowIso).getTime();
+    setLockedState(newRecord);
+    setIsSyncingCloud(false);
+    saveUserWinForItaliaState(newRecord);
   };
 
-  // 3A. Cecchino C(12, 6) = 924 integral combinations -> Top 1 + Alternatives #2 & #3
-  const sniperSelection = useMemo(() => {
-    return selectSniperSestinaFromTop12(funnelResult.top12Numbers, stats);
-  }, [funnelResult.top12Numbers, stats]);
+  const funnelResult = lockedState?.funnelResult ?? null;
+  const sniperSelection = lockedState?.sniperSelection ?? null;
+  const reduced3System = lockedState?.reduced3System ?? null;
 
-  // 3B. Sistema Ridotto C(9, 6) = 84 integral combinations -> 3 Sestine with 2x Symmetric Coverage
-  const reduced3System = useMemo(() => {
-    return generateReduced3Columns(funnelResult.top9Numbers, stats);
-  }, [funnelResult.top9Numbers, stats]);
+  const hasNewerDrawSinceGeneration = Boolean(
+    lockedState &&
+      history[0]?.id &&
+      lockedState.latestDrawIdAtGeneration &&
+      history[0].id !== lockedState.latestDrawIdAtGeneration
+  );
 
   // 4. Dynamic Monte Carlo "Settimana Tipo" (7 Estrazioni = 14,00 € in sniper mode, 42,00 € in reduced3 mode)
   const monteCarloWeekly = useMemo(() => {
+    if (!sniperSelection || !reduced3System) return null;
     const columnsToTest =
       playMode === 'reduced3'
         ? reduced3System.columns.map((c) => [...c.numbers])
         : sniperSelection.primarySestina.numbers;
     return runWinForItaliaWeeklyMonteCarlo(columnsToTest, 50000, simSeed);
-  }, [playMode, reduced3System.columns, sniperSelection.primarySestina.numbers, simSeed]);
+  }, [playMode, reduced3System, sniperSelection, simSeed]);
 
-  const chaosSet = useMemo(() => new Set(funnelResult.chaos3), [funnelResult.chaos3]);
-  const activePoolNumbers =
-    playMode === 'reduced3' ? funnelResult.top9Numbers : funnelResult.top12Numbers;
-  const activeDecadeDist =
-    playMode === 'reduced3'
+  const chaosSet = useMemo(
+    () => new Set(funnelResult ? funnelResult.chaos3 : []),
+    [funnelResult]
+  );
+  const activePoolNumbers = useMemo(() => {
+    if (!funnelResult) return [];
+    return playMode === 'reduced3' ? funnelResult.top9Numbers : funnelResult.top12Numbers;
+  }, [funnelResult, playMode]);
+  const activeDecadeDist = useMemo<Record<number, number>>(() => {
+    if (!funnelResult) return { 0: 0, 1: 0, 2: 0, 3: 0 };
+    return playMode === 'reduced3'
       ? funnelResult.decadeDistributionTop9
       : funnelResult.decadeDistributionTop12;
+  }, [funnelResult, playMode]);
   const activeUiLabels =
     playMode === 'reduced3' ? WIN_FOR_ITALIA_REDUCED3_UI_LABELS : WIN_FOR_ITALIA_UI_LABELS;
 
@@ -205,11 +301,12 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
   // Set of all numbers played in current mode for highlighting in recent archive draws
   const playedNumbersSet = useMemo(() => {
+    if (!funnelResult || !sniperSelection) return new Set<number>();
     if (playMode === 'reduced3') {
       return new Set(funnelResult.top9Numbers);
     }
     return new Set(sniperSelection.primarySestina.numbers);
-  }, [playMode, funnelResult.top9Numbers, sniperSelection.primarySestina.numbers]);
+  }, [playMode, funnelResult, sniperSelection]);
 
   const handleSyncOfficial2000 = async () => {
     setIsSyncing(true);
@@ -264,6 +361,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   };
 
   const handleCopyAll3Sestine = () => {
+    if (!reduced3System) return;
     const lines = reduced3System.columns.map(
       (col, idx) =>
         `#${String(idx + 1).padStart(2, '0')}: ${col.numbers
@@ -279,6 +377,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   };
 
   const handleRegisterSestinaPlay = (sestina: WinForItaliaRankedSestina) => {
+    if (!funnelResult) return;
     const latestDraw = history[0];
     const nextContestNum = (latestDraw?.contestNumber || 1) + 1;
     const year = latestDraw?.year || new Date().getFullYear();
@@ -314,6 +413,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   };
 
   const handleRegisterReduced3Play = () => {
+    if (!reduced3System) return;
     const latestDraw = history[0];
     const nextContestNum = (latestDraw?.contestNumber || 1) + 1;
     const year = latestDraw?.year || new Date().getFullYear();
@@ -434,6 +534,25 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
                 <Clock className="w-3 h-3 text-emerald-400" />
                 Auto-Sync GitHub Actions: 02:00 UTC
               </span>
+              {lockedState && (
+                <span
+                  className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1"
+                  data-testid="wfi-locked-badge"
+                >
+                  <Lock className="w-3 h-3" />
+                  <span>
+                    Bloccato per {userEmail}
+                    {lockedState.updatedAt
+                      ? ` • ${new Date(lockedState.updatedAt).toLocaleString('it-IT', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}`
+                      : ''}
+                  </span>
+                </span>
+              )}
             </div>
 
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
@@ -462,7 +581,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             </p>
           </div>
 
-          {/* Manual Sync & Recalc Buttons */}
+          {/* Manual Sync & Explicit Create/Recalc Sestina Buttons */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             <button
               type="button"
@@ -476,19 +595,40 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
             <button
               type="button"
-              onClick={handleRecalculateFunnel}
+              onClick={handleCreateOrRecalculateSestina}
               data-testid="wfi-recalc-funnel-btn"
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-extrabold text-xs transition-all flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
             >
               <Sparkles className="w-4 h-4" />
               <span>
-                {playMode === 'sniper'
-                  ? 'Ricalcola Imbuto 40→12→1'
-                  : 'Ricalcola Imbuto 40→9→3'}
+                {lockedState
+                  ? playMode === 'sniper'
+                    ? 'Crea Nuova Sestina (40→12→1)'
+                    : 'Crea Nuove 3 Sestine (40→9→3)'
+                  : playMode === 'sniper'
+                  ? 'Crea Sestina (40→12→1)'
+                  : 'Crea 3 Sestine (40→9→3)'}
               </span>
             </button>
           </div>
         </div>
+
+        {hasNewerDrawSinceGeneration && (
+          <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center gap-2">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              Nuova estrazione disponibile in archivio (<strong>{history[0]?.id}</strong>): i numeri
+              e le sestine attuali restano bloccati per <strong>{userEmail}</strong> e cambieranno
+              solo se scegli di cliccare su{' '}
+              <strong>
+                {playMode === 'sniper'
+                  ? 'Crea Nuova Sestina (40→12→1)'
+                  : 'Crea Nuove 3 Sestine (40→9→3)'}
+              </strong>
+              .
+            </span>
+          </div>
+        )}
 
         {/* Mode Switcher Bar: Cecchino 2,00 € vs Sistema Ridotto 6,00 € */}
         <div
@@ -598,11 +738,62 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
         </div>
       )}
 
-      {/* Main Grid: Left = Active Play Card + Monte Carlo; Right = Imbuto 40 -> 16 -> 12/9 */}
+      {/* Main Grid: Left = Active Play Card + Monte Carlo; Right = Imbuto 40 -> 16 -> 12/9 + Archive */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left 7 cols */}
         <div className="lg:col-span-7 space-y-5">
-          {playMode === 'sniper' ? (
+          {!lockedState && isSyncingCloud && (
+            <div className="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-8 text-center space-y-2 shadow-lg">
+              <div className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                <Lock className="w-6 h-6 animate-pulse" />
+              </div>
+              <h3 className="text-base font-bold text-white">
+                Sincronizzazione sestine Win for Italia dal cloud...
+              </h3>
+              <p className="text-xs text-slate-400 max-w-lg mx-auto">
+                Recupero degli ultimi numeri bloccati per <strong>{userEmail}</strong> così da
+                mantenerli identici su ogni browser, sessione o dispositivo senza rigenerarli.
+              </p>
+            </div>
+          )}
+
+          {!lockedState && !isSyncingCloud && (
+            <div
+              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center space-y-4 shadow-lg"
+              data-testid="wfi-empty-state"
+            >
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-white">
+                  Nessuna sestina Win for Italia ancora creata per {userEmail}
+                </h3>
+                <p className="text-xs text-slate-400 max-w-xl mx-auto">
+                  I numeri e le sestine Win for Life / Win for Italia (6/40) non vengono mai
+                  generati o cambiati automaticamente al cambio sezione, all&apos;arrivo di nuove
+                  estrazioni o su altri browser/dispositivi. Cambiano solo quando scegli di creare
+                  una nuova sestina.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCreateOrRecalculateSestina}
+                className="mx-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-sm shadow-xl shadow-amber-500/20 inline-flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>
+                  {playMode === 'sniper'
+                    ? 'Crea Sestina (40→12→1)'
+                    : 'Crea 3 Sestine (40→9→3)'}
+                </span>
+              </button>
+            </div>
+          )}
+
+          {lockedState && funnelResult && sniperSelection && reduced3System && monteCarloWeekly && (
+            <>
+              {playMode === 'sniper' ? (
             /* MODE 1: Cecchino — 2,00 € (1 Sestina) */
             <div
               className="bg-slate-900/95 border-2 border-emerald-500/40 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden"
@@ -1120,10 +1311,13 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
               </table>
             </div>
           </div>
+            </>
+          )}
         </div>
 
         {/* Right 5 cols: Imbuto Bilanciato 40 -> 16 (13 Gen + 3 Caos) -> 12 or 9 */}
         <div className="lg:col-span-5 space-y-5">
+          {funnelResult && reduced3System && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -1257,6 +1451,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
               </div>
             </div>
           </div>
+          )}
 
           {/* Archive Preview: Ultimi Concorsi Win for Italia Team (6/40) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
