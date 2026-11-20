@@ -1,6 +1,41 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function verifiedGoogle() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('^[^@]+@gmail[.]com$');
+    }
+
+    function myEmail() {
+      return request.auth.token.email;
+    }
+
+    function admin() {
+      return verifiedGoogle() && myEmail() == 'giuseppe.vitiello@gmail.com';
+    }
+
+    function approved() {
+      return admin() || (verifiedGoogle()
+        && exists(/databases/$(database)/documents/acl_verified/$(myEmail()))
+        && get(/databases/$(database)/documents/acl_verified/$(myEmail())).data.uid == request.auth.uid
+        && get(/databases/$(database)/documents/acl_verified/$(myEmail())).data.role == 'USER'
+        && get(/databases/$(database)/documents/acl_verified/$(myEmail())).data.status == 'AUTHORIZED');
+    }
+
+    function ownEmail(email) {
+      return approved() && email == myEmail();
+    }
+
+    function ownsPlay(data) {
+      return ownEmail(data.get('userEmail', 'giuseppe.vitiello@gmail.com'));
+    }
+
+    function ownSystemKey(key) {
+      return approved() && (key == myEmail() || key == 'camel::' + myEmail() || key == 'wfi::' + myEmail());
+    }
 
     function isValidPlay(data, playId) {
       return data.keys().hasAll(['id', 'createdAt', 'targetContestId', 'mode', 'cost', 'poolNumbers', 'columns', 'status'])
@@ -16,19 +51,16 @@ service cloud.firestore {
         && data.status in ['IN_ATTESA', 'VERIFICATA'];
     }
 
-    function isValidAclRecord(data, emailKey) {
-      return data.keys().hasAll(['email', 'name', 'role', 'status', 'requestedAt', 'updatedAt'])
+    function isValidAclRequest(data, emailKey) {
+      return data.keys().hasOnly(['uid', 'email', 'name', 'role', 'status', 'requestedAt', 'updatedAt'])
+        && data.uid == request.auth.uid
         && data.email is string
         && data.email == emailKey
         && data.email.size() >= 3 && data.email.size() <= 254
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
         && data.requestedAt is string && data.requestedAt.size() <= 64
         && data.updatedAt is string && data.updatedAt.size() <= 64
-        && data.status in ['AUTHORIZED', 'PENDING', 'REJECTED']
-        && (
-          (emailKey == 'giuseppe.vitiello@gmail.com' && data.role == 'ADMIN' && data.status == 'AUTHORIZED')
-          || (emailKey != 'giuseppe.vitiello@gmail.com' && data.role == 'USER')
-        );
+        && data.status == 'PENDING' && data.role == 'USER';
     }
 
     function isValidCustomDraw(data, drawId) {
@@ -74,43 +106,55 @@ service cloud.firestore {
     }
 
     match /plays/{playId} {
-      allow read: if true;
-      allow create, update: if isValidPlay(request.resource.data, playId);
-      allow delete: if true;
+      allow read: if admin() || (approved() && resource.data.userEmail == myEmail());
+      allow create: if isValidPlay(request.resource.data, playId)
+        && ownEmail(request.resource.data.userEmail)
+        && !exists(/databases/$(database)/documents/deleted_plays/$(playId));
+      allow update: if isValidPlay(request.resource.data, playId)
+        && ownsPlay(resource.data) && ownsPlay(request.resource.data);
+      allow delete: if ownsPlay(resource.data);
     }
 
     match /deleted_plays/{playId} {
-      allow read: if true;
-      allow create, update: if isValidDeletedPlayTombstone(request.resource.data, playId);
-      allow delete: if true;
+      allow read: if admin() || (approved() && resource.data.userEmail == myEmail());
+      allow create: if isValidDeletedPlayTombstone(request.resource.data, playId)
+        && ownEmail(request.resource.data.userEmail)
+        && ownsPlay(get(/databases/$(database)/documents/plays/$(playId)).data)
+        && !existsAfter(/databases/$(database)/documents/plays/$(playId));
     }
 
-    match /acl/{emailKey} {
-      allow read: if true;
-      allow create, update: if isValidAclRecord(request.resource.data, emailKey);
-      allow delete: if emailKey != 'giuseppe.vitiello@gmail.com';
+    match /acl_verified/{emailKey} {
+      allow list: if admin();
+      allow get: if admin() || (verifiedGoogle() && emailKey == myEmail());
+      allow create: if verifiedGoogle() && !admin() && emailKey == myEmail()
+        && isValidAclRequest(request.resource.data, emailKey);
+      allow update: if admin()
+        && resource.data.role == 'USER'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedAt.size() <= 64
+        && request.resource.data.status in ['AUTHORIZED', 'REJECTED'];
     }
 
     match /custom_draws/{drawId} {
-      allow read: if true;
-      allow create, update: if isValidCustomDraw(request.resource.data, drawId);
-      allow delete: if true;
+      allow read: if approved();
+      allow create, update: if admin() && isValidCustomDraw(request.resource.data, drawId);
+      allow delete: if admin();
     }
 
     match /user_systems/{emailKey} {
-      allow read: if true;
-      allow create, update: if isValidUserSystem(request.resource.data, emailKey);
-      allow delete: if true;
+      allow get, delete: if ownSystemKey(emailKey);
+      allow create, update: if ownSystemKey(emailKey)
+        && isValidUserSystem(request.resource.data, emailKey);
     }
 
     match /user_simulations/{emailKey} {
-      allow read: if true;
-      allow create, update: if isValidUserSimulation(request.resource.data, emailKey);
-      allow delete: if true;
+      allow get, delete: if ownEmail(emailKey);
+      allow create, update: if ownEmail(emailKey) && isValidUserSimulation(request.resource.data, emailKey);
     }
 
     match /_connection_test/{docId} {
-      allow read: if true;
+      allow read: if approved();
     }
   }
 }

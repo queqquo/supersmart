@@ -508,6 +508,17 @@ async function startServer() {
   const httpServer = http.createServer(app);
   app.use(express.json({ limit: '5mb' }));
 
+  // These pre-Firebase endpoints used caller-supplied identity and shared files.
+  // Do not expose them, including in standalone/Synology mode.
+  app.use((_req, res, next) => {
+    if (/^\/api\/(?:acl|plays|user-(?:systems|simulations|camel|winforitalia))(?:\/|$)/i.test(_req.path)
+        || /^\/api\/winforitalia\/(?:draws|official-sync)\/?$/i.test(_req.path)) {
+      res.status(410).json({ error: 'Endpoint rimosso. Usare Firebase con accesso verificato.' });
+      return;
+    }
+    next();
+  });
+
   writeServerDeletedPlayIds(readServerDeletedPlayIds());
   readServerACL();
   writeServerPlays(readServerPlays());

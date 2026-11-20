@@ -33,6 +33,7 @@ import {
   fetchCloudUserWinForItalia,
   upsertCloudUserWinForItalia
 } from './firebase';
+import { fetchArchiveMutation, getCloudAuth } from './secureAuth';
 import {
   UserCamelWorkforceRecord,
   compactCamelWorkforceResult,
@@ -917,11 +918,7 @@ export async function syncOfficialDrawsFromLiveFeed(): Promise<{
 
   if (typeof fetch !== 'undefined') {
     try {
-      const res = await fetch('/api/draws', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game: 'superenalotto', action: 'sync' })
-      });
+      const res = await fetchArchiveMutation({ game: 'superenalotto', action: 'sync' });
       const ct = res.headers.get('content-type') || '';
       if (res.ok && ct.includes('application/json')) {
         const payload = await res.json();
@@ -1035,11 +1032,7 @@ export async function resetAndRestoreSuperEnalottoArchive(): Promise<{
 
   if (typeof fetch !== 'undefined') {
     try {
-      const res = await fetch('/api/draws', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game: 'superenalotto', action: 'reset_restore' })
-      });
+      const res = await fetchArchiveMutation({ game: 'superenalotto', action: 'reset_restore' });
       const ct = res.headers.get('content-type') || '';
       if (res.ok && ct.includes('application/json')) {
         const payload = await res.json();
@@ -1131,15 +1124,11 @@ export async function persistSuperEnalottoDrawsRemote(
 
   const githubPromise =
     typeof fetch !== 'undefined'
-      ? fetch('/api/draws', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
+      ? fetchArchiveMutation(
             action === 'upsert' && valid.length === 1
               ? { game: 'superenalotto', action: 'upsert', draw: valid[0] }
               : { game: 'superenalotto', action: 'import', draws: valid }
-          )
-        })
+        )
           .then(async (res) => {
             if (!res.ok) return false;
             const data = await res.json().catch(() => null);
@@ -1199,11 +1188,7 @@ export function insertDraw(newDraw: Draw): Draw[] {
   saveDraws(merged);
   upsertCloudCustomDraw(validatedDraw).catch(() => {});
   if (typeof fetch !== 'undefined') {
-    fetch('/api/draws', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ game: 'superenalotto', action: 'upsert', draw: validatedDraw })
-    }).catch(() => {});
+    fetchArchiveMutation({ game: 'superenalotto', action: 'upsert', draw: validatedDraw }).catch(() => {});
   }
   return merged;
 }
@@ -1293,6 +1278,11 @@ export function cachePlaysLocally(plays: SavedPlay[]): void {
   savePlaysToIDB(cleanPlays);
 }
 
+export function cacheOwnedPlays(plays: SavedPlay[], email: string): void {
+  const other = loadSavedPlays().filter(play => filterPlaysForUser([play], email).length === 0);
+  cachePlaysLocally([...other, ...filterPlaysForUser(plays, email)]);
+}
+
 /**
  * Save weekly plays to localStorage + IndexedDB + Server + Cloud Firestore
  */
@@ -1342,32 +1332,18 @@ function pickPreferredPlay(existing: SavedPlay, incoming: SavedPlay): SavedPlay 
  * Synchronize saved plays across Cloud Firestore (/plays + /deleted_plays), Server (/api/plays), IndexedDB, and LocalStorage
  * Ensures deleted plays NEVER resurrect across browsers or during in-flight async syncs.
  */
-export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
-  // Also ensure the legacy test plays are removed from Cloud Firestore
-  removeCloudPlay('play-manual-1793562659204').catch(() => {});
-  removeCloudPlay('play-wfi-1795034983423').catch(() => {});
-
-  const [idbPlaysRaw, cloudPlaysResult, cloudDeletedIds, serverResponse] = await Promise.all([
+export async function syncSavedPlaysWithServer(email: string): Promise<SavedPlay[]> {
+  const [idbPlaysRaw, cloudPlaysResult, cloudDeletedIds] = await Promise.all([
     loadPlaysFromIDB(),
-    fetchCloudPlays(),
-    fetchCloudDeletedPlayIds(),
-    fetch('/api/plays')
-      .then(async (res) => {
-        if (!res.ok) return { plays: [] as SavedPlay[], deletedIds: [] as string[] };
-        const data = await res.json();
-        return {
-          plays: Array.isArray(data?.plays) ? (data.plays as SavedPlay[]) : [],
-          deletedIds: Array.isArray(data?.deletedIds) ? (data.deletedIds as string[]) : []
-        };
-      })
-      .catch(() => ({ plays: [] as SavedPlay[], deletedIds: [] as string[] }))
+    fetchCloudPlays(email),
+    fetchCloudDeletedPlayIds(email),
   ]);
+  if (getCloudAuth().currentUser?.email !== email) return [];
 
   // Re-read localDeletedPlayIds AFTER all awaits so any deletion clicked while sync was in-flight is honored!
   const allDeletedIds = saveDeletedPlayIds([
     ...loadDeletedPlayIds(),
-    ...cloudDeletedIds,
-    ...serverResponse.deletedIds
+    ...cloudDeletedIds
   ]);
 
   const localPlays = loadSavedPlays().filter((p) => p && !allDeletedIds.has(p.id));
@@ -1377,23 +1353,10 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
   const cloudPlays = (cloudPlaysResult || [])
     .filter((p) => p && !allDeletedIds.has(p.id))
     .map(normalizeLegacyWinForItaliaPlay);
-  const serverPlays = serverResponse.plays
-    .filter((p) => p && !allDeletedIds.has(p.id))
-    .map(normalizeLegacyWinForItaliaPlay);
-
-  // If any play present in Cloud Firestore is actually in allDeletedIds, remove it from Cloud Firestore
-  if (cloudPlaysResult) {
-    for (const cp of cloudPlaysResult) {
-      if (cp && allDeletedIds.has(cp.id)) {
-        removeCloudPlay(cp.id).catch(() => {});
-      }
-    }
-  }
-
   const mergedMap = new Map<string, SavedPlay>();
 
-  for (const list of [serverPlays, idbPlays, localPlays, cloudPlays]) {
-    for (const p of list) {
+  for (const list of [idbPlays, localPlays, cloudPlays]) {
+    for (const p of filterPlaysForUser(list, email)) {
       if (!p || typeof p.id !== 'string' || allDeletedIds.has(p.id)) continue;
       const existing = mergedMap.get(p.id);
       if (!existing) {
@@ -1410,7 +1373,7 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
     .filter((p) => !finalDeletedIds.has(p.id))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
-  cachePlaysLocally(merged);
+  cacheOwnedPlays(merged, email);
 
   // Push any non-deleted local/server plays that are missing or outdated in Cloud Firestore
   const cloudRawMap = new Map((cloudPlaysResult || []).map((p) => [p.id, p]));
@@ -1432,18 +1395,8 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
     return false;
   });
 
-  if (toUploadToCloud.length > 0) {
-    await upsertManyCloudPlays(toUploadToCloud);
-  }
-
-  if (merged.length !== serverPlays.length || toUploadToCloud.length > 0) {
-    fetch('/api/plays', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plays: merged })
-    }).catch(() => {
-      // Ignore
-    });
+  if (cloudPlaysResult && toUploadToCloud.length > 0) {
+    await upsertManyCloudPlays(toUploadToCloud.map(play => ({ ...play, userEmail: email })));
   }
 
   return merged;
@@ -1500,12 +1453,12 @@ export function updatePlay(updated: SavedPlay): SavedPlay[] {
 /**
  * Delete a play across localStorage, IndexedDB, Server, and Cloud Firestore
  */
-export function deletePlay(id: string): SavedPlay[] {
+export function deletePlay(id: string, email: string): SavedPlay[] {
   markPlayIdDeleted(id);
   const plays = loadSavedPlays();
   const filtered = plays.filter((p) => p.id !== id);
   cachePlaysLocally(filtered);
-  removeCloudPlay(id).catch(() => {});
+  removeCloudPlay(id, email).catch(() => {});
   fetch(`/api/plays/${encodeURIComponent(id)}`, {
     method: 'DELETE'
   }).catch(() => {

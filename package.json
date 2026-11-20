@@ -11,7 +11,9 @@
     "start:synology": "NODE_ENV=production node server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:auth": "node --test backend/archive-access.test.mjs",
+    "test:rules": "node --test backend/firestore-rules.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -20,6 +22,7 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^13.3.0",
+    "firebase-admin": "^13.10.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
@@ -27,6 +30,7 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

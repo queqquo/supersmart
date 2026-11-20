@@ -12,6 +12,8 @@ import {
   getDoc,
   getDocs,
   getDocFromServer,
+  query,
+  where,
   setDoc,
   deleteDoc,
   writeBatch,
@@ -122,15 +124,24 @@ export async function testFirestoreConnection(): Promise<boolean> {
 // 1. SAVED PLAYS CLOUD PERSISTENCE (/plays/{playId})
 // ============================================================================
 
-export async function fetchCloudPlays(): Promise<SavedPlay[] | null> {
+function ownedPlayQuery(db: Firestore, path: 'plays' | 'deleted_plays', email: string) {
+  const ref = collection(db, path);
+  return isPrimaryAdmin(email) ? query(ref) : query(ref, where('userEmail', '==', normalizeEmail(email)));
+}
+
+function belongsToPlayOwner(data: { userEmail?: string }, email: string) {
+  return data.userEmail ? normalizeEmail(data.userEmail) === normalizeEmail(email) : isPrimaryAdmin(email);
+}
+
+export async function fetchCloudPlays(email: string): Promise<SavedPlay[] | null> {
   const db = getCloudDb();
   if (!db) return null;
   try {
-    const snap = await getDocs(collection(db, 'plays'));
+    const snap = await getDocs(ownedPlayQuery(db, 'plays', email));
     const plays: SavedPlay[] = [];
     snap.forEach((docSnap) => {
       const data = docSnap.data() as SavedPlay;
-      if (data && typeof data.id === 'string' && Array.isArray(data.columns)) {
+      if (data && typeof data.id === 'string' && Array.isArray(data.columns) && belongsToPlayOwner(data, email)) {
         plays.push(data);
       }
     });
@@ -184,7 +195,7 @@ export async function upsertManyCloudPlays(plays: SavedPlay[]): Promise<boolean>
   }
 }
 
-export async function removeCloudPlay(playId: string): Promise<boolean> {
+export async function removeCloudPlay(playId: string, email: string): Promise<boolean> {
   const db = getCloudDb();
   if (!db || !playId) return false;
   try {
@@ -192,6 +203,7 @@ export async function removeCloudPlay(playId: string): Promise<boolean> {
     batch.delete(doc(db, 'plays', playId));
     batch.set(doc(db, 'deleted_plays', playId), {
       id: playId,
+      userEmail: normalizeEmail(email),
       deletedAt: new Date().toISOString()
     });
     await batch.commit();
@@ -202,14 +214,15 @@ export async function removeCloudPlay(playId: string): Promise<boolean> {
   }
 }
 
-export async function fetchCloudDeletedPlayIds(): Promise<string[]> {
+export async function fetchCloudDeletedPlayIds(email: string): Promise<string[]> {
   const db = getCloudDb();
   if (!db) return [];
   try {
-    const snap = await getDocs(collection(db, 'deleted_plays'));
+    const snap = await getDocs(ownedPlayQuery(db, 'deleted_plays', email));
     const ids: string[] = [];
     snap.forEach((docSnap) => {
-      const data = docSnap.data() as { id?: string };
+      const data = docSnap.data() as { id?: string; userEmail?: string };
+      if (!belongsToPlayOwner(data, email)) return;
       if (data && typeof data.id === 'string') {
         ids.push(data.id);
       } else if (docSnap.id) {
@@ -224,16 +237,17 @@ export async function fetchCloudDeletedPlayIds(): Promise<string[]> {
 }
 
 export function subscribeCloudDeletedPlayIds(
-  onUpdate: (deletedIds: string[]) => void
+  onUpdate: (deletedIds: string[]) => void, email: string
 ): () => void {
   const db = getCloudDb();
   if (!db) return () => {};
   return onSnapshot(
-    collection(db, 'deleted_plays'),
+    ownedPlayQuery(db, 'deleted_plays', email),
     (snap) => {
       const ids: string[] = [];
       snap.forEach((docSnap) => {
-        const data = docSnap.data() as { id?: string };
+        const data = docSnap.data() as { id?: string; userEmail?: string };
+        if (!belongsToPlayOwner(data, email)) return;
         if (data && typeof data.id === 'string') {
           ids.push(data.id);
         } else if (docSnap.id) {
@@ -248,16 +262,16 @@ export function subscribeCloudDeletedPlayIds(
   );
 }
 
-export function subscribeCloudPlays(onUpdate: (plays: SavedPlay[]) => void): () => void {
+export function subscribeCloudPlays(onUpdate: (plays: SavedPlay[]) => void, email: string): () => void {
   const db = getCloudDb();
   if (!db) return () => {};
   return onSnapshot(
-    collection(db, 'plays'),
+    ownedPlayQuery(db, 'plays', email),
     (snap) => {
       const plays: SavedPlay[] = [];
       snap.forEach((docSnap) => {
         const data = docSnap.data() as SavedPlay;
-        if (data && typeof data.id === 'string' && Array.isArray(data.columns)) {
+        if (data && typeof data.id === 'string' && Array.isArray(data.columns) && belongsToPlayOwner(data, email)) {
           plays.push(data);
         }
       });
@@ -1138,5 +1152,3 @@ export function subscribeCloudUserWinForItalia(
     }
   );
 }
-
-

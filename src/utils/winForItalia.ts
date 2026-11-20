@@ -4,6 +4,7 @@
  */
 
 import { EXTERNAL_WINFORITALIA_RAW_URL } from '../config/externalDrawsRepo';
+import { fetchArchiveMutation } from './secureAuth';
 import {
   fetchCloudWinForItaliaDraws,
   upsertCloudWinForItaliaDraw,
@@ -339,11 +340,7 @@ export function insertWinForItaliaDraw(newDraw: WinForItaliaDraw): WinForItaliaD
   saveWinForItaliaDraws(merged);
   upsertCloudWinForItaliaDraw(newDraw).catch(() => {});
   if (typeof fetch !== 'undefined') {
-    fetch('/api/draws', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ game: 'winforitalia', action: 'upsert', draw: newDraw })
-    }).catch(() => {
+    fetchArchiveMutation({ game: 'winforitalia', action: 'upsert', draw: newDraw }).catch(() => {
       // Ignore if offline or in unit test environment
     });
   }
@@ -422,11 +419,7 @@ export async function syncWinForItaliaDrawsFromServer(): Promise<{
 
   if (typeof fetch !== 'undefined') {
     try {
-      const res = await fetch('/api/draws', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game: 'winforitalia', action: 'sync' })
-      });
+      const res = await fetchArchiveMutation({ game: 'winforitalia', action: 'sync' });
       const ct = res.headers.get('content-type') || '';
       if (res.ok && ct.includes('application/json')) {
         const payload = await res.json();
@@ -502,11 +495,7 @@ export async function resetAndRestoreWinForItaliaArchive(): Promise<{
 
   if (typeof fetch !== 'undefined') {
     try {
-      const res = await fetch('/api/draws', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game: 'winforitalia', action: 'reset_restore' })
-      });
+      const res = await fetchArchiveMutation({ game: 'winforitalia', action: 'reset_restore' });
       const ct = res.headers.get('content-type') || '';
       if (res.ok && ct.includes('application/json')) {
         const payload = await res.json();
@@ -591,11 +580,7 @@ export async function importWinForItaliaDraws(
   if (validIncoming.length > 0) {
     await upsertManyCloudWinForItaliaDraws(validIncoming).catch(() => {});
     if (typeof fetch !== 'undefined') {
-      persistedToGitHub = await fetch('/api/draws', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game: 'winforitalia', action: 'import', draws: validIncoming })
-      })
+      persistedToGitHub = await fetchArchiveMutation({ game: 'winforitalia', action: 'import', draws: validIncoming })
         .then(async (res) => {
           if (!res.ok) return false;
           const data = await res.json().catch(() => null);
@@ -1807,5 +1792,4 @@ export function normalizeUserWinForItaliaRecord(
     reduced3System: reduced3
   };
 }
-
 

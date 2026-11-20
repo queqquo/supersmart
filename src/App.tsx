@@ -37,7 +37,7 @@ import {
   insertDraw,
   saveDraws,
   loadSavedPlays,
-  cachePlaysLocally,
+  cacheOwnedPlays,
   syncSavedPlaysWithServer,
   insertPlay,
   updatePlay,
@@ -51,32 +51,15 @@ import {
   loadFilters,
   saveFilters
 } from './utils/storage';
+import type { AccessStatus, AuthSession, UserAccessRecord } from './utils/auth';
+import type { User } from 'firebase/auth';
 import {
-  AuthSession,
-  UserAccessRecord,
-  UserRole,
-  loadACL,
-  saveACL,
-  mergeACLRecords,
-  loadAuthSession,
-  saveAuthSession,
-  evaluateUserAccess,
-  requestUserAccess,
-  authorizeUserByAdmin,
-  revokeUserByAdmin,
-  removeUserRecordByAdmin,
-  fetchServerACL,
-  apiRequestUserAccess,
-  apiAuthorizeUserByAdmin,
-  apiRevokeUserByAdmin,
-  apiRemoveUserRecordByAdmin,
-  isPrimaryAdmin
-} from './utils/auth';
+  decideVerifiedAccess, logoutGoogle, observeVerifiedAccess, observeVerifiedIdentity, toSession,
+} from './utils/secureAuth';
 import {
   testFirestoreConnection,
   subscribeCloudPlays,
   subscribeCloudDeletedPlayIds,
-  subscribeCloudACL,
   subscribeCloudCustomDraws,
   subscribeCloudWinForItaliaDraws
 } from './utils/firebase';
@@ -89,6 +72,50 @@ import {
 } from './utils/winForItalia';
 
 export default function App() {
+  const [identity, setIdentity] = useState<User | null>(null);
+  const [ready, setReady] = useState(false);
+  const [access, setAccess] = useState<{
+    user: User; status: AccessStatus; admin: boolean; acl: UserAccessRecord[];
+  } | null>(null);
+  const [error, setError] = useState('');
+  const verified = access?.user === identity ? access : null;
+  const session = identity ? toSession(identity) : null;
+
+  useEffect(() => observeVerifiedIdentity(user => {
+    setError('');
+    setIdentity(user);
+    setReady(true);
+  }, () => {
+    setError('Accedi con un account Gmail verificato da Google.');
+    setReady(true);
+  }), []);
+
+  useEffect(() => {
+    if (!identity) { setAccess(null); return; }
+    return observeVerifiedAccess(identity, (acl, status, admin) => {
+      setError('');
+      setAccess({ user: identity, acl, status, admin });
+    }, () => {
+      setAccess(null);
+      setError('Impossibile verificare le autorizzazioni. Esci e riprova.');
+    });
+  }, [identity]);
+
+  const logout = () => {
+    setAccess(null);
+    void logoutGoogle().catch(() => setError('Uscita non completata. Riprova.'));
+  };
+  if (!session || verified?.status !== 'AUTHORIZED' || error) {
+    return <LoginScreen session={session} status={verified?.status ?? 'PENDING'}
+      loading={!ready || Boolean(identity && !verified && !error)} error={error} onLogout={logout} />;
+  }
+  return <AuthorizedApp key={identity?.uid} session={session} acl={verified.acl}
+    isAdmin={verified.admin} onLogout={logout} />;
+}
+
+function AuthorizedApp({ session, acl, isAdmin, onLogout }: {
+  session: AuthSession; acl: UserAccessRecord[]; isAdmin: boolean; onLogout: () => void;
+}) {
   const [activeTab, setActiveTab] = useState<NavTab>('generator');
   const [draws, setDraws] = useState<Draw[]>(() => loadDraws());
   const [winForItaliaDraws, setWinForItaliaDraws] = useState<WinForItaliaDraw[]>(() =>
@@ -96,7 +123,8 @@ export default function App() {
   );
   const [weights, setWeights] = useState<ScoringWeights>(() => loadWeights());
   const [filters, setFilters] = useState<FilterOptions>(() => loadFilters());
-  const [savedPlays, setSavedPlays] = useState<SavedPlay[]>(() => loadSavedPlays());
+  const [savedPlays, setSavedPlays] = useState<SavedPlay[]>(() =>
+    filterPlaysForUser(loadSavedPlays(), session.email));
   const [isSmartPasteOpen, setIsSmartPasteOpen] = useState(false);
 
   // Compute initial weekly columns so Simulation tab always has the current weekly system even if opened directly
@@ -116,10 +144,6 @@ export default function App() {
 
   const [weeklyColumns, setWeeklyColumns] = useState<GeneratedColumn[]>([]);
   const [appliedSimPreset, setAppliedSimPreset] = useState<SimulationGeneratorPreset | null>(null);
-
-  // OAuth & Access Control State
-  const [acl, setAcl] = useState<UserAccessRecord[]>(() => loadACL());
-  const [session, setSession] = useState<AuthSession | null>(() => loadAuthSession());
 
   // All'avvio dell'app: carica gli archivi dal repo GitHub esterno + Cloud Firestore (persistenza cross-browser/dispositivo)
   useEffect(() => {
@@ -143,20 +167,20 @@ export default function App() {
   }, []);
 
   const initialPlaysSyncDoneRef = React.useRef(false);
-  const initialAclSyncDoneRef = React.useRef(false);
 
-  // Real-time Cloud Firestore listeners for Deleted Play Tombstones (/deleted_plays), Saved Plays (/plays), and User ACL (/acl)
+  // Real-time data listeners are mounted only inside the authorized app.
   useEffect(() => {
+    const email = session.email;
     const unsubDeletedPlays = subscribeCloudDeletedPlayIds((cloudDeletedIds) => {
       if (cloudDeletedIds.length > 0) {
         const allDeleted = saveDeletedPlayIds(cloudDeletedIds);
         setSavedPlays((prevPlays) => {
           const filtered = prevPlays.filter((p) => !allDeleted.has(p.id));
-          cachePlaysLocally(filtered);
+          cacheOwnedPlays(filtered, email);
           return filtered;
         });
       }
-    });
+    }, session.email);
 
     const unsubPlays = subscribeCloudPlays((cloudPlays) => {
       const deletedSet = loadDeletedPlayIds();
@@ -173,22 +197,10 @@ export default function App() {
             .filter((p) => !deletedSet.has(p.id))
             .map(normalizeLegacyWinForItaliaPlay);
         }
-        cachePlaysLocally(cleanCloudPlays);
+        cacheOwnedPlays(cleanCloudPlays, email);
         return cleanCloudPlays;
       });
-    });
-
-    const unsubAcl = subscribeCloudACL((cloudAcl) => {
-      if (cloudAcl.length > 0) {
-        setAcl((prevAcl) => {
-          const nextAcl = initialAclSyncDoneRef.current
-            ? mergeACLRecords(cloudAcl)
-            : mergeACLRecords(prevAcl, cloudAcl);
-          saveACL(nextAcl);
-          return nextAcl;
-        });
-      }
-    });
+    }, session.email);
 
     const unsubCustomDraws = subscribeCloudCustomDraws((cloudDraws) => {
       if (cloudDraws.length > 0) {
@@ -213,7 +225,6 @@ export default function App() {
     return () => {
       unsubDeletedPlays();
       unsubPlays();
-      unsubAcl();
       unsubCustomDraws();
       unsubWfiDraws();
     };
@@ -222,9 +233,9 @@ export default function App() {
   // Automatically sync savedPlays across Cloud Firestore, Server (/api/plays), IndexedDB, and LocalStorage on startup, login, and tab switch
   useEffect(() => {
     let active = true;
-    syncSavedPlaysWithServer().then((mergedPlays) => {
-      initialPlaysSyncDoneRef.current = true;
+    syncSavedPlaysWithServer(session.email).then((mergedPlays) => {
       if (active) {
+        initialPlaysSyncDoneRef.current = true;
         setSavedPlays(mergedPlays);
       }
     });
@@ -232,168 +243,6 @@ export default function App() {
       active = false;
     };
   }, [session?.email, activeTab]);
-
-  // Sync ACL with Cloud Firestore + Server on startup and periodically
-  useEffect(() => {
-    let active = true;
-    const syncAcl = async () => {
-      const serverAcl = await fetchServerACL();
-      initialAclSyncDoneRef.current = true;
-      if (active && serverAcl) {
-        setAcl(serverAcl);
-      }
-    };
-    syncAcl();
-    const interval = setInterval(syncAcl, 6000);
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [activeTab, session?.email]);
-
-  // Handle Google OAuth 2.0 Implicit Flow callback token if present in URL hash
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (hash && hash.includes('access_token=')) {
-      const params = new URLSearchParams(hash.substring(1));
-      const accessToken = params.get('access_token');
-      if (accessToken) {
-        // Clear hash from URL
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        })
-          .then((res) => res.json())
-          .then(async (profile) => {
-            if (profile && profile.email) {
-              const emailNorm = profile.email.toLowerCase();
-              const resolvedName = profile.name || emailNorm.split('@')[0];
-              const newSession: AuthSession = {
-                email: emailNorm,
-                name: resolvedName,
-                picture: profile.picture,
-                loginAt: new Date().toISOString(),
-                provider: 'google_oauth'
-              };
-              const serverAcl = (await fetchServerACL()) || loadACL();
-              setAcl(serverAcl);
-              const evalRes = evaluateUserAccess(emailNorm, serverAcl);
-              if (!evalRes.isAdmin && evalRes.status === 'UNREGISTERED') {
-                const reqPayload = {
-                  email: emailNorm,
-                  name: resolvedName,
-                  picture: profile.picture,
-                  note: 'Richiesta di approvazione accesso come Utente tramite Google Login'
-                };
-                const updatedAcl =
-                  (await apiRequestUserAccess(reqPayload)) ||
-                  requestUserAccess(serverAcl, reqPayload);
-                setAcl(updatedAcl);
-                saveACL(updatedAcl);
-              }
-              setSession(newSession);
-              saveAuthSession(newSession);
-            }
-          })
-          .catch((err) => console.error('Failed to fetch Google userinfo:', err));
-      }
-    }
-  }, []);
-
-  // Sync ACL and Plays across tabs via storage event
-  useEffect(() => {
-    const handleStorage = () => {
-      setAcl(loadACL());
-      setSession(loadAuthSession());
-      setSavedPlays(loadSavedPlays());
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, []);
-
-  // Auth handlers
-  const handleLogin = (newSession: AuthSession) => {
-    setSession(newSession);
-    saveAuthSession(newSession);
-
-    // Fetch latest ACL from Cloud Firestore before checking if the user is UNREGISTERED
-    fetchServerACL().then(async (latestAcl) => {
-      const currentAcl = latestAcl || loadACL();
-      setAcl(currentAcl);
-      if (!isPrimaryAdmin(newSession.email)) {
-        const evalRes = evaluateUserAccess(newSession.email, currentAcl);
-        if (evalRes.status === 'UNREGISTERED') {
-          const reqPayload = {
-            email: newSession.email,
-            name: newSession.name,
-            note: 'Richiesta di approvazione accesso come Utente tramite Google Login'
-          };
-          const updatedAcl =
-            (await apiRequestUserAccess(reqPayload)) ||
-            requestUserAccess(currentAcl, reqPayload);
-          setAcl(updatedAcl);
-          saveACL(updatedAcl);
-        }
-      }
-    });
-
-    syncSavedPlaysWithServer().then((mergedPlays) => {
-      setSavedPlays(mergedPlays);
-    });
-  };
-
-  const handleLogout = () => {
-    setSession(null);
-    saveAuthSession(null);
-    setActiveTab('generator');
-  };
-
-  const handleRequestAccess = (user: { email: string; name: string; note: string }) => {
-    const updated = requestUserAccess(acl, user);
-    setAcl(updated);
-    saveACL(updated);
-    apiRequestUserAccess(user).then((serverAcl) => {
-      if (serverAcl) setAcl(serverAcl);
-    });
-  };
-
-  const handleAuthorizeUser = (
-    targetEmail: string,
-    options?: { name?: string; role?: UserRole; note?: string }
-  ) => {
-    if (!session) return;
-    const updated = authorizeUserByAdmin(acl, session.email, targetEmail, options);
-    setAcl(updated);
-    saveACL(updated);
-    apiAuthorizeUserByAdmin(session.email, targetEmail, options).then((serverAcl) => {
-      if (serverAcl) setAcl(serverAcl);
-    });
-  };
-
-  const handleRevokeUser = (targetEmail: string) => {
-    if (!session) return;
-    const updated = revokeUserByAdmin(acl, session.email, targetEmail);
-    setAcl(updated);
-    saveACL(updated);
-    apiRevokeUserByAdmin(session.email, targetEmail).then((serverAcl) => {
-      if (serverAcl) setAcl(serverAcl);
-    });
-  };
-
-  const handleRemoveUser = (targetEmail: string) => {
-    if (!session) return;
-    const updated = removeUserRecordByAdmin(acl, session.email, targetEmail);
-    setAcl(updated);
-    saveACL(updated);
-    apiRemoveUserRecordByAdmin(session.email, targetEmail).then((serverAcl) => {
-      if (serverAcl) setAcl(serverAcl);
-    });
-  };
-
-  // Evaluate current user's authorization
-  const accessEval = session
-    ? evaluateUserAccess(session.email, acl)
-    : { isAuthorized: false, isAdmin: false, status: 'UNREGISTERED' as const, record: null };
 
   // Update weights
   const handleUpdateWeights = (newWeights: ScoringWeights) => {
@@ -470,22 +319,9 @@ export default function App() {
 
   // Delete Play
   const handleDeletePlay = (id: string) => {
-    const updated = deletePlay(id);
+    const updated = deletePlay(id, session.email);
     setSavedPlays(updated);
   };
-
-  // Gate: If not logged in or not authorized by Admin, render Login / Access Gate Screen
-  if (!session || !accessEval.isAuthorized) {
-    return (
-      <LoginScreen
-        session={session}
-        acl={acl}
-        onLogin={handleLogin}
-        onLogout={handleLogout}
-        onRequestAccess={handleRequestAccess}
-      />
-    );
-  }
 
   const userSavedPlays = filterPlaysForUser(savedPlays, session.email);
   const pendingPlaysCount = userSavedPlays.filter((p) => p.status === 'IN_ATTESA').length;
@@ -500,9 +336,9 @@ export default function App() {
         onOpenSmartPaste={() => setIsSmartPasteOpen(true)}
         pendingPlaysCount={pendingPlaysCount}
         session={session}
-        isAdmin={accessEval.isAdmin}
+        isAdmin={isAdmin}
         pendingAccessCount={pendingAccessCount}
-        onLogout={handleLogout}
+        onLogout={onLogout}
       />
 
       {/* Main Content Area */}
@@ -595,16 +431,10 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'admin' && accessEval.isAdmin && (
+        {activeTab === 'admin' && isAdmin && (
           <AdminAccessPanel
-            adminEmail={session.email}
             acl={acl}
-            onAuthorizeUser={handleAuthorizeUser}
-            onRevokeUser={handleRevokeUser}
-            onRemoveUser={handleRemoveUser}
-            onSimulatePendingRequest={(email, name, note) =>
-              handleRequestAccess({ email, name, note })
-            }
+            onDecision={decideVerifiedAccess}
           />
         )}
       </main>

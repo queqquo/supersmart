@@ -12,6 +12,7 @@
  * When GITHUB_TOKEN (or DRAWS_GITHUB_TOKEN) is set in Vercel env vars, POST updates
  * commit directly back to the external GitHub repository.
  */
+import { archiveWriteStatus } from '../backend/archive-access.mjs';
 
 const REPO_OWNER = process.env.EXTERNAL_DRAWS_REPO_OWNER || 'queqquo';
 const REPO_NAME = process.env.EXTERNAL_DRAWS_REPO_NAME || 'supersmart-storico-estrazioni';
@@ -505,6 +506,17 @@ async function fetchLiveWinForItaliaDraws() {
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
+
+  if (!['GET', 'POST', 'PUT'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, POST, PUT');
+    return res.status(405).json({ ok: false, error: 'Metodo non supportato' });
+  }
+  if (req.method !== 'GET') {
+    const status = await archiveWriteStatus(req.headers.authorization);
+    if (status !== 200) {
+      return res.status(status).json({ ok: false, error: 'Scrittura archivio non autorizzata o non disponibile' });
+    }
+  }
 
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   let body = {};

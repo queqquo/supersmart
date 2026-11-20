@@ -1,0 +1,12 @@
+{
+  "firestore": [
+    {
+      "database": "ai-studio-superenalottocom-0d960a74-f1fe-4300-b95d-ad2dc9e1c393",
+      "rules": "firestore.rules"
+    }
+  ],
+  "emulators": {
+    "firestore": { "host": "127.0.0.1", "port": 8080 },
+    "ui": { "enabled": false }
+  }
+}
