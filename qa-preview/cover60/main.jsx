@@ -23,7 +23,7 @@ function Preview() {
       <p className="rounded-xl border border-slate-700 px-4 py-3 text-sm text-slate-300">
         <strong className="text-white">Anteprima Supersmart</strong> · Apri «Copertura 60 · 10 €» nel generatore. Il registro è dimostrativo e non salva dati su Firebase.
       </p>
-      <SystemGenerator userEmail="demo@example.org" draws={draws} weights={weights} filters={filters}
+      <SystemGenerator userEmail="demo@example.org" draws={draws} savedPlays={plays} weights={weights} filters={filters}
         onUpdateWeights={setWeights} onUpdateFilters={setFilters} onOpenSmartPaste={() => {}}
         onSavePlay={play => setPlays(items => [...items, play])} />
       <section className="rounded-xl border border-slate-700 p-4">

@@ -1,28 +1,40 @@
 import { useState } from 'react';
-import { BookmarkPlus, Copy, Shuffle } from 'lucide-react';
+import { BookmarkPlus, Copy, ShieldCheck, Shuffle } from 'lucide-react';
 import type { Draw, GeneratedColumn, SavedPlay } from '../types/lottery';
-import { COVER60_COST, COVER60_ODDS, COVER60_TOTAL_DRAWS, generateCover60 } from '../utils/cover60';
+import { COVER60_COST, COVER60_HISTORY_LIMIT, COVER60_ODDS, COVER60_TOTAL_DRAWS, generateCover60, getCover60History } from '../utils/cover60';
 
 const pct = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 5 });
 const whole = new Intl.NumberFormat('it-IT');
 const secondary = 'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-emerald-300';
 
-export function Cover60Panel({ latestDraw, onSavePlay }: {
+export function Cover60Panel({ latestDraw, savedPlays, onSavePlay }: {
   latestDraw?: Draw;
+  savedPlays: readonly SavedPlay[];
   onSavePlay: (play: SavedPlay) => void;
 }) {
   const [columns, setColumns] = useState<GeneratedColumn[]>([]);
   const [status, setStatus] = useState('');
+  const [historyMessage, setHistoryMessage] = useState('');
+  const [generationError, setGenerationError] = useState(false);
   const [saved, setSaved] = useState(false);
   const [manualCopy, setManualCopy] = useState(false);
   const text = columns.map(({ numbers }) => numbers.map(n => String(n).padStart(2, '0')).join(' - ')).join('\n');
 
   function generate() {
-    const next = generateCover60();
-    setColumns(next);
+    const { forbidden, checkedPlays } = getCover60History(savedPlays);
+    const next = generateCover60(forbidden);
+    setColumns(next ?? []);
     setSaved(false);
     setManualCopy(false);
-    setStatus('10 sestine generate: 60 numeri distinti.');
+    setGenerationError(!next);
+    setStatus(next ? '10 sestine generate: 60 numeri distinti.' : '');
+    setHistoryMessage(!next
+      ? 'Non è stato possibile generare dieci sestine senza duplicati. Riprova.'
+      : checkedPlays === 1
+        ? 'Nessuna sestina identica nella giocata SuperEnalotto controllata.'
+        : checkedPlays > 1
+          ? `Nessuna sestina identica nelle ${checkedPlays} giocate SuperEnalotto controllate.`
+          : 'Nessuna giocata SuperEnalotto disponibile per il confronto. Il controllo sullo storico non è stato eseguito.');
   }
 
   async function copy() {
@@ -60,7 +72,7 @@ export function Cover60Panel({ latestDraw, onSavePlay }: {
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wider text-emerald-300">SuperEnalotto base · 6/90</p>
           <h2 id="cover60-heading" className="text-xl font-bold text-white">Copertura 60</h2>
-          <p className="max-w-xl text-sm text-slate-300">10 sestine da 1 €, con 60 numeri distinti e nessuna sovrapposizione. Generazione nel browser, senza storico, simulazioni o chiamate al server.</p>
+          <p className="max-w-xl text-sm text-slate-300">10 sestine da 1 €, con 60 numeri distinti e nessuna sovrapposizione. Generazione nel browser, senza simulazioni o chiamate al server.</p>
         </div>
         <div className="rounded-xl border border-emerald-800 bg-emerald-950/60 px-4 py-2">
           <span className="block text-xs text-emerald-200">Costo per concorso</span>
@@ -71,6 +83,15 @@ export function Cover60Panel({ latestDraw, onSavePlay }: {
         className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950 hover:bg-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 sm:w-auto">
         <Shuffle aria-hidden="true" className="h-4 w-4" />{columns.length ? 'Rigenera 10 sestine' : 'Genera 10 sestine'}
       </button>
+      <div className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm ${generationError ? 'border-rose-800 bg-rose-950/50 text-rose-100' : 'border-slate-700 bg-slate-950 text-slate-200'}`}>
+        <ShieldCheck aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+        <div>
+          <p className="font-semibold">Controllo anti-duplicato attivo</p>
+          <p data-testid="cover60-history-check" aria-live="polite" className="mt-0.5 text-xs leading-relaxed">
+            {historyMessage || `Confronta ogni sestina con le ultime ${COVER60_HISTORY_LIMIT} giocate SuperEnalotto già caricate in Verifica & Bilancio.`}
+          </p>
+        </div>
+      </div>
       {columns.length > 0 && (
         <>
           <ol aria-label="Sestine Copertura 60" className="grid gap-2 sm:grid-cols-2">

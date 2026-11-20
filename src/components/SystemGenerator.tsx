@@ -73,6 +73,7 @@ import { Cover60Panel } from './Cover60Panel';
 interface SystemGeneratorProps {
   userEmail: string;
   draws: Draw[];
+  savedPlays: readonly SavedPlay[];
   weights: ScoringWeights;
   onUpdateWeights: (weights: ScoringWeights) => void;
   filters: FilterOptions;
@@ -105,7 +106,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = (props) => {
         ))}
       </div>
       <div hidden={view !== 'reduced'}><ReducedSystemGenerator {...props} /></div>
-      <div hidden={view !== 'cover60'}><Cover60Panel latestDraw={props.draws[0]} onSavePlay={props.onSavePlay} /></div>
+      <div hidden={view !== 'cover60'}><Cover60Panel latestDraw={props.draws[0]} savedPlays={props.savedPlays} onSavePlay={props.onSavePlay} /></div>
     </div>
   );
 };

@@ -348,6 +348,7 @@ function AuthorizedApp({ session, acl, isAdmin, onLogout }: {
             key={session.email.toLowerCase()}
             userEmail={session.email}
             draws={draws}
+            savedPlays={userSavedPlays}
             weights={weights}
             onUpdateWeights={handleUpdateWeights}
             filters={filters}
