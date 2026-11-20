@@ -311,12 +311,22 @@ async function writeExternalGithubFile(filePath, payload, existingSha, commitMes
   };
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchLiveSuperEnalottoDraws() {
   const results = [];
   try {
-    const res = await fetch(`${SUPERENALOTTO_FEED_URL}?t=${Date.now()}`, {
+    const res = await fetchWithTimeout(`${SUPERENALOTTO_FEED_URL}?t=${Date.now()}`, {
       headers: { 'User-Agent': 'SuperSmart-Vercel-Draws-API/1.0' }
-    });
+    }, 7000);
     if (res.ok) {
       const data = await res.json();
       const rawDraws = Array.isArray(data?.draws)
@@ -342,13 +352,13 @@ async function fetchLiveSuperEnalottoDraws() {
     // Ignore transient feed errors
   }
 
-  // Live HTML fallback from estrazionilotterie.it for the very latest evening draws
+  // Live HTML fallback from estrazionilotterie.it for the very latest evening draws (short timeout)
   try {
-    const res = await fetch('https://www.estrazionilotterie.it/superenalotto/estrazioni', {
+    const res = await fetchWithTimeout('https://www.estrazionilotterie.it/superenalotto/estrazioni', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
-    });
+    }, 4500);
     if (res.ok) {
       const html = await res.text();
       const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
@@ -466,23 +476,28 @@ async function fetchLiveWinForItaliaDraws() {
     }
   ];
 
-  const collected = [];
-  for (const src of sources) {
-    try {
-      const res = await fetch(src.url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-      if (!res.ok) continue;
+  const settled = await Promise.allSettled(
+    sources.map(async (src) => {
+      const res = await fetchWithTimeout(
+        src.url,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept-Language': 'it-IT,it;q=0.9'
+          }
+        },
+        5000
+      );
+      if (!res.ok) return [];
       const html = await res.text();
-      const parsed = src.parse(html);
-      if (parsed.length > 0) {
-        collected.push(...parsed);
-        break;
-      }
-    } catch {
-      // Try next source
+      return src.parse(html);
+    })
+  );
+
+  const collected = [];
+  for (const outcome of settled) {
+    if (outcome.status === 'fulfilled' && Array.isArray(outcome.value)) {
+      collected.push(...outcome.value);
     }
   }
   return collected;
