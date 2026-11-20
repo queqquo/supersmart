@@ -1,13 +1,20 @@
 {
-  "exportedAt": "2026-11-19T20:30:00.000Z",
-  "count": 21,
+  "exportedAt": "2026-11-20T09:17:33.978Z",
+  "count": 183,
   "draws": [
     {
       "id": "2026-185",
       "contestNumber": 185,
       "year": 2026,
       "date": "2026-11-19",
-      "numbers": [22, 38, 54, 61, 68, 75],
+      "numbers": [
+        22,
+        38,
+        54,
+        61,
+        68,
+        75
+      ],
       "jolly": 2,
       "superstar": 8
     },
@@ -16,7 +23,14 @@
       "contestNumber": 184,
       "year": 2026,
       "date": "2026-11-17",
-      "numbers": [1, 2, 10, 79, 85, 90],
+      "numbers": [
+        1,
+        2,
+        10,
+        79,
+        85,
+        90
+      ],
       "jolly": 47,
       "superstar": 68
     },
@@ -25,7 +39,14 @@
       "contestNumber": 183,
       "year": 2026,
       "date": "2026-11-14",
-      "numbers": [26, 40, 49, 64, 66, 74],
+      "numbers": [
+        26,
+        40,
+        49,
+        64,
+        66,
+        74
+      ],
       "jolly": 61,
       "superstar": 5
     },
@@ -34,7 +55,14 @@
       "contestNumber": 182,
       "year": 2026,
       "date": "2026-11-13",
-      "numbers": [23, 24, 55, 56, 82, 86],
+      "numbers": [
+        23,
+        24,
+        55,
+        56,
+        82,
+        86
+      ],
       "jolly": 46,
       "superstar": 38
     },
@@ -43,7 +71,14 @@
       "contestNumber": 181,
       "year": 2026,
       "date": "2026-11-12",
-      "numbers": [3, 12, 32, 63, 79, 82],
+      "numbers": [
+        3,
+        12,
+        32,
+        63,
+        79,
+        82
+      ],
       "jolly": 83,
       "superstar": 19
     },
@@ -52,7 +87,14 @@
       "contestNumber": 180,
       "year": 2026,
       "date": "2026-11-10",
-      "numbers": [47, 73, 74, 78, 82, 90],
+      "numbers": [
+        47,
+        73,
+        74,
+        78,
+        82,
+        90
+      ],
       "jolly": 4,
       "superstar": 64
     },
@@ -61,7 +103,14 @@
       "contestNumber": 179,
       "year": 2026,
       "date": "2026-11-07",
-      "numbers": [38, 41, 54, 59, 80, 85],
+      "numbers": [
+        38,
+        41,
+        54,
+        59,
+        80,
+        85
+      ],
       "jolly": 50,
       "superstar": 39
     },
@@ -70,7 +119,14 @@
       "contestNumber": 178,
       "year": 2026,
       "date": "2026-11-06",
-      "numbers": [5, 20, 28, 47, 50, 67],
+      "numbers": [
+        5,
+        20,
+        28,
+        47,
+        50,
+        67
+      ],
       "jolly": 87,
       "superstar": 14
     },
@@ -79,7 +135,14 @@
       "contestNumber": 177,
       "year": 2026,
       "date": "2026-11-05",
-      "numbers": [17, 21, 28, 29, 51, 56],
+      "numbers": [
+        17,
+        21,
+        28,
+        29,
+        51,
+        56
+      ],
       "jolly": 30,
       "superstar": 90
     },
@@ -88,7 +151,14 @@
       "contestNumber": 176,
       "year": 2026,
       "date": "2026-11-03",
-      "numbers": [11, 13, 14, 47, 52, 71],
+      "numbers": [
+        11,
+        13,
+        14,
+        47,
+        52,
+        71
+      ],
       "jolly": 43,
       "superstar": 68
     },
@@ -97,7 +167,14 @@
       "contestNumber": 175,
       "year": 2026,
       "date": "2026-10-31",
-      "numbers": [4, 18, 20, 33, 46, 78],
+      "numbers": [
+        4,
+        18,
+        20,
+        33,
+        46,
+        78
+      ],
       "jolly": 7,
       "superstar": 2
     },
@@ -106,7 +183,14 @@
       "contestNumber": 174,
       "year": 2026,
       "date": "2026-10-30",
-      "numbers": [19, 24, 49, 62, 64, 85],
+      "numbers": [
+        19,
+        24,
+        49,
+        62,
+        64,
+        85
+      ],
       "jolly": 10,
       "superstar": 45
     },
@@ -115,7 +199,14 @@
       "contestNumber": 173,
       "year": 2026,
       "date": "2026-10-29",
-      "numbers": [5, 18, 33, 47, 71, 88],
+      "numbers": [
+        5,
+        18,
+        33,
+        47,
+        71,
+        88
+      ],
       "jolly": 22,
       "superstar": 14
     },
@@ -124,7 +215,14 @@
       "contestNumber": 172,
       "year": 2026,
       "date": "2026-10-27",
-      "numbers": [8, 21, 39, 54, 68, 82],
+      "numbers": [
+        8,
+        21,
+        39,
+        54,
+        68,
+        82
+      ],
       "jolly": 61,
       "superstar": 77
     },
@@ -133,7 +231,14 @@
       "contestNumber": 171,
       "year": 2026,
       "date": "2026-10-24",
-      "numbers": [3, 14, 29, 52, 76, 90],
+      "numbers": [
+        3,
+        14,
+        29,
+        52,
+        76,
+        90
+      ],
       "jolly": 44,
       "superstar": 9
     },
@@ -142,7 +247,14 @@
       "contestNumber": 170,
       "year": 2026,
       "date": "2026-10-23",
-      "numbers": [11, 27, 42, 58, 69, 81],
+      "numbers": [
+        11,
+        27,
+        42,
+        58,
+        69,
+        81
+      ],
       "jolly": 15,
       "superstar": 63
     },
@@ -151,7 +263,14 @@
       "contestNumber": 169,
       "year": 2026,
       "date": "2026-10-20",
-      "numbers": [6, 17, 35, 48, 74, 86],
+      "numbers": [
+        6,
+        17,
+        35,
+        48,
+        74,
+        86
+      ],
       "jolly": 31,
       "superstar": 50
     },
@@ -160,7 +279,14 @@
       "contestNumber": 168,
       "year": 2026,
       "date": "2026-10-17",
-      "numbers": [2, 19, 36, 55, 72, 89],
+      "numbers": [
+        2,
+        19,
+        36,
+        55,
+        72,
+        89
+      ],
       "jolly": 40,
       "superstar": 12
     },
@@ -169,7 +295,14 @@
       "contestNumber": 167,
       "year": 2026,
       "date": "2026-10-16",
-      "numbers": [9, 23, 41, 60, 75, 84],
+      "numbers": [
+        9,
+        23,
+        41,
+        60,
+        75,
+        84
+      ],
       "jolly": 28,
       "superstar": 37
     },
@@ -178,7 +311,14 @@
       "contestNumber": 166,
       "year": 2026,
       "date": "2026-10-13",
-      "numbers": [4, 15, 31, 53, 67, 80],
+      "numbers": [
+        4,
+        15,
+        31,
+        53,
+        67,
+        80
+      ],
       "jolly": 79,
       "superstar": 25
     },
@@ -187,9 +327,2608 @@
       "contestNumber": 165,
       "year": 2026,
       "date": "2026-10-10",
-      "numbers": [7, 22, 38, 46, 70, 87],
+      "numbers": [
+        7,
+        22,
+        38,
+        46,
+        70,
+        87
+      ],
       "jolly": 16,
       "superstar": 59
+    },
+    {
+      "id": "2026-162",
+      "contestNumber": 162,
+      "year": 2026,
+      "date": "2026-10-09",
+      "numbers": [
+        18,
+        35,
+        44,
+        56,
+        76,
+        82
+      ],
+      "jolly": 49,
+      "superstar": 15
+    },
+    {
+      "id": "2026-161",
+      "contestNumber": 161,
+      "year": 2026,
+      "date": "2026-10-08",
+      "numbers": [
+        29,
+        52,
+        57,
+        60,
+        65,
+        72
+      ],
+      "jolly": 62,
+      "superstar": 50
+    },
+    {
+      "id": "2026-160",
+      "contestNumber": 160,
+      "year": 2026,
+      "date": "2026-10-06",
+      "numbers": [
+        22,
+        32,
+        34,
+        70,
+        74,
+        77
+      ],
+      "jolly": 30,
+      "superstar": 14
+    },
+    {
+      "id": "2026-159",
+      "contestNumber": 159,
+      "year": 2026,
+      "date": "2026-10-03",
+      "numbers": [
+        5,
+        12,
+        18,
+        25,
+        28,
+        42
+      ],
+      "jolly": 66,
+      "superstar": 76
+    },
+    {
+      "id": "2026-158",
+      "contestNumber": 158,
+      "year": 2026,
+      "date": "2026-10-02",
+      "numbers": [
+        2,
+        31,
+        55,
+        56,
+        73,
+        84
+      ],
+      "jolly": 77,
+      "superstar": 41
+    },
+    {
+      "id": "2026-157",
+      "contestNumber": 157,
+      "year": 2026,
+      "date": "2026-10-01",
+      "numbers": [
+        5,
+        12,
+        28,
+        41,
+        56,
+        66
+      ],
+      "jolly": 73,
+      "superstar": 42
+    },
+    {
+      "id": "2026-156",
+      "contestNumber": 156,
+      "year": 2026,
+      "date": "2026-09-29",
+      "numbers": [
+        16,
+        26,
+        28,
+        30,
+        43,
+        72
+      ],
+      "jolly": 5,
+      "superstar": 32
+    },
+    {
+      "id": "2026-155",
+      "contestNumber": 155,
+      "year": 2026,
+      "date": "2026-09-26",
+      "numbers": [
+        52,
+        54,
+        55,
+        64,
+        68,
+        78
+      ],
+      "jolly": 31,
+      "superstar": 6
+    },
+    {
+      "id": "2026-154",
+      "contestNumber": 154,
+      "year": 2026,
+      "date": "2026-09-25",
+      "numbers": [
+        10,
+        18,
+        26,
+        33,
+        39,
+        45
+      ],
+      "jolly": 89,
+      "superstar": 48
+    },
+    {
+      "id": "2026-153",
+      "contestNumber": 153,
+      "year": 2026,
+      "date": "2026-09-24",
+      "numbers": [
+        1,
+        28,
+        31,
+        50,
+        63,
+        85
+      ],
+      "jolly": 86,
+      "superstar": 48
+    },
+    {
+      "id": "2026-152",
+      "contestNumber": 152,
+      "year": 2026,
+      "date": "2026-09-22",
+      "numbers": [
+        12,
+        42,
+        57,
+        65,
+        76,
+        77
+      ],
+      "jolly": 21,
+      "superstar": 54
+    },
+    {
+      "id": "2026-151",
+      "contestNumber": 151,
+      "year": 2026,
+      "date": "2026-09-19",
+      "numbers": [
+        20,
+        42,
+        45,
+        48,
+        68,
+        85
+      ],
+      "jolly": 49,
+      "superstar": 41
+    },
+    {
+      "id": "2026-150",
+      "contestNumber": 150,
+      "year": 2026,
+      "date": "2026-09-18",
+      "numbers": [
+        29,
+        37,
+        41,
+        43,
+        74,
+        86
+      ],
+      "jolly": 25,
+      "superstar": 78
+    },
+    {
+      "id": "2026-149",
+      "contestNumber": 149,
+      "year": 2026,
+      "date": "2026-09-17",
+      "numbers": [
+        6,
+        7,
+        16,
+        35,
+        46,
+        54
+      ],
+      "jolly": 21,
+      "superstar": 51
+    },
+    {
+      "id": "2026-148",
+      "contestNumber": 148,
+      "year": 2026,
+      "date": "2026-09-15",
+      "numbers": [
+        3,
+        12,
+        18,
+        32,
+        47,
+        54
+      ],
+      "jolly": 69,
+      "superstar": 28
+    },
+    {
+      "id": "2026-147",
+      "contestNumber": 147,
+      "year": 2026,
+      "date": "2026-09-12",
+      "numbers": [
+        3,
+        7,
+        14,
+        40,
+        78,
+        81
+      ],
+      "jolly": 1,
+      "superstar": 54
+    },
+    {
+      "id": "2026-146",
+      "contestNumber": 146,
+      "year": 2026,
+      "date": "2026-09-11",
+      "numbers": [
+        8,
+        13,
+        16,
+        52,
+        64,
+        70
+      ],
+      "jolly": 17,
+      "superstar": 21
+    },
+    {
+      "id": "2026-145",
+      "contestNumber": 145,
+      "year": 2026,
+      "date": "2026-09-10",
+      "numbers": [
+        2,
+        17,
+        39,
+        59,
+        63,
+        89
+      ],
+      "jolly": 62,
+      "superstar": 62
+    },
+    {
+      "id": "2026-144",
+      "contestNumber": 144,
+      "year": 2026,
+      "date": "2026-09-08",
+      "numbers": [
+        23,
+        26,
+        41,
+        52,
+        59,
+        85
+      ],
+      "jolly": 49,
+      "superstar": 47
+    },
+    {
+      "id": "2026-143",
+      "contestNumber": 143,
+      "year": 2026,
+      "date": "2026-09-05",
+      "numbers": [
+        12,
+        24,
+        28,
+        32,
+        37,
+        78
+      ],
+      "jolly": 40,
+      "superstar": 16
+    },
+    {
+      "id": "2026-142",
+      "contestNumber": 142,
+      "year": 2026,
+      "date": "2026-09-04",
+      "numbers": [
+        8,
+        44,
+        60,
+        73,
+        86,
+        89
+      ],
+      "jolly": 57,
+      "superstar": 42
+    },
+    {
+      "id": "2026-141",
+      "contestNumber": 141,
+      "year": 2026,
+      "date": "2026-09-03",
+      "numbers": [
+        8,
+        11,
+        15,
+        60,
+        68,
+        76
+      ],
+      "jolly": 9,
+      "superstar": 90
+    },
+    {
+      "id": "2026-140",
+      "contestNumber": 140,
+      "year": 2026,
+      "date": "2026-09-01",
+      "numbers": [
+        42,
+        47,
+        59,
+        64,
+        67,
+        71
+      ],
+      "jolly": 88,
+      "superstar": 75
+    },
+    {
+      "id": "2026-139",
+      "contestNumber": 139,
+      "year": 2026,
+      "date": "2026-08-29",
+      "numbers": [
+        12,
+        17,
+        45,
+        59,
+        74,
+        77
+      ],
+      "jolly": 62,
+      "superstar": 62
+    },
+    {
+      "id": "2026-138",
+      "contestNumber": 138,
+      "year": 2026,
+      "date": "2026-08-28",
+      "numbers": [
+        4,
+        8,
+        27,
+        62,
+        70,
+        79
+      ],
+      "jolly": 60,
+      "superstar": 55
+    },
+    {
+      "id": "2026-137",
+      "contestNumber": 137,
+      "year": 2026,
+      "date": "2026-08-27",
+      "numbers": [
+        2,
+        27,
+        28,
+        50,
+        75,
+        84
+      ],
+      "jolly": 32,
+      "superstar": 40
+    },
+    {
+      "id": "2026-136",
+      "contestNumber": 136,
+      "year": 2026,
+      "date": "2026-08-25",
+      "numbers": [
+        15,
+        36,
+        62,
+        67,
+        69,
+        70
+      ],
+      "jolly": 32,
+      "superstar": 15
+    },
+    {
+      "id": "2026-135",
+      "contestNumber": 135,
+      "year": 2026,
+      "date": "2026-08-22",
+      "numbers": [
+        2,
+        16,
+        23,
+        31,
+        72,
+        85
+      ],
+      "jolly": 82,
+      "superstar": 14
+    },
+    {
+      "id": "2026-134",
+      "contestNumber": 134,
+      "year": 2026,
+      "date": "2026-08-21",
+      "numbers": [
+        12,
+        25,
+        27,
+        28,
+        39,
+        57
+      ],
+      "jolly": 42,
+      "superstar": 13
+    },
+    {
+      "id": "2026-133",
+      "contestNumber": 133,
+      "year": 2026,
+      "date": "2026-08-20",
+      "numbers": [
+        14,
+        18,
+        26,
+        51,
+        64,
+        71
+      ],
+      "jolly": 77,
+      "superstar": 49
+    },
+    {
+      "id": "2026-132",
+      "contestNumber": 132,
+      "year": 2026,
+      "date": "2026-08-18",
+      "numbers": [
+        10,
+        16,
+        24,
+        25,
+        39,
+        66
+      ],
+      "jolly": 70,
+      "superstar": 6
+    },
+    {
+      "id": "2026-131",
+      "contestNumber": 131,
+      "year": 2026,
+      "date": "2026-08-17",
+      "numbers": [
+        18,
+        24,
+        69,
+        71,
+        73,
+        82
+      ],
+      "jolly": 29,
+      "superstar": 41
+    },
+    {
+      "id": "2026-130",
+      "contestNumber": 130,
+      "year": 2026,
+      "date": "2026-08-14",
+      "numbers": [
+        9,
+        18,
+        20,
+        25,
+        53,
+        90
+      ],
+      "jolly": 49,
+      "superstar": 23
+    },
+    {
+      "id": "2026-129",
+      "contestNumber": 129,
+      "year": 2026,
+      "date": "2026-08-13",
+      "numbers": [
+        2,
+        7,
+        16,
+        29,
+        57,
+        84
+      ],
+      "jolly": 18,
+      "superstar": 1
+    },
+    {
+      "id": "2026-128",
+      "contestNumber": 128,
+      "year": 2026,
+      "date": "2026-08-11",
+      "numbers": [
+        8,
+        19,
+        38,
+        53,
+        66,
+        79
+      ],
+      "jolly": 90,
+      "superstar": 49
+    },
+    {
+      "id": "2026-127",
+      "contestNumber": 127,
+      "year": 2026,
+      "date": "2026-08-08",
+      "numbers": [
+        9,
+        12,
+        55,
+        61,
+        82,
+        85
+      ],
+      "jolly": 71,
+      "superstar": 31
+    },
+    {
+      "id": "2026-126",
+      "contestNumber": 126,
+      "year": 2026,
+      "date": "2026-08-07",
+      "numbers": [
+        1,
+        7,
+        29,
+        32,
+        60,
+        63
+      ],
+      "jolly": 68,
+      "superstar": 37
+    },
+    {
+      "id": "2026-125",
+      "contestNumber": 125,
+      "year": 2026,
+      "date": "2026-08-06",
+      "numbers": [
+        2,
+        11,
+        20,
+        33,
+        74,
+        83
+      ],
+      "jolly": 15,
+      "superstar": 19
+    },
+    {
+      "id": "2026-124",
+      "contestNumber": 124,
+      "year": 2026,
+      "date": "2026-08-04",
+      "numbers": [
+        49,
+        56,
+        58,
+        70,
+        76,
+        78
+      ],
+      "jolly": 29,
+      "superstar": 16
+    },
+    {
+      "id": "2026-123",
+      "contestNumber": 123,
+      "year": 2026,
+      "date": "2026-08-01",
+      "numbers": [
+        8,
+        11,
+        21,
+        24,
+        72,
+        88
+      ],
+      "jolly": 33,
+      "superstar": 11
+    },
+    {
+      "id": "2026-122",
+      "contestNumber": 122,
+      "year": 2026,
+      "date": "2026-07-31",
+      "numbers": [
+        2,
+        6,
+        10,
+        31,
+        39,
+        83
+      ],
+      "jolly": 66,
+      "superstar": 75
+    },
+    {
+      "id": "2026-121",
+      "contestNumber": 121,
+      "year": 2026,
+      "date": "2026-07-30",
+      "numbers": [
+        20,
+        47,
+        75,
+        76,
+        78,
+        89
+      ],
+      "jolly": 9,
+      "superstar": 89
+    },
+    {
+      "id": "2026-120",
+      "contestNumber": 120,
+      "year": 2026,
+      "date": "2026-07-28",
+      "numbers": [
+        1,
+        6,
+        9,
+        43,
+        54,
+        62
+      ],
+      "jolly": 87,
+      "superstar": 69
+    },
+    {
+      "id": "2026-119",
+      "contestNumber": 119,
+      "year": 2026,
+      "date": "2026-07-25",
+      "numbers": [
+        18,
+        19,
+        33,
+        34,
+        61,
+        85
+      ],
+      "jolly": 15,
+      "superstar": 59
+    },
+    {
+      "id": "2026-118",
+      "contestNumber": 118,
+      "year": 2026,
+      "date": "2026-07-24",
+      "numbers": [
+        20,
+        40,
+        53,
+        61,
+        74,
+        79
+      ],
+      "jolly": 11,
+      "superstar": 30
+    },
+    {
+      "id": "2026-117",
+      "contestNumber": 117,
+      "year": 2026,
+      "date": "2026-07-23",
+      "numbers": [
+        2,
+        12,
+        22,
+        34,
+        70,
+        74
+      ],
+      "jolly": 41,
+      "superstar": 8
+    },
+    {
+      "id": "2026-116",
+      "contestNumber": 116,
+      "year": 2026,
+      "date": "2026-07-21",
+      "numbers": [
+        13,
+        14,
+        15,
+        29,
+        38,
+        63
+      ],
+      "jolly": 24,
+      "superstar": 49
+    },
+    {
+      "id": "2026-115",
+      "contestNumber": 115,
+      "year": 2026,
+      "date": "2026-07-18",
+      "numbers": [
+        1,
+        28,
+        52,
+        62,
+        79,
+        86
+      ],
+      "jolly": 61,
+      "superstar": 31
+    },
+    {
+      "id": "2026-114",
+      "contestNumber": 114,
+      "year": 2026,
+      "date": "2026-07-17",
+      "numbers": [
+        7,
+        34,
+        45,
+        64,
+        65,
+        76
+      ],
+      "jolly": 46,
+      "superstar": 90
+    },
+    {
+      "id": "2026-113",
+      "contestNumber": 113,
+      "year": 2026,
+      "date": "2026-07-16",
+      "numbers": [
+        1,
+        15,
+        21,
+        46,
+        52,
+        67
+      ],
+      "jolly": 41,
+      "superstar": 76
+    },
+    {
+      "id": "2026-112",
+      "contestNumber": 112,
+      "year": 2026,
+      "date": "2026-07-14",
+      "numbers": [
+        8,
+        44,
+        49,
+        80,
+        85,
+        88
+      ],
+      "jolly": 30,
+      "superstar": 64
+    },
+    {
+      "id": "2026-111",
+      "contestNumber": 111,
+      "year": 2026,
+      "date": "2026-07-11",
+      "numbers": [
+        6,
+        7,
+        10,
+        47,
+        49,
+        61
+      ],
+      "jolly": 5,
+      "superstar": 62
+    },
+    {
+      "id": "2026-110",
+      "contestNumber": 110,
+      "year": 2026,
+      "date": "2026-07-10",
+      "numbers": [
+        2,
+        3,
+        12,
+        28,
+        63,
+        82
+      ],
+      "jolly": 76,
+      "superstar": 79
+    },
+    {
+      "id": "2026-109",
+      "contestNumber": 109,
+      "year": 2026,
+      "date": "2026-07-09",
+      "numbers": [
+        9,
+        17,
+        20,
+        31,
+        40,
+        79
+      ],
+      "jolly": 58,
+      "superstar": 47
+    },
+    {
+      "id": "2026-108",
+      "contestNumber": 108,
+      "year": 2026,
+      "date": "2026-07-07",
+      "numbers": [
+        3,
+        16,
+        30,
+        53,
+        55,
+        79
+      ],
+      "jolly": 84,
+      "superstar": 66
+    },
+    {
+      "id": "2026-107",
+      "contestNumber": 107,
+      "year": 2026,
+      "date": "2026-07-04",
+      "numbers": [
+        2,
+        37,
+        55,
+        62,
+        72,
+        76
+      ],
+      "jolly": 34,
+      "superstar": 75
+    },
+    {
+      "id": "2026-106",
+      "contestNumber": 106,
+      "year": 2026,
+      "date": "2026-07-03",
+      "numbers": [
+        22,
+        26,
+        30,
+        40,
+        68,
+        86
+      ],
+      "jolly": 72,
+      "superstar": 48
+    },
+    {
+      "id": "2026-105",
+      "contestNumber": 105,
+      "year": 2026,
+      "date": "2026-07-02",
+      "numbers": [
+        4,
+        17,
+        19,
+        23,
+        47,
+        59
+      ],
+      "jolly": 51,
+      "superstar": 82
+    },
+    {
+      "id": "2026-104",
+      "contestNumber": 104,
+      "year": 2026,
+      "date": "2026-06-30",
+      "numbers": [
+        1,
+        7,
+        51,
+        64,
+        78,
+        83
+      ],
+      "jolly": 13,
+      "superstar": 66
+    },
+    {
+      "id": "2026-103",
+      "contestNumber": 103,
+      "year": 2026,
+      "date": "2026-06-27",
+      "numbers": [
+        15,
+        19,
+        36,
+        47,
+        85,
+        90
+      ],
+      "jolly": 42,
+      "superstar": 62
+    },
+    {
+      "id": "2026-102",
+      "contestNumber": 102,
+      "year": 2026,
+      "date": "2026-06-26",
+      "numbers": [
+        1,
+        22,
+        30,
+        45,
+        73,
+        76
+      ],
+      "jolly": 64,
+      "superstar": 49
+    },
+    {
+      "id": "2026-101",
+      "contestNumber": 101,
+      "year": 2026,
+      "date": "2026-06-25",
+      "numbers": [
+        25,
+        27,
+        54,
+        72,
+        73,
+        76
+      ],
+      "jolly": 31,
+      "superstar": 80
+    },
+    {
+      "id": "2026-100",
+      "contestNumber": 100,
+      "year": 2026,
+      "date": "2026-06-23",
+      "numbers": [
+        1,
+        12,
+        17,
+        27,
+        66,
+        84
+      ],
+      "jolly": 61,
+      "superstar": 4
+    },
+    {
+      "id": "2026-099",
+      "contestNumber": 99,
+      "year": 2026,
+      "date": "2026-06-20",
+      "numbers": [
+        14,
+        59,
+        69,
+        71,
+        82,
+        89
+      ],
+      "jolly": 47,
+      "superstar": 3
+    },
+    {
+      "id": "2026-098",
+      "contestNumber": 98,
+      "year": 2026,
+      "date": "2026-06-19",
+      "numbers": [
+        14,
+        18,
+        25,
+        69,
+        81,
+        89
+      ],
+      "jolly": 11,
+      "superstar": 69
+    },
+    {
+      "id": "2026-097",
+      "contestNumber": 97,
+      "year": 2026,
+      "date": "2026-06-18",
+      "numbers": [
+        4,
+        26,
+        39,
+        43,
+        70,
+        87
+      ],
+      "jolly": 57,
+      "superstar": 57
+    },
+    {
+      "id": "2026-096",
+      "contestNumber": 96,
+      "year": 2026,
+      "date": "2026-06-16",
+      "numbers": [
+        4,
+        28,
+        33,
+        35,
+        66,
+        80
+      ],
+      "jolly": 48,
+      "superstar": 72
+    },
+    {
+      "id": "2026-095",
+      "contestNumber": 95,
+      "year": 2026,
+      "date": "2026-06-13",
+      "numbers": [
+        13,
+        23,
+        34,
+        68,
+        87,
+        90
+      ],
+      "jolly": 80,
+      "superstar": 54
+    },
+    {
+      "id": "2026-094",
+      "contestNumber": 94,
+      "year": 2026,
+      "date": "2026-06-12",
+      "numbers": [
+        18,
+        24,
+        42,
+        68,
+        75,
+        83
+      ],
+      "jolly": 26,
+      "superstar": 20
+    },
+    {
+      "id": "2026-093",
+      "contestNumber": 93,
+      "year": 2026,
+      "date": "2026-06-11",
+      "numbers": [
+        7,
+        21,
+        22,
+        40,
+        44,
+        87
+      ],
+      "jolly": 53,
+      "superstar": 83
+    },
+    {
+      "id": "2026-092",
+      "contestNumber": 92,
+      "year": 2026,
+      "date": "2026-06-09",
+      "numbers": [
+        18,
+        36,
+        47,
+        55,
+        73,
+        80
+      ],
+      "jolly": 90,
+      "superstar": 54
+    },
+    {
+      "id": "2026-091",
+      "contestNumber": 91,
+      "year": 2026,
+      "date": "2026-06-08",
+      "numbers": [
+        28,
+        33,
+        51,
+        59,
+        82,
+        87
+      ],
+      "jolly": 88,
+      "superstar": 87
+    },
+    {
+      "id": "2026-090",
+      "contestNumber": 90,
+      "year": 2026,
+      "date": "2026-06-06",
+      "numbers": [
+        2,
+        7,
+        29,
+        68,
+        72,
+        89
+      ],
+      "jolly": 57,
+      "superstar": 38
+    },
+    {
+      "id": "2026-089",
+      "contestNumber": 89,
+      "year": 2026,
+      "date": "2026-06-05",
+      "numbers": [
+        9,
+        25,
+        51,
+        63,
+        73,
+        89
+      ],
+      "jolly": 90,
+      "superstar": 40
+    },
+    {
+      "id": "2026-088",
+      "contestNumber": 88,
+      "year": 2026,
+      "date": "2026-06-04",
+      "numbers": [
+        12,
+        33,
+        43,
+        55,
+        74,
+        75
+      ],
+      "jolly": 70,
+      "superstar": 59
+    },
+    {
+      "id": "2026-087",
+      "contestNumber": 87,
+      "year": 2026,
+      "date": "2026-05-30",
+      "numbers": [
+        8,
+        13,
+        21,
+        39,
+        63,
+        71
+      ],
+      "jolly": 72,
+      "superstar": 56
+    },
+    {
+      "id": "2026-086",
+      "contestNumber": 86,
+      "year": 2026,
+      "date": "2026-05-29",
+      "numbers": [
+        9,
+        42,
+        44,
+        46,
+        85,
+        90
+      ],
+      "jolly": 56,
+      "superstar": 20
+    },
+    {
+      "id": "2026-085",
+      "contestNumber": 85,
+      "year": 2026,
+      "date": "2026-05-28",
+      "numbers": [
+        22,
+        33,
+        36,
+        74,
+        78,
+        86
+      ],
+      "jolly": 81,
+      "superstar": 34
+    },
+    {
+      "id": "2026-084",
+      "contestNumber": 84,
+      "year": 2026,
+      "date": "2026-05-26",
+      "numbers": [
+        7,
+        10,
+        35,
+        41,
+        45,
+        61
+      ],
+      "jolly": 2,
+      "superstar": 45
+    },
+    {
+      "id": "2026-083",
+      "contestNumber": 83,
+      "year": 2026,
+      "date": "2026-05-23",
+      "numbers": [
+        14,
+        29,
+        34,
+        57,
+        59,
+        69
+      ],
+      "jolly": 20,
+      "superstar": 16
+    },
+    {
+      "id": "2026-082",
+      "contestNumber": 82,
+      "year": 2026,
+      "date": "2026-05-22",
+      "numbers": [
+        5,
+        17,
+        65,
+        71,
+        83,
+        87
+      ],
+      "jolly": 50,
+      "superstar": 86
+    },
+    {
+      "id": "2026-081",
+      "contestNumber": 81,
+      "year": 2026,
+      "date": "2026-05-21",
+      "numbers": [
+        1,
+        38,
+        57,
+        58,
+        64,
+        81
+      ],
+      "jolly": 28,
+      "superstar": 50
+    },
+    {
+      "id": "2026-080",
+      "contestNumber": 80,
+      "year": 2026,
+      "date": "2026-05-19",
+      "numbers": [
+        49,
+        57,
+        61,
+        73,
+        79,
+        86
+      ],
+      "jolly": 8,
+      "superstar": 36
+    },
+    {
+      "id": "2026-079",
+      "contestNumber": 79,
+      "year": 2026,
+      "date": "2026-05-16",
+      "numbers": [
+        7,
+        12,
+        60,
+        69,
+        89,
+        90
+      ],
+      "jolly": 59,
+      "superstar": 36
+    },
+    {
+      "id": "2026-078",
+      "contestNumber": 78,
+      "year": 2026,
+      "date": "2026-05-15",
+      "numbers": [
+        5,
+        13,
+        17,
+        28,
+        47,
+        68
+      ],
+      "jolly": 42,
+      "superstar": 19
+    },
+    {
+      "id": "2026-077",
+      "contestNumber": 77,
+      "year": 2026,
+      "date": "2026-05-14",
+      "numbers": [
+        31,
+        56,
+        72,
+        74,
+        84,
+        85
+      ],
+      "jolly": 18,
+      "superstar": 34
+    },
+    {
+      "id": "2026-076",
+      "contestNumber": 76,
+      "year": 2026,
+      "date": "2026-05-12",
+      "numbers": [
+        2,
+        28,
+        31,
+        57,
+        58,
+        59
+      ],
+      "jolly": 5,
+      "superstar": 2
+    },
+    {
+      "id": "2026-075",
+      "contestNumber": 75,
+      "year": 2026,
+      "date": "2026-05-09",
+      "numbers": [
+        9,
+        27,
+        30,
+        42,
+        43,
+        62
+      ],
+      "jolly": 11,
+      "superstar": 11
+    },
+    {
+      "id": "2026-074",
+      "contestNumber": 74,
+      "year": 2026,
+      "date": "2026-05-08",
+      "numbers": [
+        8,
+        16,
+        41,
+        47,
+        51,
+        90
+      ],
+      "jolly": 82,
+      "superstar": 69
+    },
+    {
+      "id": "2026-073",
+      "contestNumber": 73,
+      "year": 2026,
+      "date": "2026-05-07",
+      "numbers": [
+        1,
+        34,
+        48,
+        66,
+        69,
+        73
+      ],
+      "jolly": 75,
+      "superstar": 58
+    },
+    {
+      "id": "2026-072",
+      "contestNumber": 72,
+      "year": 2026,
+      "date": "2026-05-05",
+      "numbers": [
+        24,
+        34,
+        45,
+        55,
+        81,
+        87
+      ],
+      "jolly": 23,
+      "superstar": 52
+    },
+    {
+      "id": "2026-071",
+      "contestNumber": 71,
+      "year": 2026,
+      "date": "2026-05-04",
+      "numbers": [
+        3,
+        14,
+        31,
+        46,
+        61,
+        63
+      ],
+      "jolly": 75,
+      "superstar": 24
+    },
+    {
+      "id": "2026-070",
+      "contestNumber": 70,
+      "year": 2026,
+      "date": "2026-05-02",
+      "numbers": [
+        7,
+        58,
+        60,
+        79,
+        84,
+        86
+      ],
+      "jolly": 2,
+      "superstar": 19
+    },
+    {
+      "id": "2026-069",
+      "contestNumber": 69,
+      "year": 2026,
+      "date": "2026-04-30",
+      "numbers": [
+        6,
+        7,
+        15,
+        44,
+        52,
+        58
+      ],
+      "jolly": 40,
+      "superstar": 16
+    },
+    {
+      "id": "2026-068",
+      "contestNumber": 68,
+      "year": 2026,
+      "date": "2026-04-28",
+      "numbers": [
+        29,
+        42,
+        43,
+        47,
+        57,
+        60
+      ],
+      "jolly": 27,
+      "superstar": 30
+    },
+    {
+      "id": "2026-067",
+      "contestNumber": 67,
+      "year": 2026,
+      "date": "2026-04-27",
+      "numbers": [
+        40,
+        57,
+        62,
+        64,
+        85,
+        87
+      ],
+      "jolly": 23,
+      "superstar": 56
+    },
+    {
+      "id": "2026-066",
+      "contestNumber": 66,
+      "year": 2026,
+      "date": "2026-04-24",
+      "numbers": [
+        6,
+        13,
+        33,
+        37,
+        68,
+        82
+      ],
+      "jolly": 56,
+      "superstar": 20
+    },
+    {
+      "id": "2026-065",
+      "contestNumber": 65,
+      "year": 2026,
+      "date": "2026-04-23",
+      "numbers": [
+        18,
+        24,
+        28,
+        35,
+        56,
+        58
+      ],
+      "jolly": 72,
+      "superstar": 57
+    },
+    {
+      "id": "2026-064",
+      "contestNumber": 64,
+      "year": 2026,
+      "date": "2026-04-21",
+      "numbers": [
+        18,
+        19,
+        40,
+        43,
+        56,
+        77
+      ],
+      "jolly": 6,
+      "superstar": 65
+    },
+    {
+      "id": "2026-063",
+      "contestNumber": 63,
+      "year": 2026,
+      "date": "2026-04-18",
+      "numbers": [
+        11,
+        22,
+        28,
+        33,
+        68,
+        77
+      ],
+      "jolly": 9,
+      "superstar": 70
+    },
+    {
+      "id": "2026-062",
+      "contestNumber": 62,
+      "year": 2026,
+      "date": "2026-04-17",
+      "numbers": [
+        13,
+        27,
+        45,
+        53,
+        57,
+        84
+      ],
+      "jolly": 34,
+      "superstar": 63
+    },
+    {
+      "id": "2026-061",
+      "contestNumber": 61,
+      "year": 2026,
+      "date": "2026-04-16",
+      "numbers": [
+        9,
+        11,
+        12,
+        38,
+        44,
+        54
+      ],
+      "jolly": 60,
+      "superstar": 39
+    },
+    {
+      "id": "2026-060",
+      "contestNumber": 60,
+      "year": 2026,
+      "date": "2026-04-14",
+      "numbers": [
+        3,
+        5,
+        20,
+        27,
+        35,
+        66
+      ],
+      "jolly": 17,
+      "superstar": 6
+    },
+    {
+      "id": "2026-059",
+      "contestNumber": 59,
+      "year": 2026,
+      "date": "2026-04-11",
+      "numbers": [
+        19,
+        28,
+        38,
+        48,
+        77,
+        85
+      ],
+      "jolly": 59,
+      "superstar": 57
+    },
+    {
+      "id": "2026-058",
+      "contestNumber": 58,
+      "year": 2026,
+      "date": "2026-04-10",
+      "numbers": [
+        3,
+        10,
+        13,
+        17,
+        58,
+        90
+      ],
+      "jolly": 32,
+      "superstar": 7
+    },
+    {
+      "id": "2026-057",
+      "contestNumber": 57,
+      "year": 2026,
+      "date": "2026-04-09",
+      "numbers": [
+        2,
+        30,
+        38,
+        63,
+        74,
+        84
+      ],
+      "jolly": 19,
+      "superstar": 82
+    },
+    {
+      "id": "2026-056",
+      "contestNumber": 56,
+      "year": 2026,
+      "date": "2026-04-07",
+      "numbers": [
+        10,
+        16,
+        18,
+        47,
+        50,
+        59
+      ],
+      "jolly": 7,
+      "superstar": 60
+    },
+    {
+      "id": "2026-055",
+      "contestNumber": 55,
+      "year": 2026,
+      "date": "2026-04-04",
+      "numbers": [
+        8,
+        21,
+        29,
+        46,
+        60,
+        81
+      ],
+      "jolly": 42,
+      "superstar": 80
+    },
+    {
+      "id": "2026-054",
+      "contestNumber": 54,
+      "year": 2026,
+      "date": "2026-04-03",
+      "numbers": [
+        28,
+        52,
+        53,
+        64,
+        66,
+        72
+      ],
+      "jolly": 44,
+      "superstar": 6
+    },
+    {
+      "id": "2026-053",
+      "contestNumber": 53,
+      "year": 2026,
+      "date": "2026-04-02",
+      "numbers": [
+        18,
+        24,
+        25,
+        32,
+        36,
+        63
+      ],
+      "jolly": 40,
+      "superstar": 80
+    },
+    {
+      "id": "2026-052",
+      "contestNumber": 52,
+      "year": 2026,
+      "date": "2026-03-31",
+      "numbers": [
+        1,
+        3,
+        39,
+        46,
+        47,
+        61
+      ],
+      "jolly": 25,
+      "superstar": 67
+    },
+    {
+      "id": "2026-051",
+      "contestNumber": 51,
+      "year": 2026,
+      "date": "2026-03-28",
+      "numbers": [
+        9,
+        45,
+        62,
+        67,
+        68,
+        81
+      ],
+      "jolly": 36,
+      "superstar": 54
+    },
+    {
+      "id": "2026-050",
+      "contestNumber": 50,
+      "year": 2026,
+      "date": "2026-03-27",
+      "numbers": [
+        6,
+        22,
+        27,
+        43,
+        58,
+        64
+      ],
+      "jolly": 10,
+      "superstar": 74
+    },
+    {
+      "id": "2026-049",
+      "contestNumber": 49,
+      "year": 2026,
+      "date": "2026-03-26",
+      "numbers": [
+        24,
+        26,
+        39,
+        69,
+        77,
+        80
+      ],
+      "jolly": 82,
+      "superstar": 3
+    },
+    {
+      "id": "2026-048",
+      "contestNumber": 48,
+      "year": 2026,
+      "date": "2026-03-24",
+      "numbers": [
+        6,
+        54,
+        60,
+        64,
+        74,
+        87
+      ],
+      "jolly": 10,
+      "superstar": 65
+    },
+    {
+      "id": "2026-047",
+      "contestNumber": 47,
+      "year": 2026,
+      "date": "2026-03-21",
+      "numbers": [
+        9,
+        26,
+        33,
+        49,
+        51,
+        55
+      ],
+      "jolly": 50,
+      "superstar": 4
+    },
+    {
+      "id": "2026-046",
+      "contestNumber": 46,
+      "year": 2026,
+      "date": "2026-03-20",
+      "numbers": [
+        14,
+        32,
+        45,
+        51,
+        54,
+        87
+      ],
+      "jolly": 61,
+      "superstar": 50
+    },
+    {
+      "id": "2026-045",
+      "contestNumber": 45,
+      "year": 2026,
+      "date": "2026-03-19",
+      "numbers": [
+        19,
+        39,
+        45,
+        54,
+        62,
+        89
+      ],
+      "jolly": 42,
+      "superstar": 45
+    },
+    {
+      "id": "2026-044",
+      "contestNumber": 44,
+      "year": 2026,
+      "date": "2026-03-17",
+      "numbers": [
+        2,
+        13,
+        16,
+        41,
+        53,
+        56
+      ],
+      "jolly": 60,
+      "superstar": 6
+    },
+    {
+      "id": "2026-043",
+      "contestNumber": 43,
+      "year": 2026,
+      "date": "2026-03-14",
+      "numbers": [
+        3,
+        6,
+        33,
+        63,
+        88,
+        89
+      ],
+      "jolly": 18,
+      "superstar": 87
+    },
+    {
+      "id": "2026-042",
+      "contestNumber": 42,
+      "year": 2026,
+      "date": "2026-03-13",
+      "numbers": [
+        3,
+        11,
+        13,
+        20,
+        53,
+        61
+      ],
+      "jolly": 88,
+      "superstar": 43
+    },
+    {
+      "id": "2026-041",
+      "contestNumber": 41,
+      "year": 2026,
+      "date": "2026-03-12",
+      "numbers": [
+        8,
+        24,
+        25,
+        62,
+        63,
+        64
+      ],
+      "jolly": 43,
+      "superstar": 54
+    },
+    {
+      "id": "2026-040",
+      "contestNumber": 40,
+      "year": 2026,
+      "date": "2026-03-10",
+      "numbers": [
+        8,
+        34,
+        42,
+        47,
+        55,
+        83
+      ],
+      "jolly": 4,
+      "superstar": 42
+    },
+    {
+      "id": "2026-039",
+      "contestNumber": 39,
+      "year": 2026,
+      "date": "2026-03-07",
+      "numbers": [
+        3,
+        12,
+        18,
+        40,
+        45,
+        69
+      ],
+      "jolly": 5,
+      "superstar": 49
+    },
+    {
+      "id": "2026-038",
+      "contestNumber": 38,
+      "year": 2026,
+      "date": "2026-03-06",
+      "numbers": [
+        4,
+        17,
+        22,
+        37,
+        50,
+        88
+      ],
+      "jolly": 20,
+      "superstar": 2
+    },
+    {
+      "id": "2026-037",
+      "contestNumber": 37,
+      "year": 2026,
+      "date": "2026-03-05",
+      "numbers": [
+        7,
+        23,
+        39,
+        62,
+        63,
+        78
+      ],
+      "jolly": 22,
+      "superstar": 35
+    },
+    {
+      "id": "2026-036",
+      "contestNumber": 36,
+      "year": 2026,
+      "date": "2026-03-03",
+      "numbers": [
+        4,
+        16,
+        42,
+        48,
+        56,
+        68
+      ],
+      "jolly": 26,
+      "superstar": 83
+    },
+    {
+      "id": "2026-035",
+      "contestNumber": 35,
+      "year": 2026,
+      "date": "2026-02-28",
+      "numbers": [
+        14,
+        17,
+        33,
+        63,
+        64,
+        80
+      ],
+      "jolly": 15,
+      "superstar": 27
+    },
+    {
+      "id": "2026-034",
+      "contestNumber": 34,
+      "year": 2026,
+      "date": "2026-02-27",
+      "numbers": [
+        10,
+        14,
+        49,
+        55,
+        71,
+        79
+      ],
+      "jolly": 80,
+      "superstar": 36
+    },
+    {
+      "id": "2026-033",
+      "contestNumber": 33,
+      "year": 2026,
+      "date": "2026-02-26",
+      "numbers": [
+        18,
+        30,
+        36,
+        52,
+        67,
+        72
+      ],
+      "jolly": 69,
+      "superstar": 47
+    },
+    {
+      "id": "2026-032",
+      "contestNumber": 32,
+      "year": 2026,
+      "date": "2026-02-24",
+      "numbers": [
+        4,
+        18,
+        23,
+        26,
+        45,
+        87
+      ],
+      "jolly": 82,
+      "superstar": 29
+    },
+    {
+      "id": "2026-031",
+      "contestNumber": 31,
+      "year": 2026,
+      "date": "2026-02-21",
+      "numbers": [
+        49,
+        58,
+        60,
+        66,
+        68,
+        81
+      ],
+      "jolly": 75,
+      "superstar": 58
+    },
+    {
+      "id": "2026-030",
+      "contestNumber": 30,
+      "year": 2026,
+      "date": "2026-02-20",
+      "numbers": [
+        30,
+        34,
+        41,
+        42,
+        49,
+        83
+      ],
+      "jolly": 64,
+      "superstar": 77
+    },
+    {
+      "id": "2026-029",
+      "contestNumber": 29,
+      "year": 2026,
+      "date": "2026-02-19",
+      "numbers": [
+        20,
+        39,
+        40,
+        43,
+        76,
+        90
+      ],
+      "jolly": 53,
+      "superstar": 53
+    },
+    {
+      "id": "2026-028",
+      "contestNumber": 28,
+      "year": 2026,
+      "date": "2026-02-17",
+      "numbers": [
+        16,
+        21,
+        42,
+        45,
+        52,
+        88
+      ],
+      "jolly": 58,
+      "superstar": 21
+    },
+    {
+      "id": "2026-027",
+      "contestNumber": 27,
+      "year": 2026,
+      "date": "2026-02-14",
+      "numbers": [
+        5,
+        23,
+        40,
+        47,
+        80,
+        85
+      ],
+      "jolly": 6,
+      "superstar": 47
+    },
+    {
+      "id": "2026-026",
+      "contestNumber": 26,
+      "year": 2026,
+      "date": "2026-02-13",
+      "numbers": [
+        1,
+        52,
+        57,
+        71,
+        76,
+        83
+      ],
+      "jolly": 37,
+      "superstar": 3
+    },
+    {
+      "id": "2026-025",
+      "contestNumber": 25,
+      "year": 2026,
+      "date": "2026-02-12",
+      "numbers": [
+        5,
+        11,
+        35,
+        52,
+        80,
+        85
+      ],
+      "jolly": 66,
+      "superstar": 29
+    },
+    {
+      "id": "2026-024",
+      "contestNumber": 24,
+      "year": 2026,
+      "date": "2026-02-10",
+      "numbers": [
+        1,
+        15,
+        29,
+        39,
+        63,
+        83
+      ],
+      "jolly": 73,
+      "superstar": 21
+    },
+    {
+      "id": "2026-023",
+      "contestNumber": 23,
+      "year": 2026,
+      "date": "2026-02-07",
+      "numbers": [
+        4,
+        7,
+        12,
+        30,
+        69,
+        81
+      ],
+      "jolly": 41,
+      "superstar": 67
+    },
+    {
+      "id": "2026-022",
+      "contestNumber": 22,
+      "year": 2026,
+      "date": "2026-02-06",
+      "numbers": [
+        6,
+        8,
+        17,
+        31,
+        36,
+        75
+      ],
+      "jolly": 90,
+      "superstar": 82
+    },
+    {
+      "id": "2026-021",
+      "contestNumber": 21,
+      "year": 2026,
+      "date": "2026-02-05",
+      "numbers": [
+        6,
+        8,
+        26,
+        27,
+        57,
+        90
+      ],
+      "jolly": 41,
+      "superstar": 30
+    },
+    {
+      "id": "2026-020",
+      "contestNumber": 20,
+      "year": 2026,
+      "date": "2026-02-03",
+      "numbers": [
+        11,
+        16,
+        17,
+        41,
+        42,
+        46
+      ],
+      "jolly": 70,
+      "superstar": 57
+    },
+    {
+      "id": "2026-019",
+      "contestNumber": 19,
+      "year": 2026,
+      "date": "2026-01-31",
+      "numbers": [
+        2,
+        6,
+        7,
+        33,
+        37,
+        80
+      ],
+      "jolly": 11,
+      "superstar": 80
+    },
+    {
+      "id": "2026-018",
+      "contestNumber": 18,
+      "year": 2026,
+      "date": "2026-01-30",
+      "numbers": [
+        32,
+        33,
+        39,
+        40,
+        52,
+        86
+      ],
+      "jolly": 63,
+      "superstar": 16
+    },
+    {
+      "id": "2026-017",
+      "contestNumber": 17,
+      "year": 2026,
+      "date": "2026-01-29",
+      "numbers": [
+        29,
+        30,
+        34,
+        56,
+        66,
+        80
+      ],
+      "jolly": 88,
+      "superstar": 11
+    },
+    {
+      "id": "2026-016",
+      "contestNumber": 16,
+      "year": 2026,
+      "date": "2026-01-27",
+      "numbers": [
+        11,
+        19,
+        27,
+        31,
+        54,
+        84
+      ],
+      "jolly": 38,
+      "superstar": 37
+    },
+    {
+      "id": "2026-015",
+      "contestNumber": 15,
+      "year": 2026,
+      "date": "2026-01-24",
+      "numbers": [
+        22,
+        37,
+        55,
+        61,
+        68,
+        71
+      ],
+      "jolly": 21,
+      "superstar": 18
+    },
+    {
+      "id": "2026-014",
+      "contestNumber": 14,
+      "year": 2026,
+      "date": "2026-01-23",
+      "numbers": [
+        2,
+        6,
+        11,
+        19,
+        88,
+        90
+      ],
+      "jolly": 69,
+      "superstar": 52
+    },
+    {
+      "id": "2026-013",
+      "contestNumber": 13,
+      "year": 2026,
+      "date": "2026-01-22",
+      "numbers": [
+        2,
+        30,
+        52,
+        56,
+        57,
+        78
+      ],
+      "jolly": 59,
+      "superstar": 25
+    },
+    {
+      "id": "2026-012",
+      "contestNumber": 12,
+      "year": 2026,
+      "date": "2026-01-20",
+      "numbers": [
+        8,
+        13,
+        25,
+        60,
+        72,
+        74
+      ],
+      "jolly": 78,
+      "superstar": 34
+    },
+    {
+      "id": "2026-011",
+      "contestNumber": 11,
+      "year": 2026,
+      "date": "2026-01-17",
+      "numbers": [
+        3,
+        7,
+        41,
+        56,
+        65,
+        83
+      ],
+      "jolly": 79,
+      "superstar": 82
+    },
+    {
+      "id": "2026-010",
+      "contestNumber": 10,
+      "year": 2026,
+      "date": "2026-01-16",
+      "numbers": [
+        14,
+        21,
+        24,
+        52,
+        80,
+        86
+      ],
+      "jolly": 57,
+      "superstar": 14
+    },
+    {
+      "id": "2026-009",
+      "contestNumber": 9,
+      "year": 2026,
+      "date": "2026-01-15",
+      "numbers": [
+        44,
+        49,
+        60,
+        69,
+        73,
+        85
+      ],
+      "jolly": 36,
+      "superstar": 1
+    },
+    {
+      "id": "2026-008",
+      "contestNumber": 8,
+      "year": 2026,
+      "date": "2026-01-13",
+      "numbers": [
+        20,
+        29,
+        56,
+        68,
+        72,
+        74
+      ],
+      "jolly": 35,
+      "superstar": 50
+    },
+    {
+      "id": "2026-007",
+      "contestNumber": 7,
+      "year": 2026,
+      "date": "2026-01-12",
+      "numbers": [
+        1,
+        11,
+        40,
+        73,
+        75,
+        81
+      ],
+      "jolly": 70,
+      "superstar": 22
+    },
+    {
+      "id": "2026-006",
+      "contestNumber": 6,
+      "year": 2026,
+      "date": "2026-01-10",
+      "numbers": [
+        11,
+        19,
+        24,
+        66,
+        82,
+        88
+      ],
+      "jolly": 58,
+      "superstar": 48
+    },
+    {
+      "id": "2026-005",
+      "contestNumber": 5,
+      "year": 2026,
+      "date": "2026-01-09",
+      "numbers": [
+        31,
+        33,
+        61,
+        68,
+        71,
+        72
+      ],
+      "jolly": 87,
+      "superstar": 18
+    },
+    {
+      "id": "2026-004",
+      "contestNumber": 4,
+      "year": 2026,
+      "date": "2026-01-08",
+      "numbers": [
+        35,
+        42,
+        45,
+        53,
+        55,
+        88
+      ],
+      "jolly": 66,
+      "superstar": 52
+    },
+    {
+      "id": "2026-003",
+      "contestNumber": 3,
+      "year": 2026,
+      "date": "2026-01-05",
+      "numbers": [
+        11,
+        13,
+        17,
+        56,
+        80,
+        84
+      ],
+      "jolly": 41,
+      "superstar": 13
+    },
+    {
+      "id": "2026-002",
+      "contestNumber": 2,
+      "year": 2026,
+      "date": "2026-01-03",
+      "numbers": [
+        16,
+        30,
+        32,
+        43,
+        68,
+        76
+      ],
+      "jolly": 36,
+      "superstar": 58
+    },
+    {
+      "id": "2026-001",
+      "contestNumber": 1,
+      "year": 2026,
+      "date": "2026-01-02",
+      "numbers": [
+        29,
+        33,
+        47,
+        56,
+        69,
+        89
+      ],
+      "jolly": 16,
+      "superstar": 7
     }
   ]
 }
