@@ -733,7 +733,7 @@ export function generateSmartPoolRecommendation(
 
   const clampedRequestedWindow = Math.max(1, Math.round(walkForwardWindow || 200));
   const actualWindow = Math.min(clampedRequestedWindow, Math.max(1, totalDraws));
-  const wfStartIdx = Math.max(1, totalDraws - actualWindow);
+  const wfStartIdx = totalDraws === 0 ? 0 : Math.max(1, totalDraws - actualWindow);
 
   // Initialize state with draws [0 .. wfStartIdx - 1]
   for (let idx = 0; idx < wfStartIdx; idx++) {

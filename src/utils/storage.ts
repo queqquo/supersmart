@@ -5,14 +5,14 @@
 
 import {
   Draw,
+  SisalDrawRecord,
   SavedPlay,
   ScoringWeights,
   FilterOptions,
   UserGeneratedSystemRecord,
   UserSimulationStateRecord
 } from '../types/lottery';
-import { generateFullHistoricalDataset } from '../data/seedDraws';
-import superenalottoSyncedJson from '../data/superenalotto.json';
+import { validateRealDrawInput, drawToSisalRecord } from './combinatorics';
 import {
   fetchCloudPlays,
   upsertCloudPlay,
@@ -28,11 +28,11 @@ import {
 } from './firebase';
 
 const STORAGE_KEYS = {
-  DRAWS: 'superenalotto_custom_draws_delta_v6',
+  DRAWS: 'superenalotto_real_draws_v1',
   PLAYS: 'superenalotto_saved_plays',
   DELETED_PLAY_IDS: 'superenalotto_deleted_play_ids_v1',
   WEIGHTS: 'superenalotto_scoring_weights',
-  FILTERS: 'superenalotto_filter_options',
+  FILTERS: 'superenalotto_filter_options_v2',
   PIGGYBANK: 'superenalotto_piggybank_balance',
   USER_SYSTEM_PREFIX: 'superenalotto_user_system_v1_',
   USER_SIMULATION_PREFIX: 'superenalotto_user_simulation_v1_'
@@ -283,7 +283,7 @@ export async function syncUserSimulationState(
 }
 
 export function loadDeletedPlayIds(): Set<string> {
-  const baseSet = new Set<string>(['play-manual-1793562659204']);
+  const baseSet = new Set<string>(['play-manual-1793562659204', 'play-wfi-1795034983423']);
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.DELETED_PLAY_IDS);
     if (raw) {
@@ -351,14 +351,14 @@ export const DEFAULT_WEIGHTS: ScoringWeights = {
 };
 
 export const DEFAULT_FILTERS: FilterOptions = {
-  evenOdd: true,
-  highLow: true,
-  sumRange: true,
+  evenOdd: false,
+  highLow: false,
+  sumRange: false,
   minSum: 190,
   maxSum: 350,
-  consecutive: true,
-  decades: true,
-  cadences: true
+  consecutive: false,
+  decades: false,
+  cadences: false
 };
 
 // --- IndexedDB Helper for High-Capacity Zero-Cost Persistence of Saved Plays ---
@@ -413,45 +413,149 @@ async function loadPlaysFromIDB(): Promise<SavedPlay[]> {
 }
 
 /**
- * Load all official historical draws (2,946 draws from 2009 to 2026) merged with any custom user draws
+ * Valida, deduplica (per numero di concorso e data) e ordina in modo decrescente per data/concorso
+ * una lista di record (sia in formato SisalDrawRecord sia in formato Draw).
+ * Scarta automaticamente qualsiasi record incompleto, duplicato o fuori intervallo [1..90].
  */
-export function loadDraws(): Draw[] {
-  const fullSeed = generateFullHistoricalDataset();
-  const syncedJsonDraws: Draw[] = Array.isArray(
-    (superenalottoSyncedJson as { draws?: unknown[] })?.draws
-  )
-    ? ((superenalottoSyncedJson as unknown as { draws: Draw[] }).draws || [])
-    : [];
+export function validateAndDeduplicateDraws(rawItems: unknown[]): Draw[] {
+  if (!Array.isArray(rawItems)) return [];
 
-  const mergedMap = new Map<string, Draw>();
-  for (const d of fullSeed) mergedMap.set(d.id, d);
-  for (const d of syncedJsonDraws) {
-    if (d && d.id && Array.isArray(d.numbers) && d.numbers.length === 6) {
-      mergedMap.set(d.id, d);
+  const byConcorsoAndDate = new Map<string, Draw>();
+  const byYearConcorso = new Map<string, string>();
+  const byDateAndSestina = new Map<string, string>();
+
+  for (const raw of rawItems) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+
+    const check = validateRealDrawInput({
+      id: typeof item.id === 'string' ? item.id : undefined,
+      concorso:
+        typeof item.concorso === 'number'
+          ? item.concorso
+          : typeof item.contestNumber === 'number'
+          ? item.contestNumber
+          : undefined,
+      contestNumber:
+        typeof item.contestNumber === 'number'
+          ? item.contestNumber
+          : typeof item.concorso === 'number'
+          ? item.concorso
+          : undefined,
+      year: typeof item.year === 'number' ? item.year : undefined,
+      data:
+        typeof item.data === 'string'
+          ? item.data
+          : typeof item.date === 'string'
+          ? item.date
+          : undefined,
+      date:
+        typeof item.date === 'string'
+          ? item.date
+          : typeof item.data === 'string'
+          ? item.data
+          : undefined,
+      sestina: Array.isArray(item.sestina)
+        ? (item.sestina as number[])
+        : Array.isArray(item.numbers)
+        ? (item.numbers as number[])
+        : undefined,
+      numbers: Array.isArray(item.numbers)
+        ? (item.numbers as number[])
+        : Array.isArray(item.sestina)
+        ? (item.sestina as number[])
+        : undefined,
+      jolly: item.jolly !== undefined ? Number(item.jolly) : undefined,
+      superstar: item.superstar !== undefined ? Number(item.superstar) : undefined
+    });
+
+    if (!check.valid || !check.draw) continue;
+    const validDraw = check.draw;
+
+    const primaryKey = `${validDraw.contestNumber}__${validDraw.date}`;
+    const yearConcorsoKey = `${validDraw.year}-${validDraw.contestNumber}`;
+    const dateSestinaKey = `${validDraw.date}__${validDraw.numbers.join(',')}`;
+
+    // Skip duplicates by concorso+data, year+concorso, or same date+sestina
+    if (
+      byConcorsoAndDate.has(primaryKey) ||
+      byYearConcorso.has(yearConcorsoKey) ||
+      byDateAndSestina.has(dateSestinaKey)
+    ) {
+      continue;
     }
+
+    byConcorsoAndDate.set(primaryKey, validDraw);
+    byYearConcorso.set(yearConcorsoKey, primaryKey);
+    byDateAndSestina.set(dateSestinaKey, primaryKey);
   }
 
-  try {
-    // Free up localStorage space by removing legacy full-archive keys
-    localStorage.removeItem('superenalotto_historical_draws');
-    localStorage.removeItem('superenalotto_official_draws_2009_2026_v5');
-
-    const rawDelta = localStorage.getItem(STORAGE_KEYS.DRAWS);
-    if (rawDelta) {
-      const parsedDelta: Draw[] = JSON.parse(rawDelta);
-      if (Array.isArray(parsedDelta) && parsedDelta.length > 0) {
-        for (const d of parsedDelta) mergedMap.set(d.id, d);
-      }
-    }
-  } catch (e) {
-    console.warn('Error reading custom draws delta from localStorage:', e);
-  }
-
-  return Array.from(mergedMap.values()).sort((a, b) => b.date.localeCompare(a.date));
+  return Array.from(byConcorsoAndDate.values()).sort((a, b) => {
+    const dateCmp = b.date.localeCompare(a.date);
+    if (dateCmp !== 0) return dateCmp;
+    return b.contestNumber - a.contestNumber;
+  });
 }
 
 /**
- * Synchronize official SuperEnalotto archive from the live Open-Data feed + Cloud Firestore custom draws
+ * Carica esclusivamente le estrazioni reali validate salvate in localStorage.
+ * Nessun dato precompilato o fittizio: se l'archivio è vuoto, restituisce [].
+ */
+export function loadDraws(): Draw[] {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+
+    // Pulizia chiavi legacy precompilate
+    localStorage.removeItem('superenalotto_historical_draws');
+    localStorage.removeItem('superenalotto_official_draws_2009_2026_v5');
+    localStorage.removeItem('superenalotto_custom_draws_delta_v6');
+
+    const raw = localStorage.getItem(STORAGE_KEYS.DRAWS);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return validateAndDeduplicateDraws(parsed);
+  } catch (e) {
+    console.warn('Error reading real draws from localStorage:', e);
+    return [];
+  }
+}
+
+/**
+ * All'avvio dell'app, esegue il fetch di `/data/estrazioni_sisal.json` e lo unisce
+ * (merge deduplicato per numero di concorso e data) con eventuali estrazioni reali salvate
+ * dall'utente in `localStorage`.
+ * Se entrambi sono vuoti (`draws.length === 0`), restituisce `[]`.
+ */
+export async function loadAndMergeEstrazioniSisal(): Promise<Draw[]> {
+  const localDraws = loadDraws();
+  let staticSisalRecords: unknown[] = [];
+
+  try {
+    if (typeof fetch !== 'undefined') {
+      const res = await fetch('/data/estrazioni_sisal.json', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          staticSisalRecords = data;
+        }
+      }
+    }
+  } catch {
+    // Se offline o ambiente di test senza server HTTP, usa solo localDraws
+  }
+
+  const merged = validateAndDeduplicateDraws([...localDraws, ...staticSisalRecords]);
+  if (merged.length > 0) {
+    saveDraws(merged);
+  }
+  return merged;
+}
+
+/**
+ * Sincronizzazione manuale su richiesta dell'utente da `/data/estrazioni_sisal.json` e Cloud Firestore
  */
 export async function syncOfficialDrawsFromLiveFeed(): Promise<{
   draws: Draw[];
@@ -460,87 +564,7 @@ export async function syncOfficialDrawsFromLiveFeed(): Promise<{
 }> {
   const current = loadDraws();
   const prevCount = current.length;
-
-  let fetchedDraws: Draw[] = [];
-
-  try {
-    const res = await fetch('/api/draws/official-sync');
-    if (res.ok) {
-      const payload = await res.json();
-      if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
-        fetchedDraws = payload.draws;
-      }
-    }
-  } catch {
-    // Fallback to direct GitHub Raw Open-Data feed if running in static environment
-  }
-
-  if (fetchedDraws.length === 0) {
-    try {
-      const directRes = await fetch(
-        'https://raw.githubusercontent.com/delpinsky/Superenalotto/main/storico-estrazioni-superenalotto.json'
-      );
-      if (directRes.ok) {
-        const data = await directRes.json();
-        const rawDraws = Array.isArray(data?.draws)
-          ? data.draws.filter((d: { date?: string }) => d.date && d.date >= '2009-01-01')
-          : [];
-        rawDraws.sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
-        const byYear: Record<number, number> = {};
-        fetchedDraws = rawDraws.map(
-          (d: {
-            date: string;
-            nums: number[];
-            jolly?: number | null;
-            ss?: number | null;
-            concorso?: number;
-          }) => {
-            const year = parseInt(d.date.slice(0, 4), 10);
-            byYear[year] = (byYear[year] || 0) + 1;
-            const contestNumber =
-              typeof d.concorso === 'number' && d.concorso > 0 ? d.concorso : byYear[year];
-            const sortedNums = [...d.nums].map(Number).sort((a, b) => a - b) as [
-              number,
-              number,
-              number,
-              number,
-              number,
-              number
-            ];
-            return {
-              id: `${year}-${String(contestNumber).padStart(3, '0')}`,
-              contestNumber,
-              year,
-              date: d.date,
-              numbers: sortedNums,
-              jolly: Number(d.jolly) || 1,
-              superstar: Number(d.ss) || Number(d.jolly) || 1
-            };
-          }
-        );
-      }
-    } catch {
-      // Ignore if offline
-    }
-  }
-
-  const cloudCustomDraws = (await fetchCloudCustomDraws()) || [];
-
-  if (fetchedDraws.length === 0 && cloudCustomDraws.length === 0) {
-    return {
-      draws: current,
-      addedOrUpdated: 0,
-      latestDate: current[0]?.date || ''
-    };
-  }
-
-  const mergedMap = new Map<string, Draw>();
-  for (const d of current) mergedMap.set(d.id, d);
-  for (const d of fetchedDraws) mergedMap.set(d.id, d);
-  for (const d of cloudCustomDraws) mergedMap.set(d.id, d);
-
-  const merged = Array.from(mergedMap.values()).sort((a, b) => b.date.localeCompare(a.date));
-  saveDraws(merged);
+  const merged = await loadAndMergeEstrazioniSisal();
 
   return {
     draws: merged,
@@ -550,35 +574,100 @@ export async function syncOfficialDrawsFromLiveFeed(): Promise<{
 }
 
 /**
- * Save only custom/extra draws to browser storage so localStorage stays lightweight (<5 KB)
+ * Salva l'archivio reale validato in localStorage nel formato rigoroso Sisal
+ * ({ concorso, data, sestina, jolly, superstar }) ordinato per data/concorso decrescente.
  */
 export function saveDraws(draws: Draw[]): void {
   try {
-    const seedIds = new Set(generateFullHistoricalDataset().map((d) => d.id));
-    const delta = draws.filter((d) => !seedIds.has(d.id));
-    localStorage.setItem(STORAGE_KEYS.DRAWS, JSON.stringify(delta));
+    if (typeof localStorage === 'undefined') return;
+    const validDraws = validateAndDeduplicateDraws(draws || []);
+    const sisalRecords: SisalDrawRecord[] = validDraws
+      .map((d) => drawToSisalRecord(d))
+      .filter((r): r is SisalDrawRecord => r !== null);
+    localStorage.setItem(STORAGE_KEYS.DRAWS, JSON.stringify(sisalRecords));
   } catch (e) {
-    console.error('Error saving draws delta to localStorage:', e);
+    console.error('Error saving real draws to localStorage:', e);
   }
 }
 
 /**
- * Add a new draw to the archive (prepend or update existing) and persist to Cloud Firestore
+ * Svuota completamente l'archivio delle estrazioni in localStorage
+ */
+export function clearAllDraws(): Draw[] {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEYS.DRAWS);
+    }
+  } catch (e) {
+    console.error('Error clearing draws from localStorage:', e);
+  }
+  return [];
+}
+
+/**
+ * Inserisce una nuova estrazione reale nell'archivio dopo validazione rigorosa Sisal [1..90] e controllo anti-duplicati
  */
 export function insertDraw(newDraw: Draw): Draw[] {
-  const current = loadDraws();
-  const existingIdx = current.findIndex((d) => d.id === newDraw.id);
-
-  if (existingIdx >= 0) {
-    current[existingIdx] = newDraw;
-  } else {
-    current.unshift(newDraw);
+  const check = validateRealDrawInput(newDraw);
+  if (!check.valid || !check.draw) {
+    throw new Error(check.error || 'Estrazione non valida');
   }
+  const validatedDraw = check.draw;
+  const current = loadDraws();
 
-  current.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  saveDraws(current);
-  upsertCloudCustomDraw(newDraw).catch(() => {});
-  return current;
+  // Merge deduplicato (il nuovo record ha priorità in caso di aggiornamento dello stesso concorso/data)
+  const merged = validateAndDeduplicateDraws([validatedDraw, ...current]);
+  saveDraws(merged);
+  upsertCloudCustomDraw(validatedDraw).catch(() => {});
+  return merged;
+}
+
+export function normalizeLegacyWinForItaliaPlay(play: SavedPlay): SavedPlay {
+  if (
+    play &&
+    play.id === 'play-wfi-1795036570889' &&
+    (play.targetContestId === 'WFI-2026-304' ||
+      play.columns?.[0]?.numbers?.join(',') === '3,14,15,26,30,35')
+  ) {
+    return {
+      ...play,
+      targetContestId: 'WFI-2026-053',
+      manualNote: 'Win for Italia Team (6/40) — Concorso 53 del 19/11/2026 (2,00 €)',
+      poolNumbers: [1, 14, 15, 24, 30, 39],
+      columns: [
+        {
+          id: 1,
+          numbers: [1, 14, 15, 24, 30, 39],
+          sum: 123,
+          evens: 3,
+          odds: 3,
+          lows: 3,
+          highs: 3
+        }
+      ],
+      status: 'VERIFICATA',
+      result: {
+        matchesPerColumn: [
+          {
+            columnId: 1,
+            numbers: [1, 14, 15, 24, 30, 39],
+            matchedNumbers: [],
+            matchCount: 0,
+            hasJolly: false,
+            hasSuperstar: false,
+            prizeTier: 'Nessun Punto',
+            estimatedPrize: 0
+          }
+        ],
+        totalWinning: 0,
+        netReturn: -2,
+        bestMatch: 0,
+        hasWin: false,
+        verifiedAt: '2026-11-19T20:55:00.000Z'
+      }
+    };
+  }
+  return play;
 }
 
 /**
@@ -591,7 +680,9 @@ export function loadSavedPlays(): SavedPlay[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id));
+        return parsed
+          .filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id))
+          .map(normalizeLegacyWinForItaliaPlay);
       }
     }
   } catch (e) {
@@ -605,7 +696,9 @@ export function loadSavedPlays(): SavedPlay[] {
  */
 export function cachePlaysLocally(plays: SavedPlay[]): void {
   const deletedIds = loadDeletedPlayIds();
-  const cleanPlays = plays.filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id));
+  const cleanPlays = plays
+    .filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id))
+    .map(normalizeLegacyWinForItaliaPlay);
   try {
     localStorage.setItem(STORAGE_KEYS.PLAYS, JSON.stringify(cleanPlays));
   } catch (e) {
@@ -619,7 +712,9 @@ export function cachePlaysLocally(plays: SavedPlay[]): void {
  */
 export function savePlays(plays: SavedPlay[]): void {
   const deletedIds = loadDeletedPlayIds();
-  const cleanPlays = plays.filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id));
+  const cleanPlays = plays
+    .filter((p) => p && typeof p.id === 'string' && !deletedIds.has(p.id))
+    .map(normalizeLegacyWinForItaliaPlay);
   cachePlaysLocally(cleanPlays);
   fetch('/api/plays', {
     method: 'PUT',
@@ -634,15 +729,27 @@ export function savePlays(plays: SavedPlay[]): void {
 }
 
 function pickPreferredPlay(existing: SavedPlay, incoming: SavedPlay): SavedPlay {
-  if (incoming.status === 'VERIFICATA' && existing.status !== 'VERIFICATA') {
-    return incoming;
+  const normExisting = normalizeLegacyWinForItaliaPlay(existing);
+  const normIncoming = normalizeLegacyWinForItaliaPlay(incoming);
+  if (normIncoming.status === 'VERIFICATA' && normExisting.status !== 'VERIFICATA') {
+    return normIncoming;
   }
-  if (existing.status === 'VERIFICATA' && incoming.status !== 'VERIFICATA') {
-    return existing;
+  if (normExisting.status === 'VERIFICATA' && normIncoming.status !== 'VERIFICATA') {
+    return normExisting;
   }
-  const existingVerTime = new Date(existing.result?.verifiedAt || existing.createdAt || 0).getTime();
-  const incomingVerTime = new Date(incoming.result?.verifiedAt || incoming.createdAt || 0).getTime();
-  return incomingVerTime >= existingVerTime ? incoming : existing;
+  const existingVerTime = new Date(
+    (normExisting as SavedPlay & { updatedAt?: string }).updatedAt ||
+      normExisting.result?.verifiedAt ||
+      normExisting.createdAt ||
+      0
+  ).getTime();
+  const incomingVerTime = new Date(
+    (normIncoming as SavedPlay & { updatedAt?: string }).updatedAt ||
+      normIncoming.result?.verifiedAt ||
+      normIncoming.createdAt ||
+      0
+  ).getTime();
+  return incomingVerTime >= existingVerTime ? normIncoming : normExisting;
 }
 
 /**
@@ -650,8 +757,9 @@ function pickPreferredPlay(existing: SavedPlay, incoming: SavedPlay): SavedPlay 
  * Ensures deleted plays NEVER resurrect across browsers or during in-flight async syncs.
  */
 export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
-  // Also ensure the legacy test play is removed from Cloud Firestore
+  // Also ensure the legacy test plays are removed from Cloud Firestore
   removeCloudPlay('play-manual-1793562659204').catch(() => {});
+  removeCloudPlay('play-wfi-1795034983423').catch(() => {});
 
   const [idbPlaysRaw, cloudPlaysResult, cloudDeletedIds, serverResponse] = await Promise.all([
     loadPlaysFromIDB(),
@@ -677,9 +785,15 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
   ]);
 
   const localPlays = loadSavedPlays().filter((p) => p && !allDeletedIds.has(p.id));
-  const idbPlays = idbPlaysRaw.filter((p) => p && !allDeletedIds.has(p.id));
-  const cloudPlays = (cloudPlaysResult || []).filter((p) => p && !allDeletedIds.has(p.id));
-  const serverPlays = serverResponse.plays.filter((p) => p && !allDeletedIds.has(p.id));
+  const idbPlays = idbPlaysRaw
+    .filter((p) => p && !allDeletedIds.has(p.id))
+    .map(normalizeLegacyWinForItaliaPlay);
+  const cloudPlays = (cloudPlaysResult || [])
+    .filter((p) => p && !allDeletedIds.has(p.id))
+    .map(normalizeLegacyWinForItaliaPlay);
+  const serverPlays = serverResponse.plays
+    .filter((p) => p && !allDeletedIds.has(p.id))
+    .map(normalizeLegacyWinForItaliaPlay);
 
   // If any play present in Cloud Firestore is actually in allDeletedIds, remove it from Cloud Firestore
   if (cloudPlaysResult) {
@@ -713,11 +827,18 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
   cachePlaysLocally(merged);
 
   // Push any non-deleted local/server plays that are missing or outdated in Cloud Firestore
-  const cloudMap = new Map(cloudPlays.map((p) => [p.id, p]));
+  const cloudRawMap = new Map((cloudPlaysResult || []).map((p) => [p.id, p]));
   const toUploadToCloud = merged.filter((p) => {
     if (finalDeletedIds.has(p.id)) return false;
-    const inCloud = cloudMap.get(p.id);
+    const inCloud = cloudRawMap.get(p.id);
     if (!inCloud) return true;
+    if (p.targetContestId !== inCloud.targetContestId) return true;
+    if (
+      (p.columns?.[0]?.numbers || []).join(',') !==
+      (inCloud.columns?.[0]?.numbers || []).join(',')
+    ) {
+      return true;
+    }
     if (p.status === 'VERIFICATA' && inCloud.status !== 'VERIFICATA') return true;
     if ((p.result?.totalWinning ?? 0) !== (inCloud.result?.totalWinning ?? 0)) return true;
     if (p.cost !== inCloud.cost) return true;
@@ -729,7 +850,7 @@ export async function syncSavedPlaysWithServer(): Promise<SavedPlay[]> {
     await upsertManyCloudPlays(toUploadToCloud);
   }
 
-  if (merged.length > serverPlays.length) {
+  if (merged.length !== serverPlays.length || toUploadToCloud.length > 0) {
     fetch('/api/plays', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -868,14 +989,39 @@ export function saveFilters(filters: FilterOptions): void {
 }
 
 /**
+ * Esporta l'intero archivio reale unito e ordinato per data/concorso decrescente
+ * nel formato esatto di `public/data/estrazioni_sisal.json`:
+ * [
+ *   {
+ *     "concorso": number,
+ *     "data": "YYYY-MM-DD",
+ *     "sestina": [n1, n2, n3, n4, n5, n6],
+ *     "jolly": number,
+ *     "superstar": number
+ *   }
+ * ]
+ */
+export function exportEstrazioniSisalJSON(sourceDraws?: Draw[]): string {
+  const validDraws = validateAndDeduplicateDraws(sourceDraws ?? loadDraws());
+  const sisalArray: SisalDrawRecord[] = validDraws
+    .map((d) => drawToSisalRecord(d))
+    .filter((r): r is SisalDrawRecord => r !== null);
+  return JSON.stringify(sisalArray, null, 2);
+}
+
+/**
  * Export all draws and plays to JSON string
  */
 export function exportBackupJSON(): string {
+  const validDraws = loadDraws();
+  const sisalDraws = validDraws
+    .map((d) => drawToSisalRecord(d))
+    .filter((r): r is SisalDrawRecord => r !== null);
   const data = {
     app: 'SuperEnalotto Combinatorial Optimizer',
     version: '1.0.0',
     exportDate: new Date().toISOString(),
-    draws: loadDraws(),
+    draws: sisalDraws,
     plays: loadSavedPlays(),
     weights: loadWeights(),
     filters: loadFilters()
@@ -888,56 +1034,112 @@ export function exportBackupJSON(): string {
  */
 export function exportDrawsCSV(): string {
   const draws = loadDraws();
-  const header = 'id;data;n1;n2;n3;n4;n5;n6;jolly;superstar\n';
+  const header = 'concorso;data;n1;n2;n3;n4;n5;n6;jolly;superstar\n';
   const rows = draws.map((d) => {
-    return `${d.id};${d.date};${d.numbers.join(';')};${d.jolly};${d.superstar ?? ''}`;
+    return `${d.contestNumber};${d.date};${d.numbers.join(';')};${d.jolly};${d.superstar ?? ''}`;
   });
   return header + rows.join('\n');
 }
 
 /**
- * Import JSON backup
+ * Importa archivio JSON (formato `estrazioni_sisal.json` o backup JSON completo)
+ * validando rigorosamente ogni record e scartando record incompleti, duplicati o fuori intervallo.
  */
 export function importBackupJSON(jsonString: string): { importedDraws: number; importedPlays: number } {
   const parsed = JSON.parse(jsonString);
   let importedDraws = 0;
   let importedPlays = 0;
 
-  if (Array.isArray(parsed.draws)) {
-    saveDraws(parsed.draws);
-    importedDraws = parsed.draws.length;
+  const rawDrawsList = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.draws)
+    ? parsed.draws
+    : null;
+
+  if (rawDrawsList) {
+    const current = loadDraws();
+    const prevCount = current.length;
+    const validIncoming: Draw[] = [];
+
+    for (const item of rawDrawsList) {
+      if (!item || typeof item !== 'object') continue;
+      const numbers = Array.isArray(item.sestina)
+        ? item.sestina
+        : Array.isArray(item.numbers)
+        ? item.numbers
+        : [];
+      const jolly = item.jolly;
+      const superstar = item.superstar;
+      const date = item.data ?? item.date;
+      const concorso = item.concorso ?? item.contestNumber;
+
+      const check = validateRealDrawInput({
+        id: typeof item.id === 'string' ? item.id : undefined,
+        concorso: concorso !== undefined ? Number(concorso) : undefined,
+        contestNumber: concorso !== undefined ? Number(concorso) : undefined,
+        year: typeof item.year === 'number' ? item.year : undefined,
+        data: date !== undefined ? String(date) : undefined,
+        date: date !== undefined ? String(date) : undefined,
+        sestina: numbers.map(Number),
+        numbers: numbers.map(Number),
+        jolly: jolly !== undefined ? Number(jolly) : undefined,
+        superstar: superstar !== undefined && superstar !== null && String(superstar).trim() !== ''
+          ? Number(superstar)
+          : undefined
+      });
+
+      if (check.valid && check.draw) {
+        validIncoming.push(check.draw);
+      }
+    }
+
+    const merged = validateAndDeduplicateDraws([...current, ...validIncoming]);
+    importedDraws = Math.max(0, merged.length - prevCount);
+    saveDraws(merged);
   }
-  if (Array.isArray(parsed.plays)) {
-    savePlays(parsed.plays);
-    importedPlays = parsed.plays.length;
-  }
-  if (parsed.weights) {
-    saveWeights(parsed.weights);
-  }
-  if (parsed.filters) {
-    saveFilters(parsed.filters);
+
+  if (parsed && !Array.isArray(parsed)) {
+    if (Array.isArray(parsed.plays)) {
+      savePlays(parsed.plays);
+      importedPlays = parsed.plays.length;
+    }
+    if (parsed.weights) {
+      saveWeights(parsed.weights);
+    }
+    if (parsed.filters) {
+      saveFilters(parsed.filters);
+    }
   }
 
   return { importedDraws, importedPlays };
 }
 
 /**
- * Import draws from CSV format
+ * Importa estrazioni da formato CSV con validazione rigorosa Sisal:
+ * - `sestina`: 6 interi univoci [1..90] ordinati in modo crescente
+ * - `jolly`: intero [1..90] non presente in `sestina`
+ * - `superstar`: intero [1..90] obbligatorio
+ * - Scarta automaticamente record incompleti, duplicati o fuori intervallo.
  */
 export function importDrawsCSV(csvString: string): number {
-  const lines = csvString.trim().split('\n');
-  if (lines.length < 2) return 0;
+  const lines = csvString.trim().split(/\r?\n/);
+  if (lines.length === 0) return 0;
 
   const current = loadDraws();
-  const existingMap = new Map(current.map((d) => [d.id, d]));
-  let added = 0;
+  const prevCount = current.length;
+  const validIncoming: Draw[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
+  const startIdx =
+    /^[a-zA-Z]/.test(lines[0].trim()) && !/^\d{1,4}(-\d{1,4})?[;,]/.test(lines[0].trim())
+      ? 1
+      : 0;
+
+  for (let i = startIdx; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
     const parts = line.split(/[;,]/);
-    if (parts.length >= 8) {
-      const id = parts[0].trim();
+    if (parts.length >= 10) {
+      const rawIdOrConcorso = parts[0].trim();
       const date = parts[1].trim();
       const n1 = parseInt(parts[2], 10);
       const n2 = parseInt(parts[3], 10);
@@ -945,39 +1147,36 @@ export function importDrawsCSV(csvString: string): number {
       const n4 = parseInt(parts[5], 10);
       const n5 = parseInt(parts[6], 10);
       const n6 = parseInt(parts[7], 10);
-      const jolly = parts[8] ? parseInt(parts[8], 10) : 1;
-      const superstar = parts[9] ? parseInt(parts[9], 10) : undefined;
+      const jolly = parts[8] ? parseInt(parts[8].trim(), 10) : NaN;
+      const superstar = parts[9] && parts[9].trim() !== '' ? parseInt(parts[9].trim(), 10) : NaN;
 
-      if ([n1, n2, n3, n4, n5, n6].every((n) => !isNaN(n) && n >= 1 && n <= 90)) {
-        const sortedNums = [n1, n2, n3, n4, n5, n6].sort((a, b) => a - b) as [
-          number,
-          number,
-          number,
-          number,
-          number,
-          number
-        ];
-        const contestNumber = parseInt(id.split('-')[1] || '1', 10);
-        const year = parseInt(id.split('-')[0] || date.slice(0, 4) || '2026', 10);
+      const contestNumber = rawIdOrConcorso.includes('-')
+        ? parseInt(rawIdOrConcorso.split('-')[1], 10)
+        : parseInt(rawIdOrConcorso, 10);
+      const year = parseInt(date.slice(0, 4), 10);
 
-        const draw: Draw = {
-          id: id || `${year}-${String(contestNumber).padStart(3, '0')}`,
-          contestNumber,
-          year,
-          date,
-          numbers: sortedNums,
-          jolly,
-          superstar
-        };
+      const check = validateRealDrawInput({
+        id: rawIdOrConcorso.includes('-')
+          ? rawIdOrConcorso
+          : `${year}-${String(contestNumber).padStart(3, '0')}`,
+        concorso: contestNumber,
+        contestNumber,
+        year,
+        data: date,
+        date,
+        sestina: [n1, n2, n3, n4, n5, n6],
+        numbers: [n1, n2, n3, n4, n5, n6],
+        jolly,
+        superstar
+      });
 
-        existingMap.set(draw.id, draw);
-        added++;
+      if (check.valid && check.draw) {
+        validIncoming.push(check.draw);
       }
     }
   }
 
-  const merged = Array.from(existingMap.values());
-  merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const merged = validateAndDeduplicateDraws([...current, ...validIncoming]);
   saveDraws(merged);
-  return added;
+  return Math.max(0, merged.length - prevCount);
 }

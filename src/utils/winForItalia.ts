@@ -50,6 +50,7 @@ export interface WinForItaliaFunnelCandidate {
   isolationPenalty: number;
   totalFunnelScore: number;
   selectedInTop12: boolean;
+  selectedInTop9?: boolean;
 }
 
 export interface WinForItaliaFunnelResult {
@@ -59,6 +60,8 @@ export interface WinForItaliaFunnelResult {
   scoredPool16: WinForItaliaFunnelCandidate[];
   top12Numbers: number[];
   decadeDistributionTop12: Record<number, number>;
+  top9Numbers: number[];
+  decadeDistributionTop9: Record<number, number>;
 }
 
 export interface WinForItaliaRankedSestina {
@@ -68,6 +71,8 @@ export interface WinForItaliaRankedSestina {
   sum: number;
   evenCount: number;
   oddCount: number;
+  lowCount?: number; // 1..20
+  highCount?: number; // 21..40
   extremesCount: number; // 1-8 and 33-40
   adjacentPairsCount: number;
   sameDecadePairsCount: number;
@@ -84,19 +89,36 @@ export interface WinForItaliaSniperSelection {
   totalCombinationsEvaluated: number; // C(12,6) = 924
 }
 
+export interface WinForItaliaReduced3System {
+  top9Numbers: number[];
+  columns: [WinForItaliaRankedSestina, WinForItaliaRankedSestina, WinForItaliaRankedSestina];
+  numberFrequencies: Record<number, number>;
+  isPerfect2x: boolean;
+  uniquePairsCovered: number;
+  totalPairsInTop9: number; // C(9,2) = 36
+  uniqueTripletsCovered: number;
+  totalTripletsInTop9: number; // C(9,3) = 84
+  totalCombinationsEvaluated: number; // C(9,6) = 84
+}
+
 export interface WinForItaliaWeeklyMonteCarloResult {
   totalSimulatedDraws: number;
   totalSimulatedWeeks: number;
-  ticketCost: number; // 2.00 €
-  weeklyCost: number; // 14.00 € (7 draws)
+  columnsCount: number; // 1 (2,00 €) or 3 (6,00 €)
+  ticketCost: number; // 2.00 € or 6.00 €
+  weeklyCost: number; // 14.00 € or 42.00 € (7 draws)
   totalSpent: number;
   totalEarned: number;
   averagePayoutPerDraw: number;
   averageWeeklyPayout: number;
   averageWeeklyRecoveryRatePct: number;
   expectedPunto2PerWeek: number;
+  probAtLeastOneWinPerDrawPct: number;
+  probAtLeastOnePunto2PerDrawPct: number;
+  probAtLeastOnePunto3PerDrawPct: number;
   probAtLeastOneWinPerWeekPct: number;
   probAtLeastOnePunto2PerWeekPct: number;
+  probAtLeastOnePunto3PerWeekPct: number;
   executionTimeMs: number;
   hitsByCategory: {
     punto2: number;
@@ -122,13 +144,23 @@ export const WIN_FOR_ITALIA_PRIZES = {
   PUNTO_6: 10000.0
 } as const;
 
-export const WIN_FOR_ITALIA_STORAGE_KEY = 'winforitalia_custom_draws_delta_v1';
+export const WIN_FOR_ITALIA_STORAGE_KEY = 'winforitalia_custom_draws_delta_v2';
+const LEGACY_WIN_FOR_ITALIA_STORAGE_KEY = 'winforitalia_custom_draws_delta_v1';
 
 export const WIN_FOR_ITALIA_UI_LABELS = {
   title: 'Imbuto Cecchino 40→16→12→1 (13 Gen + 3 Caos)',
-  subtitle: 'Competizione Pura Bilanciata (16 → 12 → 1 Sestina): Cluster + Estremi 1–8/33–40 • Max 3/Decina',
+  shortBadge: 'Imbuto 40→12 (13 Gen + 3 Caos · Max 7 P/D)',
+  subtitle: 'Competizione Pura Bilanciata (16 → 12 → 1 Sestina): Cluster + Estremi 1–8/33–40 • Max 3/Decina • Max 7 P/D',
   weightsDetail:
-    'Rosa 16 (13 Genetici + 3 Caos su 1..40) valutata con Cluster (cap +45: Decina +12, Cadenza +8, Contigui ±2 +15), Estremi 1–8/33–40 (+40), Penalità Isolati (-30 / -5 estremi) e limite morbido Max 3 per decina nei Top 12. Sestina #1 estratta dalle C(12,6) = 924 combinazioni integrali.'
+    'Rosa 16 (13 Genetici + 3 Caos su 1..40) valutata con Cluster (cap +45: Decina +12, Cadenza +8, Contigui ±2 +15), Estremi 1–8/33–40 (+40), Penalità Isolati (-30 / -5 estremi), limite Max 3 per decina e vincolo equilibrio Max 7 P/D nei Top 12. Sestina #1 estratta dalle C(12,6) = 924 combinazioni integrali.'
+} as const;
+
+export const WIN_FOR_ITALIA_REDUCED3_UI_LABELS = {
+  title: 'Sistema Ridotto 40→16→9→3 (13 Gen + 3 Caos)',
+  shortBadge: 'Imbuto 40→9 (13 Gen + 3 Caos · Max 5 P/D)',
+  subtitle: 'Competizione Pura Bilanciata (16 → 9 → 3 Sestine): Cluster + Estremi 1–8/33–40 • Max 3/Decina • Max 5 P/D',
+  weightsDetail:
+    'Rosa 16 (13 Genetici + 3 Caos su 1..40) valutata con Cluster (cap +45), Estremi 1–8/33–40 (+40), Penalità Isolati (-30 / -5 estremi), limite Max 3 per decina e vincolo equilibrio Max 5 P/D (5/4 o 4/5) nei Top 9. Sviluppo ridotto a 3 Sestine su C(9,6) = 84 combinazioni con Copertura 2x Simmetrica (ogni numero dei 9 compare esattamente 2 volte).'
 } as const;
 
 /**
@@ -157,22 +189,26 @@ export function loadWinForItaliaDraws(): WinForItaliaDraw[] {
     ? ((seedWinForItaliaData as unknown as { draws: WinForItaliaDraw[] }).draws || [])
     : [];
 
-  const mergedMap = new Map<string, WinForItaliaDraw>();
+  // Key by calendar date (YYYY-MM-DD) since Win for Italia Team has exactly 1 official draw per day at 20:00
+  const mergedByDate = new Map<string, WinForItaliaDraw>();
   for (const d of rawSeed) {
-    if (d && d.id && isValidWinForItaliaSestina(d.numbers)) {
+    if (d && d.id && d.date && isValidWinForItaliaSestina(d.numbers)) {
       const sorted = [...d.numbers].sort((a, b) => a - b) as [number, number, number, number, number, number];
-      mergedMap.set(d.id, { ...d, numbers: sorted });
+      mergedByDate.set(d.date, { ...d, numbers: sorted });
     }
   }
 
   if (typeof localStorage !== 'undefined') {
     try {
+      // Purge legacy v1 delta key that may contain synthetic fallback draws (WFI-2026-304..323)
+      localStorage.removeItem(LEGACY_WIN_FOR_ITALIA_STORAGE_KEY);
+
       const rawDelta = localStorage.getItem(WIN_FOR_ITALIA_STORAGE_KEY);
       if (rawDelta) {
         const parsedDelta = JSON.parse(rawDelta) as WinForItaliaDraw[];
         if (Array.isArray(parsedDelta)) {
           for (const d of parsedDelta) {
-            if (d && d.id && isValidWinForItaliaSestina(d.numbers)) {
+            if (d && d.id && d.date && isValidWinForItaliaSestina(d.numbers)) {
               const sorted = [...d.numbers].sort((a, b) => a - b) as [
                 number,
                 number,
@@ -181,7 +217,7 @@ export function loadWinForItaliaDraws(): WinForItaliaDraw[] {
                 number,
                 number
               ];
-              mergedMap.set(d.id, { ...d, numbers: sorted });
+              mergedByDate.set(d.date, { ...d, numbers: sorted });
             }
           }
         }
@@ -191,7 +227,7 @@ export function loadWinForItaliaDraws(): WinForItaliaDraw[] {
     }
   }
 
-  return Array.from(mergedMap.values()).sort((a, b) => {
+  return Array.from(mergedByDate.values()).sort((a, b) => {
     const cmp = b.date.localeCompare(a.date);
     if (cmp !== 0) return cmp;
     return b.contestNumber - a.contestNumber;
@@ -207,8 +243,12 @@ export function saveWinForItaliaDraws(draws: WinForItaliaDraw[]): void {
     const rawSeed = Array.isArray((seedWinForItaliaData as { draws?: unknown[] })?.draws)
       ? ((seedWinForItaliaData as unknown as { draws: WinForItaliaDraw[] }).draws || [])
       : [];
-    const seedMap = new Map(rawSeed.map((d) => [d.id, d.numbers.join(',')]));
-    const delta = draws.filter((d) => seedMap.get(d.id) !== d.numbers.join(','));
+    const seedByDate = new Map(
+      rawSeed.map((d) => [d.date, `${d.id}:${[...d.numbers].sort((a, b) => a - b).join(',')}`])
+    );
+    const delta = draws.filter(
+      (d) => seedByDate.get(d.date) !== `${d.id}:${[...d.numbers].sort((a, b) => a - b).join(',')}`
+    );
     localStorage.setItem(WIN_FOR_ITALIA_STORAGE_KEY, JSON.stringify(delta));
   } catch {
     // Ignore storage quota errors
@@ -315,17 +355,20 @@ export async function syncWinForItaliaDrawsFromServer(): Promise<{
   latestDate: string;
 }> {
   const current = loadWinForItaliaDraws();
-  const prevCount = current.length;
 
   try {
     const res = await fetch('/api/winforitalia/official-sync');
     if (res.ok) {
       const payload = await res.json();
       if (Array.isArray(payload?.draws) && payload.draws.length > 0) {
-        const mergedMap = new Map<string, WinForItaliaDraw>();
-        for (const d of current) mergedMap.set(d.id, d);
+        const mergedByDate = new Map<string, WinForItaliaDraw>();
+        for (const d of current) {
+          if (d && d.date) mergedByDate.set(d.date, d);
+        }
+
+        let addedOrUpdated = 0;
         for (const d of payload.draws as WinForItaliaDraw[]) {
-          if (d && d.id && isValidWinForItaliaSestina(d.numbers)) {
+          if (d && d.id && d.date && isValidWinForItaliaSestina(d.numbers)) {
             const sorted = [...d.numbers].sort((a, b) => a - b) as [
               number,
               number,
@@ -334,10 +377,14 @@ export async function syncWinForItaliaDrawsFromServer(): Promise<{
               number,
               number
             ];
-            mergedMap.set(d.id, { ...d, numbers: sorted });
+            const prev = mergedByDate.get(d.date);
+            if (!prev || prev.id !== d.id || prev.numbers.join(',') !== sorted.join(',')) {
+              addedOrUpdated++;
+            }
+            mergedByDate.set(d.date, { ...d, numbers: sorted });
           }
         }
-        const merged = Array.from(mergedMap.values()).sort((a, b) => {
+        const merged = Array.from(mergedByDate.values()).sort((a, b) => {
           const cmp = b.date.localeCompare(a.date);
           if (cmp !== 0) return cmp;
           return b.contestNumber - a.contestNumber;
@@ -345,7 +392,7 @@ export async function syncWinForItaliaDrawsFromServer(): Promise<{
         saveWinForItaliaDraws(merged);
         return {
           draws: merged,
-          addedOrUpdated: Math.max(0, merged.length - prevCount),
+          addedOrUpdated,
           latestDate: merged[0]?.date || ''
         };
       }
@@ -448,21 +495,24 @@ export function calculateWinForItaliaStats(history: WinForItaliaDraw[]): {
 }
 
 /**
- * Balanced Funnel Scoring 16 -> 12 for Win for Italia Team (6/40):
+ * Balanced Funnel Scoring 16 -> N (N = 12 for Cecchino, N = 9 for Sistema Ridotto) for Win for Italia Team (6/40):
  * - Cluster (cap max +45 pt): Ambi decina (1-10, 11-20, 21-30, 31-40) +12, cadenza +8, contigui ±2 +15
  * - Estremi (1-8 e 33-40): +40 pt
  * - Penalità isolati: -30 pt (-5 pt se estremo)
- * - Limite morbido: massimo 3 numeri per singola decina nei Top 12 finali
+ * - Limite morbido decina: massimo 3 numeri per singola decina
+ * - Vincolo Equilibrio Pari/Dispari: max 7 Pari o 7 Dispari su 12 numeri; max 5 Pari o 5 Dispari su 9 numeri (5/4 o 4/5)
  */
 export function selectBalancedTop12ForWinForItalia(
   pool16: number[],
-  chaosSet: Set<number> = new Set()
+  chaosSet: Set<number> = new Set(),
+  targetCount: number = 12
 ): {
   top12Numbers: number[];
   scoredPool16: WinForItaliaFunnelCandidate[];
   decadeDistributionTop12: Record<number, number>;
 } {
   const uniquePool = Array.from(new Set(pool16)).filter((n) => n >= 1 && n <= 40);
+  const clampedTarget = Math.min(uniquePool.length || targetCount, Math.max(6, Math.round(targetCount || 12)));
 
   const rawCandidates = uniquePool.map((num) => {
     const decade = getWinForItaliaDecade(num);
@@ -514,31 +564,61 @@ export function selectBalancedTop12ForWinForItalia(
       extremeBonus,
       isolationPenalty,
       totalFunnelScore,
-      selectedInTop12: false
+      selectedInTop12: false,
+      selectedInTop9: false
     };
   });
 
   // Sort descending by score
   rawCandidates.sort((a, b) => b.totalFunnelScore - a.totalFunnelScore || a.num - b.num);
 
-  // 4. SELEZIONE FINALE CON LIMITE MORBIDO (max 3 numeri per singola decina)
+  // 4. SELEZIONE FINALE CON LIMITE DECINA (max 3) E PARITÀ (max 7 su 12 / max 5 su 9)
   const selected: number[] = [];
   const decadeCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0 };
+  const maxPerParity = clampedTarget === 9 ? 5 : Math.ceil(clampedTarget / 2) + 1;
+  let evenCount = 0;
+  let oddCount = 0;
 
   for (const item of rawCandidates) {
-    if (selected.length >= 12) break;
-    const currentCount = decadeCounts[item.decade] || 0;
-    if (currentCount < 3) {
-      selected.push(item.num);
-      decadeCounts[item.decade] = currentCount + 1;
-      item.selectedInTop12 = true;
+    if (selected.length >= clampedTarget) break;
+    const currentDecadeCount = decadeCounts[item.decade] || 0;
+    const isEven = item.num % 2 === 0;
+
+    if (currentDecadeCount < 3) {
+      if (isEven && evenCount < maxPerParity) {
+        selected.push(item.num);
+        decadeCounts[item.decade] = currentDecadeCount + 1;
+        evenCount++;
+        item.selectedInTop12 = true;
+      } else if (!isEven && oddCount < maxPerParity) {
+        selected.push(item.num);
+        decadeCounts[item.decade] = currentDecadeCount + 1;
+        oddCount++;
+        item.selectedInTop12 = true;
+      }
     }
   }
 
-  // Fallback di sicurezza se il filtro decine ha bloccato troppi candidati
-  if (selected.length < 12) {
+  // Fallback di sicurezza: prima prova a rispettare SEMPRE il limite di decina (max 3 per decina), poi completa
+  if (selected.length < clampedTarget) {
     for (const item of rawCandidates) {
-      if (selected.length >= 12) break;
+      if (selected.length >= clampedTarget) break;
+      if (!selected.includes(item.num)) {
+        const currentDecadeCount = decadeCounts[item.decade] || 0;
+        if (currentDecadeCount < 3) {
+          selected.push(item.num);
+          decadeCounts[item.decade] = currentDecadeCount + 1;
+          if (item.num % 2 === 0) evenCount++;
+          else oddCount++;
+          item.selectedInTop12 = true;
+        }
+      }
+    }
+  }
+
+  if (selected.length < clampedTarget) {
+    for (const item of rawCandidates) {
+      if (selected.length >= clampedTarget) break;
       if (!selected.includes(item.num)) {
         selected.push(item.num);
         decadeCounts[item.decade] = (decadeCounts[item.decade] || 0) + 1;
@@ -555,7 +635,7 @@ export function selectBalancedTop12ForWinForItalia(
 }
 
 /**
- * Full 40 -> 16 (13 Genetic + 3 Chaos) -> 12 Funnel for Win for Italia Team
+ * Full 40 -> 16 (13 Genetic + 3 Chaos) -> 12 & 9 Funnel for Win for Italia Team
  */
 export function runWinForItaliaFunnel40To12(
   rankedStats: WinForItaliaNumberStat[],
@@ -566,15 +646,29 @@ export function runWinForItaliaFunnel40To12(
   );
 
   // Ensure each of the 4 decades (1-10, 11-20, 21-30, 31-40) contributes its top 3 genetic candidates (4x3=12)
-  // plus the highest-scoring 13th remaining genetic candidate so that max 3 per decade in Top 12 is always respected.
+  // with at least 1 even and 1 odd per decade so that both Max 3/Decade and Max P/D (Max 7 on 12, Max 5 on 9) are always satisfied.
   const genetic13: number[] = [];
   const pickedGenetic = new Set<number>();
 
   for (let dec = 0; dec < 4; dec++) {
     const decCandidates = sortedStats.filter((s) => s.decade === dec);
-    for (let i = 0; i < Math.min(3, decCandidates.length); i++) {
-      genetic13.push(decCandidates[i].number);
-      pickedGenetic.add(decCandidates[i].number);
+    const topEven = decCandidates.find((s) => s.number % 2 === 0);
+    const topOdd = decCandidates.find((s) => s.number % 2 !== 0);
+    if (topEven && !pickedGenetic.has(topEven.number)) {
+      genetic13.push(topEven.number);
+      pickedGenetic.add(topEven.number);
+    }
+    if (topOdd && !pickedGenetic.has(topOdd.number)) {
+      genetic13.push(topOdd.number);
+      pickedGenetic.add(topOdd.number);
+    }
+    for (const cand of decCandidates) {
+      const decCount = genetic13.filter((n) => getWinForItaliaDecade(n) === dec).length;
+      if (decCount >= 3) break;
+      if (!pickedGenetic.has(cand.number)) {
+        genetic13.push(cand.number);
+        pickedGenetic.add(cand.number);
+      }
     }
   }
 
@@ -611,7 +705,15 @@ export function runWinForItaliaFunnel40To12(
   const chaosSet = new Set(chaos3);
 
   const { top12Numbers, scoredPool16, decadeDistributionTop12 } =
-    selectBalancedTop12ForWinForItalia(pool16, chaosSet);
+    selectBalancedTop12ForWinForItalia(pool16, chaosSet, 12);
+
+  const { top12Numbers: top9Numbers, decadeDistributionTop12: decadeDistributionTop9 } =
+    selectBalancedTop12ForWinForItalia(pool16, chaosSet, 9);
+
+  const top9Set = new Set(top9Numbers);
+  for (const cand of scoredPool16) {
+    cand.selectedInTop9 = top9Set.has(cand.num);
+  }
 
   return {
     genetic13,
@@ -619,7 +721,127 @@ export function runWinForItaliaFunnel40To12(
     pool16,
     scoredPool16,
     top12Numbers,
-    decadeDistributionTop12
+    decadeDistributionTop12,
+    top9Numbers,
+    decadeDistributionTop9
+  };
+}
+
+/**
+ * Score a single 6/40 sestina according to structural filters (Pari/Dispari 3/3 o 4/2, Somma 95-150,
+ * Estremi 1-8/33-40, Coppie contigue o decina, Max 3 per decina) and genetic score.
+ */
+export function scoreWinForItaliaSestina(
+  rawCombo: number[],
+  statScoreMap?: Map<number, number>
+): Omit<WinForItaliaRankedSestina, 'rank'> {
+  const combo = [...rawCombo].slice(0, 6).sort((a, b) => a - b) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number
+  ];
+
+  let sum = 0;
+  let evenCount = 0;
+  let lowCount = 0;
+  let extremesCount = 0;
+  let adjacentPairsCount = 0;
+  let sameDecadePairsCount = 0;
+  let geneticSum = 0;
+  const decadeCounts: [number, number, number, number] = [0, 0, 0, 0];
+
+  for (let k = 0; k < 6; k++) {
+    const val = combo[k];
+    sum += val;
+    if (val % 2 === 0) evenCount++;
+    if (val <= 20) lowCount++;
+    if (val <= 8 || val >= 33) extremesCount++;
+    const dec = getWinForItaliaDecade(val);
+    decadeCounts[dec]++;
+    geneticSum += statScoreMap?.get(val) ?? 50;
+
+    if (k > 0 && combo[k] - combo[k - 1] <= 2) {
+      adjacentPairsCount++;
+    }
+  }
+
+  for (let d = 0; d < 4; d++) {
+    if (decadeCounts[d] >= 2) {
+      sameDecadePairsCount += (decadeCounts[d] * (decadeCounts[d] - 1)) / 2;
+    }
+  }
+
+  const oddCount = 6 - evenCount;
+  const highCount = 6 - lowCount;
+  const maxPerDecade = Math.max(...decadeCounts);
+
+  let structuralScore = 0;
+
+  // 1. Bilanciamento Pari/Dispari (3/3 o 4/2 - 2/4)
+  if (evenCount === 3 && oddCount === 3) {
+    structuralScore += 35;
+  } else if (evenCount === 4 || evenCount === 2) {
+    structuralScore += 22;
+  } else {
+    structuralScore -= 45;
+  }
+
+  // 2. Somma fisiologica per 6/40 (95 - 150, centro ideale ~123)
+  if (sum >= 95 && sum <= 150) {
+    const distFromIdeal = Math.abs(sum - 123);
+    structuralScore += 35 + Math.max(0, 15 - distFromIdeal * 0.5);
+  } else {
+    structuralScore -= 50;
+  }
+
+  // 3. Presenza di almeno 1-2 estremi (1-8 / 33-40)
+  if (extremesCount >= 1 && extremesCount <= 2) {
+    structuralScore += 32;
+  } else if (extremesCount === 3) {
+    structuralScore += 20;
+  } else {
+    structuralScore -= 35;
+  }
+
+  // 4. Presenza di almeno 1 coppia contigua (±1/±2) o d'ambo di decina
+  if (adjacentPairsCount >= 1 && adjacentPairsCount <= 2) {
+    structuralScore += 28;
+  } else if (sameDecadePairsCount >= 1) {
+    structuralScore += 18;
+  } else {
+    structuralScore -= 25;
+  }
+
+  // 5. Massimo 3 numeri nella stessa decina
+  if (maxPerDecade <= 2) {
+    structuralScore += 25;
+  } else if (maxPerDecade === 3) {
+    structuralScore += 15;
+  } else {
+    structuralScore -= 80;
+  }
+
+  const geneticBaseScore = Number((geneticSum / 6).toFixed(2));
+  const totalScore = Number((structuralScore + geneticBaseScore * 0.35).toFixed(2));
+
+  return {
+    numbers: combo,
+    totalScore,
+    sum,
+    evenCount,
+    oddCount,
+    lowCount,
+    highCount,
+    extremesCount,
+    adjacentPairsCount,
+    sameDecadePairsCount,
+    maxPerDecade,
+    decadeCounts,
+    geneticBaseScore,
+    structuralScore: Number(structuralScore.toFixed(2))
   };
 }
 
@@ -646,7 +868,7 @@ export function selectSniperSestinaFromTop12(
         for (let i3 = i2 + 1; i3 < n - 2; i3++) {
           for (let i4 = i3 + 1; i4 < n - 1; i4++) {
             for (let i5 = i4 + 1; i5 < n; i5++) {
-              const combo: [number, number, number, number, number, number] = [
+              const combo = [
                 pool[i0],
                 pool[i1],
                 pool[i2],
@@ -654,102 +876,7 @@ export function selectSniperSestinaFromTop12(
                 pool[i4],
                 pool[i5]
               ];
-
-              let sum = 0;
-              let evenCount = 0;
-              let extremesCount = 0;
-              let adjacentPairsCount = 0;
-              let sameDecadePairsCount = 0;
-              let geneticSum = 0;
-              const decadeCounts: [number, number, number, number] = [0, 0, 0, 0];
-
-              for (let k = 0; k < 6; k++) {
-                const val = combo[k];
-                sum += val;
-                if (val % 2 === 0) evenCount++;
-                if (val <= 8 || val >= 33) extremesCount++;
-                const dec = getWinForItaliaDecade(val);
-                decadeCounts[dec]++;
-                geneticSum += statScoreMap.get(val) || 50;
-
-                if (k > 0 && combo[k] - combo[k - 1] <= 2) {
-                  adjacentPairsCount++;
-                }
-              }
-
-              for (let d = 0; d < 4; d++) {
-                if (decadeCounts[d] >= 2) {
-                  sameDecadePairsCount += (decadeCounts[d] * (decadeCounts[d] - 1)) / 2;
-                }
-              }
-
-              const oddCount = 6 - evenCount;
-              const maxPerDecade = Math.max(...decadeCounts);
-
-              // Structural scoring for Cecchino mode:
-              let structuralScore = 0;
-
-              // 1. Bilanciamento Pari/Dispari (3/3 o 4/2 - 2/4)
-              if (evenCount === 3 && oddCount === 3) {
-                structuralScore += 35;
-              } else if (evenCount === 4 || evenCount === 2) {
-                structuralScore += 22;
-              } else {
-                structuralScore -= 45;
-              }
-
-              // 2. Somma fisiologica per 6/40 (95 - 150, centro ideale ~123)
-              if (sum >= 95 && sum <= 150) {
-                const distFromIdeal = Math.abs(sum - 123);
-                structuralScore += 35 + Math.max(0, 15 - distFromIdeal * 0.5);
-              } else {
-                structuralScore -= 50;
-              }
-
-              // 3. Presenza di almeno 1-2 estremi (1-8 / 33-40)
-              if (extremesCount >= 1 && extremesCount <= 2) {
-                structuralScore += 32;
-              } else if (extremesCount === 3) {
-                structuralScore += 20;
-              } else {
-                structuralScore -= 35;
-              }
-
-              // 4. Presenza di almeno 1 coppia contigua (±1/±2) o d'ambo di decina
-              if (adjacentPairsCount >= 1 && adjacentPairsCount <= 2) {
-                structuralScore += 28;
-              } else if (sameDecadePairsCount >= 1) {
-                structuralScore += 18;
-              } else {
-                structuralScore -= 25;
-              }
-
-              // 5. Massimo 3 numeri nella stessa decina
-              if (maxPerDecade <= 2) {
-                structuralScore += 25;
-              } else if (maxPerDecade === 3) {
-                structuralScore += 15;
-              } else {
-                structuralScore -= 80;
-              }
-
-              const geneticBaseScore = Number((geneticSum / 6).toFixed(2));
-              const totalScore = Number((structuralScore + geneticBaseScore * 0.35).toFixed(2));
-
-              evaluated.push({
-                numbers: combo,
-                totalScore,
-                sum,
-                evenCount,
-                oddCount,
-                extremesCount,
-                adjacentPairsCount,
-                sameDecadePairsCount,
-                maxPerDecade,
-                decadeCounts,
-                geneticBaseScore,
-                structuralScore: Number(structuralScore.toFixed(2))
-              });
+              evaluated.push(scoreWinForItaliaSestina(combo, statScoreMap));
             }
           }
         }
@@ -788,6 +915,149 @@ export function selectSniperSestinaFromTop12(
   };
 }
 
+/**
+ * Sistema Ridotto 6,00 € (3 Sestine) su Pool Base di 9 Numeri:
+ * - Genera tutte le C(9, 6) = 84 sestine integrali
+ * - Valuta ogni sestina con scoreWinForItaliaSestina
+ * - Trova la terna [s1, s2, s3] con il punteggio strutturale complessivo più alto in cui
+ *   OGNI numero del pool Top 9 compare esattamente 2 volte (9 x 2 = 18 posizioni -> Copertura 2x Simmetrica).
+ */
+export function generateReduced3Columns(
+  top9: number[],
+  stats: WinForItaliaNumberStat[] = []
+): WinForItaliaReduced3System {
+  const pool9 = Array.from(new Set(top9))
+    .filter((n) => n >= 1 && n <= 40)
+    .slice(0, 9)
+    .sort((a, b) => a - b);
+
+  // If fewer than 9 numbers were passed, pad deterministically from 1..40
+  for (let n = 1; n <= 40 && pool9.length < 9; n++) {
+    if (!pool9.includes(n)) pool9.push(n);
+  }
+  pool9.sort((a, b) => a - b);
+
+  const statScoreMap = new Map<number, number>();
+  for (const s of stats) {
+    statScoreMap.set(s.number, s.geneticScore);
+  }
+
+  // 1. Genera tutte le C(9, 6) = 84 sestine possibili
+  const allSestine: Omit<WinForItaliaRankedSestina, 'rank'>[] = [];
+  const n = pool9.length;
+  for (let i0 = 0; i0 < n - 5; i0++) {
+    for (let i1 = i0 + 1; i1 < n - 4; i1++) {
+      for (let i2 = i1 + 1; i2 < n - 3; i2++) {
+        for (let i3 = i2 + 1; i3 < n - 2; i3++) {
+          for (let i4 = i3 + 1; i4 < n - 1; i4++) {
+            for (let i5 = i4 + 1; i5 < n; i5++) {
+              allSestine.push(
+                scoreWinForItaliaSestina(
+                  [pool9[i0], pool9[i1], pool9[i2], pool9[i3], pool9[i4], pool9[i5]],
+                  statScoreMap
+                )
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Ordina per punteggio strutturale decrescente
+  const scored = [...allSestine].sort((a, b) => b.totalScore - a.totalScore || a.sum - b.sum);
+
+  // 3. Cerca la migliore terna [s1, s2, s3] con copertura perfettamente simmetrica (ogni numero esattamente 2 volte)
+  const findBest2xTriplet = (
+    candidates: Omit<WinForItaliaRankedSestina, 'rank'>[]
+  ): [
+    Omit<WinForItaliaRankedSestina, 'rank'>,
+    Omit<WinForItaliaRankedSestina, 'rank'>,
+    Omit<WinForItaliaRankedSestina, 'rank'>
+  ] | null => {
+    let bestTriplet: [
+      Omit<WinForItaliaRankedSestina, 'rank'>,
+      Omit<WinForItaliaRankedSestina, 'rank'>,
+      Omit<WinForItaliaRankedSestina, 'rank'>
+    ] | null = null;
+    let bestTotalScore = -Infinity;
+
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < candidates.length; j++) {
+        for (let k = j + 1; k < candidates.length; k++) {
+          const s1 = candidates[i];
+          const s2 = candidates[j];
+          const s3 = candidates[k];
+
+          const counts: Record<number, number> = {};
+          for (const num of s1.numbers) counts[num] = (counts[num] || 0) + 1;
+          for (const num of s2.numbers) counts[num] = (counts[num] || 0) + 1;
+          for (const num of s3.numbers) counts[num] = (counts[num] || 0) + 1;
+
+          const isPerfectlyBalanced = pool9.every((num) => counts[num] === 2);
+          if (isPerfectlyBalanced) {
+            const totalScore = s1.totalScore + s2.totalScore + s3.totalScore;
+            if (totalScore > bestTotalScore) {
+              bestTotalScore = totalScore;
+              bestTriplet = [s1, s2, s3];
+            }
+          }
+        }
+      }
+    }
+    return bestTriplet;
+  };
+
+  // Prima cerca nelle prime 35 candidate come da specifica, poi su tutte le 84 per garanzia matematica 100%
+  const topCandidates = scored.slice(0, Math.min(35, scored.length));
+  const chosenTriplet =
+    findBest2xTriplet(topCandidates) ||
+    findBest2xTriplet(scored) || [scored[0], scored[1], scored[2]];
+
+  const columns: [WinForItaliaRankedSestina, WinForItaliaRankedSestina, WinForItaliaRankedSestina] = [
+    { ...chosenTriplet[0], rank: 1 },
+    { ...chosenTriplet[1], rank: 2 },
+    { ...chosenTriplet[2], rank: 3 }
+  ];
+
+  const numberFrequencies: Record<number, number> = {};
+  for (const num of pool9) numberFrequencies[num] = 0;
+  for (const col of columns) {
+    for (const num of col.numbers) {
+      numberFrequencies[num] = (numberFrequencies[num] || 0) + 1;
+    }
+  }
+
+  const isPerfect2x = pool9.every((num) => numberFrequencies[num] === 2);
+
+  // Calcola copertura coppie C(9,2)=36 e terne C(9,3)=84
+  const pairsSet = new Set<string>();
+  const tripletsSet = new Set<string>();
+  for (const col of columns) {
+    const nums = col.numbers;
+    for (let a = 0; a < 6; a++) {
+      for (let b = a + 1; b < 6; b++) {
+        pairsSet.add(`${nums[a]}-${nums[b]}`);
+        for (let c = b + 1; c < 6; c++) {
+          tripletsSet.add(`${nums[a]}-${nums[b]}-${nums[c]}`);
+        }
+      }
+    }
+  }
+
+  return {
+    top9Numbers: pool9,
+    columns,
+    numberFrequencies,
+    isPerfect2x,
+    uniquePairsCovered: pairsSet.size,
+    totalPairsInTop9: 36,
+    uniqueTripletsCovered: tripletsSet.size,
+    totalTripletsInTop9: 84,
+    totalCombinationsEvaluated: allSestine.length
+  };
+}
+
 function popcnt32(v: number): number {
   let x = v - ((v >>> 1) & 0x55555555);
   x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
@@ -795,26 +1065,40 @@ function popcnt32(v: number): number {
 }
 
 /**
- * Simulatore Monte Carlo "Settimana Tipo" (7 Estrazioni = 14,00 €) per Win for Italia Team (6/40)
- * Usa bitmask compatte a 40 bit (2 x 20-bit integers) per simulare 50.000 estrazioni sulla Sestina #1.
+ * Simulatore Monte Carlo "Settimana Tipo" (7 Estrazioni) per Win for Italia Team (6/40):
+ * - Supporta sia Modalità Cecchino (1 sestina = 2,00 € / serata, 14,00 € / settimana)
+ *   sia Modalità Sistema Ridotto (3 sestine = 6,00 € / serata, 42,00 € / settimana).
+ * - Usa bitmask compatte a 40 bit (2 x 20-bit integers) per simulare 50.000 estrazioni,
+ *   testando tutte le colonne contemporaneamente su ogni estrazione e sommando eventuali vincite multiple.
  */
 export function runWinForItaliaWeeklyMonteCarlo(
-  sestina: number[],
+  sestinaOrColumns: number[] | number[][],
   totalSimulatedDraws: number = 50000,
   seed: number = 2026040
 ): WinForItaliaWeeklyMonteCarloResult {
   const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
-  // Build 40-bit bitmask split into two 20-bit words: low20 (1..20) and high20 (21..40)
-  let ticketLow20 = 0;
-  let ticketHigh20 = 0;
-  for (const n of sestina) {
-    if (n >= 1 && n <= 20) {
-      ticketLow20 |= 1 << (n - 1);
-    } else if (n >= 21 && n <= 40) {
-      ticketHigh20 |= 1 << (n - 21);
+  const columnsList: number[][] =
+    Array.isArray(sestinaOrColumns) && Array.isArray(sestinaOrColumns[0])
+      ? (sestinaOrColumns as number[][])
+      : [sestinaOrColumns as number[]];
+
+  const validColumns = columnsList.filter((col) => Array.isArray(col) && col.length > 0);
+  const columnsCount = Math.max(1, validColumns.length);
+
+  // Build 40-bit bitmask split into two 20-bit words: low20 (1..20) and high20 (21..40) for each column
+  const columnMasks = validColumns.map((col) => {
+    let low20 = 0;
+    let high20 = 0;
+    for (const n of col) {
+      if (n >= 1 && n <= 20) {
+        low20 |= 1 << (n - 1);
+      } else if (n >= 21 && n <= 40) {
+        high20 |= 1 << (n - 21);
+      }
     }
-  }
+    return { low20, high20 };
+  });
 
   let rngState = (seed >>> 0) || 123456789;
   const nextRand = (): number => {
@@ -832,10 +1116,17 @@ export function runWinForItaliaWeeklyMonteCarlo(
     punto6: 0
   };
 
+  let drawsWithAtLeastOneWin = 0;
+  let drawsWithAtLeastOnePunto2 = 0;
+  let drawsWithAtLeastOnePunto3 = 0;
+
   let weeksWithAtLeastOneWin = 0;
   let weeksWithAtLeastOnePunto2 = 0;
+  let weeksWithAtLeastOnePunto3 = 0;
+
   let currentWeekWins = 0;
   let currentWeekPunto2 = 0;
+  let currentWeekPunto3 = 0;
   let completedWeeks = 0;
 
   for (let d = 0; d < totalSimulatedDraws; d++) {
@@ -860,31 +1151,48 @@ export function runWinForItaliaWeeklyMonteCarlo(
       }
     }
 
-    const matchCount =
-      popcnt32(ticketLow20 & drawLow20) + popcnt32(ticketHigh20 & drawHigh20);
+    let drawHasWin = false;
+    let drawHasPunto2 = false;
+    let drawHasPunto3 = false;
 
-    if (matchCount >= 2) {
-      currentWeekWins++;
-      if (matchCount === 2) {
-        hitsByCategory.punto2++;
-        currentWeekPunto2++;
-      } else if (matchCount === 3) {
-        hitsByCategory.punto3++;
-      } else if (matchCount === 4) {
-        hitsByCategory.punto4++;
-      } else if (matchCount === 5) {
-        hitsByCategory.punto5++;
-      } else if (matchCount === 6) {
-        hitsByCategory.punto6++;
+    for (let c = 0; c < columnMasks.length; c++) {
+      const mask = columnMasks[c];
+      const matchCount =
+        popcnt32(mask.low20 & drawLow20) + popcnt32(mask.high20 & drawHigh20);
+
+      if (matchCount >= 2) {
+        drawHasWin = true;
+        currentWeekWins++;
+        if (matchCount === 2) {
+          hitsByCategory.punto2++;
+          drawHasPunto2 = true;
+          currentWeekPunto2++;
+        } else if (matchCount === 3) {
+          hitsByCategory.punto3++;
+          drawHasPunto3 = true;
+          currentWeekPunto3++;
+        } else if (matchCount === 4) {
+          hitsByCategory.punto4++;
+        } else if (matchCount === 5) {
+          hitsByCategory.punto5++;
+        } else if (matchCount === 6) {
+          hitsByCategory.punto6++;
+        }
       }
     }
+
+    if (drawHasWin) drawsWithAtLeastOneWin++;
+    if (drawHasPunto2) drawsWithAtLeastOnePunto2++;
+    if (drawHasPunto3) drawsWithAtLeastOnePunto3++;
 
     if ((d + 1) % 7 === 0) {
       completedWeeks++;
       if (currentWeekWins > 0) weeksWithAtLeastOneWin++;
       if (currentWeekPunto2 > 0) weeksWithAtLeastOnePunto2++;
+      if (currentWeekPunto3 > 0) weeksWithAtLeastOnePunto3++;
       currentWeekWins = 0;
       currentWeekPunto2 = 0;
+      currentWeekPunto3 = 0;
     }
   }
 
@@ -896,8 +1204,8 @@ export function runWinForItaliaWeeklyMonteCarlo(
     punto6: hitsByCategory.punto6 * WIN_FOR_ITALIA_PRIZES.PUNTO_6
   };
 
-  const ticketCost = 2.0;
-  const weeklyCost = 14.0;
+  const ticketCost = Number((columnsCount * 2.0).toFixed(2));
+  const weeklyCost = Number((ticketCost * 7).toFixed(2));
   const totalSpent = totalSimulatedDraws * ticketCost;
   const totalEarned =
     payoutByCategory.punto2 +
@@ -916,6 +1224,7 @@ export function runWinForItaliaWeeklyMonteCarlo(
   return {
     totalSimulatedDraws,
     totalSimulatedWeeks: Math.max(1, completedWeeks),
+    columnsCount,
     ticketCost,
     weeklyCost,
     totalSpent,
@@ -924,11 +1233,23 @@ export function runWinForItaliaWeeklyMonteCarlo(
     averageWeeklyPayout: Number(averageWeeklyPayout.toFixed(2)),
     averageWeeklyRecoveryRatePct: Number(averageWeeklyRecoveryRatePct.toFixed(1)),
     expectedPunto2PerWeek: Number(expectedPunto2PerWeek.toFixed(2)),
+    probAtLeastOneWinPerDrawPct: Number(
+      ((drawsWithAtLeastOneWin / Math.max(1, totalSimulatedDraws)) * 100).toFixed(1)
+    ),
+    probAtLeastOnePunto2PerDrawPct: Number(
+      ((drawsWithAtLeastOnePunto2 / Math.max(1, totalSimulatedDraws)) * 100).toFixed(1)
+    ),
+    probAtLeastOnePunto3PerDrawPct: Number(
+      ((drawsWithAtLeastOnePunto3 / Math.max(1, totalSimulatedDraws)) * 100).toFixed(2)
+    ),
     probAtLeastOneWinPerWeekPct: Number(
       ((weeksWithAtLeastOneWin / Math.max(1, completedWeeks)) * 100).toFixed(1)
     ),
     probAtLeastOnePunto2PerWeekPct: Number(
       ((weeksWithAtLeastOnePunto2 / Math.max(1, completedWeeks)) * 100).toFixed(1)
+    ),
+    probAtLeastOnePunto3PerWeekPct: Number(
+      ((weeksWithAtLeastOnePunto3 / Math.max(1, completedWeeks)) * 100).toFixed(1)
     ),
     executionTimeMs: Math.max(1, Math.round(endTime - startTime)),
     hitsByCategory,

@@ -20,14 +20,18 @@ import {
   BookmarkCheck,
   Clock,
   Award,
-  TrendingUp
+  TrendingUp,
+  Grid,
+  ShieldCheck
 } from 'lucide-react';
 import { SavedPlay } from '../types/lottery';
 import {
   WinForItaliaDraw,
+  WinForItaliaFunnelResult,
   WinForItaliaRankedSestina,
   WIN_FOR_ITALIA_PRIZES,
   WIN_FOR_ITALIA_UI_LABELS,
+  WIN_FOR_ITALIA_REDUCED3_UI_LABELS,
   loadWinForItaliaDraws,
   insertWinForItaliaDraw,
   parseWinForItaliaManualInput,
@@ -35,6 +39,7 @@ import {
   calculateWinForItaliaStats,
   runWinForItaliaFunnel40To12,
   selectSniperSestinaFromTop12,
+  generateReduced3Columns,
   runWinForItaliaWeeklyMonteCarlo
 } from '../utils/winForItalia';
 
@@ -51,6 +56,9 @@ const DECADE_LABELS: Record<number, string> = {
   3: 'Decina 31–40'
 };
 
+const WFI_LOCKED_FUNNEL_STORAGE_KEY = 'winforitalia_locked_funnel_v1';
+const WFI_PLAY_MODE_STORAGE_KEY = 'winforitalia_play_mode_v1';
+
 export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   onSavePlay,
   draws: externalDraws,
@@ -64,7 +72,27 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
       onUpdateDraws(nextDraws);
     }
   };
-  const [funnelNonce, setFunnelNonce] = useState<number>(0);
+
+  // Mode Switcher: 'sniper' (2,00 € - 1 Sestina) | 'reduced3' (6,00 € - 3 Sestine su 9 numeri)
+  const [playMode, setPlayMode] = useState<'sniper' | 'reduced3'>(() => {
+    try {
+      const saved = localStorage.getItem(WFI_PLAY_MODE_STORAGE_KEY);
+      if (saved === 'reduced3' || saved === 'sniper') return saved;
+    } catch {
+      // Ignore
+    }
+    return 'sniper';
+  });
+
+  const handleSelectPlayMode = (nextMode: 'sniper' | 'reduced3') => {
+    setPlayMode(nextMode);
+    try {
+      localStorage.setItem(WFI_PLAY_MODE_STORAGE_KEY, nextMode);
+    } catch {
+      // Ignore
+    }
+  };
+
   const [simSeed, setSimSeed] = useState<number>(2026040);
 
   // Sync & Rapid manual insertion state
@@ -77,9 +105,9 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     text: string;
   } | null>(null);
 
-  // Expandable drawer for Alternatives #2 and #3
+  // Expandable drawer for Alternatives #2 and #3 (Cecchino mode)
   const [isAlternativesOpen, setIsAlternativesOpen] = useState<boolean>(false);
-  const [copiedRank, setCopiedRank] = useState<number | null>(null);
+  const [copiedRank, setCopiedRank] = useState<number | 'all3' | null>(null);
   const [savedToast, setSavedToast] = useState<string | null>(null);
 
   // 1. Dynamic Historical Window: Math.min(history.length, 50)
@@ -87,32 +115,101 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     return calculateWinForItaliaStats(history);
   }, [history]);
 
-  // 2. Balanced Funnel 40 -> 16 (13 Genetic + 3 Chaos) -> 12
-  const funnelResult = useMemo(() => {
-    // Use Math.random() for fresh chaos injection whenever funnelNonce or stats update
-    void funnelNonce;
-    return runWinForItaliaFunnel40To12(stats, Math.random);
-  }, [stats, funnelNonce]);
+  // 2. Balanced Funnel 40 -> 16 (13 Genetic + 3 Chaos) -> Top 12 & Top 9 (Persisted in localStorage until user clicks Ricalcola)
+  const [funnelResult, setFunnelResult] = useState<WinForItaliaFunnelResult>(() => {
+    try {
+      const raw = localStorage.getItem(WFI_LOCKED_FUNNEL_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          latestDrawId?: string;
+          funnel?: WinForItaliaFunnelResult;
+        };
+        if (
+          parsed?.funnel &&
+          parsed.latestDrawId === (history[0]?.id || '') &&
+          Array.isArray(parsed.funnel.top12Numbers) &&
+          parsed.funnel.top12Numbers.length === 12 &&
+          Array.isArray(parsed.funnel.top9Numbers) &&
+          parsed.funnel.top9Numbers.length === 9
+        ) {
+          return parsed.funnel;
+        }
+      }
+    } catch {
+      // Ignore storage error
+    }
+    const generated = runWinForItaliaFunnel40To12(stats, Math.random);
+    try {
+      localStorage.setItem(
+        WFI_LOCKED_FUNNEL_STORAGE_KEY,
+        JSON.stringify({ latestDrawId: history[0]?.id || '', funnel: generated })
+      );
+    } catch {
+      // Ignore
+    }
+    return generated;
+  });
 
-  // 3. Cecchino C(12, 6) = 924 integral combinations -> Top 1 + Alternatives #2 & #3
+  const handleRecalculateFunnel = () => {
+    const generated = runWinForItaliaFunnel40To12(stats, Math.random);
+    setFunnelResult(generated);
+    try {
+      localStorage.setItem(
+        WFI_LOCKED_FUNNEL_STORAGE_KEY,
+        JSON.stringify({ latestDrawId: history[0]?.id || '', funnel: generated })
+      );
+    } catch {
+      // Ignore
+    }
+  };
+
+  // 3A. Cecchino C(12, 6) = 924 integral combinations -> Top 1 + Alternatives #2 & #3
   const sniperSelection = useMemo(() => {
     return selectSniperSestinaFromTop12(funnelResult.top12Numbers, stats);
   }, [funnelResult.top12Numbers, stats]);
 
-  // 4. Monte Carlo "Settimana Tipo" (7 Estrazioni = 14,00 €) over 50.000 draws with 40-bit bitmask
+  // 3B. Sistema Ridotto C(9, 6) = 84 integral combinations -> 3 Sestine with 2x Symmetric Coverage
+  const reduced3System = useMemo(() => {
+    return generateReduced3Columns(funnelResult.top9Numbers, stats);
+  }, [funnelResult.top9Numbers, stats]);
+
+  // 4. Dynamic Monte Carlo "Settimana Tipo" (7 Estrazioni = 14,00 € in sniper mode, 42,00 € in reduced3 mode)
   const monteCarloWeekly = useMemo(() => {
-    return runWinForItaliaWeeklyMonteCarlo(
-      sniperSelection.primarySestina.numbers,
-      50000,
-      simSeed
-    );
-  }, [sniperSelection.primarySestina.numbers, simSeed]);
+    const columnsToTest =
+      playMode === 'reduced3'
+        ? reduced3System.columns.map((c) => [...c.numbers])
+        : sniperSelection.primarySestina.numbers;
+    return runWinForItaliaWeeklyMonteCarlo(columnsToTest, 50000, simSeed);
+  }, [playMode, reduced3System.columns, sniperSelection.primarySestina.numbers, simSeed]);
 
   const chaosSet = useMemo(() => new Set(funnelResult.chaos3), [funnelResult.chaos3]);
+  const activePoolNumbers =
+    playMode === 'reduced3' ? funnelResult.top9Numbers : funnelResult.top12Numbers;
+  const activeDecadeDist =
+    playMode === 'reduced3'
+      ? funnelResult.decadeDistributionTop9
+      : funnelResult.decadeDistributionTop12;
+  const activeUiLabels =
+    playMode === 'reduced3' ? WIN_FOR_ITALIA_REDUCED3_UI_LABELS : WIN_FOR_ITALIA_UI_LABELS;
+
   const survivedChaos = useMemo(
-    () => funnelResult.top12Numbers.filter((n) => chaosSet.has(n)),
-    [funnelResult.top12Numbers, chaosSet]
+    () => activePoolNumbers.filter((n) => chaosSet.has(n)),
+    [activePoolNumbers, chaosSet]
   );
+
+  const activePoolEvenCount = useMemo(
+    () => activePoolNumbers.filter((n) => n % 2 === 0).length,
+    [activePoolNumbers]
+  );
+  const activePoolOddCount = activePoolNumbers.length - activePoolEvenCount;
+
+  // Set of all numbers played in current mode for highlighting in recent archive draws
+  const playedNumbersSet = useMemo(() => {
+    if (playMode === 'reduced3') {
+      return new Set(funnelResult.top9Numbers);
+    }
+    return new Set(sniperSelection.primarySestina.numbers);
+  }, [playMode, funnelResult.top9Numbers, sniperSelection.primarySestina.numbers]);
 
   const handleSyncOfficial2000 = async () => {
     setIsSyncing(true);
@@ -166,6 +263,21 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     setTimeout(() => setCopiedRank(null), 2000);
   };
 
+  const handleCopyAll3Sestine = () => {
+    const lines = reduced3System.columns.map(
+      (col, idx) =>
+        `#${String(idx + 1).padStart(2, '0')}: ${col.numbers
+          .map((n) => String(n).padStart(2, '0'))
+          .join(' - ')} (Σ ${col.sum} • ${col.evenCount}P/${col.oddCount}D)`
+    );
+    const text = lines.join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setCopiedRank('all3');
+    setTimeout(() => setCopiedRank(null), 2200);
+  };
+
   const handleRegisterSestinaPlay = (sestina: WinForItaliaRankedSestina) => {
     const latestDraw = history[0];
     const nextContestNum = (latestDraw?.contestNumber || 1) + 1;
@@ -201,7 +313,44 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     setTimeout(() => setSavedToast(null), 4000);
   };
 
-  const renderNumberBadge = (num: number, size: 'lg' | 'md' | 'sm' = 'lg') => {
+  const handleRegisterReduced3Play = () => {
+    const latestDraw = history[0];
+    const nextContestNum = (latestDraw?.contestNumber || 1) + 1;
+    const year = latestDraw?.year || new Date().getFullYear();
+
+    const newPlay: SavedPlay = {
+      id: `play-wfi-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      targetContestId: `WFI-${year}-${String(nextContestNum).padStart(3, '0')}`,
+      mode: 'manual',
+      savedAmount: 0,
+      manualNote: `Win for Italia Team (6/40) — Sistema Ridotto 3 Sestine su 9 Numeri (6,00 € • Copertura 2x Simmetrica)`,
+      poolNumbers: [...reduced3System.top9Numbers],
+      columns: reduced3System.columns.map((col, idx) => ({
+        id: idx + 1,
+        numbers: [...col.numbers],
+        sum: col.sum,
+        evens: col.evenCount,
+        odds: col.oddCount,
+        lows: col.numbers.filter((n) => n <= 20).length,
+        highs: col.numbers.filter((n) => n >= 21).length
+      })),
+      cost: 6.0,
+      status: 'IN_ATTESA'
+    };
+
+    onSavePlay(newPlay);
+    setSavedToast(
+      `Sistema Ridotto 3 Sestine (Pool 9: [${reduced3System.top9Numbers.join(', ')}]) registrato in Verifica & Bilancio (Budget 6,00 €).`
+    );
+    setTimeout(() => setSavedToast(null), 4000);
+  };
+
+  const renderNumberBadge = (
+    num: number,
+    size: 'lg' | 'md' | 'sm' = 'lg',
+    freqBadge?: number
+  ) => {
     const isExtreme = num <= 8 || num >= 33;
     const isChaos = chaosSet.has(num);
 
@@ -221,8 +370,10 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             : 'bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 border-amber-300 shadow-amber-500/20'
         }`}
         title={`${num <= 8 || num >= 33 ? 'Fascia Estrema (1–8 / 33–40)' : 'Fascia Centrale'} • Decina ${
-          DECADE_LABELS[ Math.floor((num - 1) / 10)]
-        }${isChaos ? ' • Numero Caos Sopravvissuto' : ''}`}
+          DECADE_LABELS[Math.floor((num - 1) / 10)]
+        }${isChaos ? ' • Numero Caos Sopravvissuto' : ''}${
+          freqBadge ? ` • Presenza: ${freqBadge}x nelle 3 sestine` : ''
+        }`}
       >
         <span>{String(num).padStart(2, '0')}</span>
         {isChaos && (
@@ -233,23 +384,45 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             ⚡
           </span>
         )}
+        {typeof freqBadge === 'number' && (
+          <span
+            className="absolute -bottom-1.5 -right-1.5 px-1 py-0.2 rounded bg-slate-950 text-[9px] font-mono font-black text-emerald-300 border border-emerald-400/60 shadow"
+            title={`Compare ${freqBadge} volte nel sistema da 3 sestine`}
+          >
+            {freqBadge}x
+          </span>
+        )}
       </div>
     );
   };
 
   return (
     <div className="space-y-6">
-      {/* Header Banner: Win for Italia Team (6/40) — Budget 2,00 € (1 Sestina) */}
+      {/* Header Banner: Win for Italia Team (6/40) with Mode Switcher */}
       <div className="bg-gradient-to-r from-slate-900 via-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
-                <Crosshair className="w-3.5 h-3.5" />
-                Modalità Cecchino 6/40
+                {playMode === 'sniper' ? (
+                  <>
+                    <Crosshair className="w-3.5 h-3.5" />
+                    Modalità Cecchino 6/40
+                  </>
+                ) : (
+                  <>
+                    <Grid className="w-3.5 h-3.5" />
+                    Sistema Ridotto 6/40 (3 Sestine)
+                  </>
+                )}
               </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                Budget: 2,00 € (1 Sestina Secca)
+              <span
+                className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                data-testid="wfi-active-budget-badge"
+              >
+                {playMode === 'sniper'
+                  ? 'Budget: 2,00 € (1 Sestina Secca)'
+                  : 'Budget: 6,00 € (3 Sestine • Copertura 2x)'}
               </span>
               <span
                 className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30"
@@ -264,16 +437,32 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             </div>
 
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Win for Italia Team (6/40) &mdash; {WIN_FOR_ITALIA_UI_LABELS.title}
+              Win for Italia Team (6/40) &mdash; {activeUiLabels.title}
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-3xl">
-              Estrazione quotidiana ore <strong className="text-white">20:00</strong> (6 numeri su 40, senza Jolly/SuperStar).
-              Imbuto a competizione pura <strong className="text-emerald-300">40 &rarr; 16 (13 Gen + 3 Caos) &rarr; 12 &rarr; 1 Sestina</strong> con
-              valutazione integrale delle <strong className="text-amber-300">C(12,6) = 924</strong> combinazioni.
+              Estrazione quotidiana ore <strong className="text-white">20:00</strong> (6 numeri su 40, senza Jolly/SuperStar).{' '}
+              {playMode === 'sniper' ? (
+                <>
+                  Imbuto a competizione pura{' '}
+                  <strong className="text-emerald-300">
+                    40 &rarr; 16 (13 Gen + 3 Caos) &rarr; 12 &rarr; 1 Sestina
+                  </strong>{' '}
+                  con valutazione integrale delle <strong className="text-amber-300">C(12,6) = 924</strong> combinazioni.
+                </>
+              ) : (
+                <>
+                  Pipeline dedicata{' '}
+                  <strong className="text-emerald-300">
+                    40 &rarr; 16 (13 Gen + 3 Caos) &rarr; 9 &rarr; 3 Colonne
+                  </strong>{' '}
+                  su <strong className="text-amber-300">C(9,6) = 84</strong> combinazioni con{' '}
+                  <strong className="text-teal-300">Copertura 2x Simmetrica</strong> (ogni numero compare esattamente 2 volte: 9 &times; 2 = 18).
+                </>
+              )}
             </p>
           </div>
 
-          {/* Manual Sync Button */}
+          {/* Manual Sync & Recalc Buttons */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             <button
               type="button"
@@ -287,11 +476,57 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
             <button
               type="button"
-              onClick={() => setFunnelNonce((n) => n + 1)}
+              onClick={handleRecalculateFunnel}
+              data-testid="wfi-recalc-funnel-btn"
               className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-extrabold text-xs transition-all flex items-center gap-2 cursor-pointer"
             >
               <Sparkles className="w-4 h-4" />
-              <span>Ricalcola Imbuto Cecchino 40&rarr;12&rarr;1</span>
+              <span>
+                {playMode === 'sniper'
+                  ? 'Ricalcola Imbuto 40→12→1'
+                  : 'Ricalcola Imbuto 40→9→3'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mode Switcher Bar: Cecchino 2,00 € vs Sistema Ridotto 6,00 € */}
+        <div
+          className="mt-4 pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+          data-testid="wfi-mode-switcher"
+        >
+          <span className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+            <Layers className="w-4 h-4 text-emerald-400" />
+            Seleziona Modalità di Gioco (6/40):
+          </span>
+
+          <div className="inline-flex rounded-xl bg-slate-950/90 p-1 border border-slate-800 gap-1">
+            <button
+              type="button"
+              data-testid="wfi-mode-sniper"
+              onClick={() => handleSelectPlayMode('sniper')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer ${
+                playMode === 'sniper'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Crosshair className="w-3.5 h-3.5" />
+              <span>Cecchino &middot; 2,00 &euro; (1 Sestina)</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="wfi-mode-reduced3"
+              onClick={() => handleSelectPlayMode('reduced3')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer ${
+                playMode === 'reduced3'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Grid className="w-3.5 h-3.5" />
+              <span>Sistema Ridotto &middot; 6,00 &euro; (3 Sestine)</span>
             </button>
           </div>
         </div>
@@ -363,172 +598,315 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
         </div>
       )}
 
-      {/* Main Grid: Left = Sestina #1 Cecchino + Alternatives #2/#3; Right = Imbuto 40 -> 16 -> 12 */}
+      {/* Main Grid: Left = Active Play Card + Monte Carlo; Right = Imbuto 40 -> 16 -> 12/9 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left 7 cols: Sestina #1 da giocare (2,00 €) + Cassetto Alternative #2 e #3 */}
+        {/* Left 7 cols */}
         <div className="lg:col-span-7 space-y-5">
-          {/* Primary Sestina #1 Card */}
-          <div className="bg-slate-900/95 border-2 border-emerald-500/40 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
-              <div>
+          {playMode === 'sniper' ? (
+            /* MODE 1: Cecchino — 2,00 € (1 Sestina) */
+            <div
+              className="bg-slate-900/95 border-2 border-emerald-500/40 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden"
+              data-testid="wfi-sniper-card"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-md bg-emerald-500 text-slate-950 font-black text-[11px] uppercase tracking-wider">
+                      Sestina #1 &bull; Cecchino Top 1 / {sniperSelection.totalCombinationsEvaluated}
+                    </span>
+                    <span className="text-xs font-mono font-bold text-emerald-300">
+                      Score: {sniperSelection.primarySestina.totalScore} pt
+                    </span>
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-black text-white mt-1">
+                    Sestina #1 da Giocare &mdash; Costo Schedina:{' '}
+                    <span className="text-amber-400">2,00 &euro;</span>
+                  </h2>
+                </div>
+
                 <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-md bg-emerald-500 text-slate-950 font-black text-[11px] uppercase tracking-wider">
-                    Sestina #1 &bull; Cecchino Top 1 / {sniperSelection.totalCombinationsEvaluated}
+                  <button
+                    type="button"
+                    onClick={() => handleCopySestina(sniperSelection.primarySestina)}
+                    className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{copiedRank === 1 ? 'Copiata!' : 'Copia'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRegisterSestinaPlay(sniperSelection.primarySestina)}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 cursor-pointer"
+                  >
+                    <BookmarkCheck className="w-4 h-4" />
+                    <span>Registra in Verifica (2,00 €)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 6 Numbers display */}
+              <div
+                className="py-6 flex flex-wrap items-center justify-center sm:justify-start gap-3 sm:gap-4"
+                data-testid="wfi-primary-sestina-numbers"
+              >
+                {sniperSelection.primarySestina.numbers.map((num) => renderNumberBadge(num, 'lg'))}
+              </div>
+
+              {/* Structural Metrics Bar for Sestina #1 */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-3 border-t border-slate-800/80 text-xs">
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    Somma (95&ndash;150)
                   </span>
-                  <span className="text-xs font-mono font-bold text-emerald-300">
-                    Score: {sniperSelection.primarySestina.totalScore} pt
+                  <span className="font-mono font-black text-sm text-emerald-300">
+                    &Sigma; {sniperSelection.primarySestina.sum}
                   </span>
                 </div>
-                <h2 className="text-lg sm:text-xl font-black text-white mt-1">
-                  Sestina #1 da Giocare &mdash; Costo Schedina: <span className="text-amber-400">2,00 &euro;</span>
-                </h2>
-              </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleCopySestina(sniperSelection.primarySestina)}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Copy className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{copiedRank === 1 ? 'Copiata!' : 'Copia'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleRegisterSestinaPlay(sniperSelection.primarySestina)}
-                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 cursor-pointer"
-                >
-                  <BookmarkCheck className="w-4 h-4" />
-                  <span>Registra in Verifica (2,00 €)</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 6 Numbers display */}
-            <div
-              className="py-6 flex flex-wrap items-center justify-center sm:justify-start gap-3 sm:gap-4"
-              data-testid="wfi-primary-sestina-numbers"
-            >
-              {sniperSelection.primarySestina.numbers.map((num) => renderNumberBadge(num, 'lg'))}
-            </div>
-
-            {/* Structural Metrics Bar for Sestina #1 */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-3 border-t border-slate-800/80 text-xs">
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">
-                  Somma (95&ndash;150)
-                </span>
-                <span className="font-mono font-black text-sm text-emerald-300">
-                  &Sigma; {sniperSelection.primarySestina.sum}
-                </span>
-              </div>
-
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">
-                  Pari / Dispari
-                </span>
-                <span className="font-mono font-black text-sm text-amber-300">
-                  {sniperSelection.primarySestina.evenCount}P / {sniperSelection.primarySestina.oddCount}D
-                </span>
-              </div>
-
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">
-                  Estremi (1-8 / 33-40)
-                </span>
-                <span className="font-mono font-black text-sm text-teal-300">
-                  {sniperSelection.primarySestina.extremesCount} presenze
-                </span>
-              </div>
-
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">
-                  Cluster &amp; Contigui
-                </span>
-                <span className="font-mono font-black text-sm text-indigo-300">
-                  {sniperSelection.primarySestina.adjacentPairsCount} cont. &bull;{' '}
-                  {sniperSelection.primarySestina.sameDecadePairsCount} ambi dec.
-                </span>
-              </div>
-
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 col-span-2 sm:col-span-1">
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">
-                  Decine (Max 3)
-                </span>
-                <span className="font-mono font-black text-sm text-slate-200">
-                  [{sniperSelection.primarySestina.decadeCounts.join('-')}] (max{' '}
-                  {sniperSelection.primarySestina.maxPerDecade})
-                </span>
-              </div>
-            </div>
-
-            {/* Expandable Drawer for Alternatives #2 and #3 */}
-            <div className="mt-5 pt-4 border-t border-slate-800">
-              <button
-                type="button"
-                aria-expanded={isAlternativesOpen}
-                onClick={() => setIsAlternativesOpen((prev) => !prev)}
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 text-xs font-bold text-slate-200 flex items-center justify-between transition-colors cursor-pointer"
-              >
-                <span className="flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-amber-400" />
-                  <span>
-                    Alternative Sestina #2 e #3 (dalle {sniperSelection.totalCombinationsEvaluated} combinazioni C(12,6))
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    Pari / Dispari
                   </span>
-                </span>
-                {isAlternativesOpen ? (
-                  <ChevronUp className="w-4 h-4 text-slate-400" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-slate-400" />
-                )}
-              </button>
+                  <span className="font-mono font-black text-sm text-amber-300">
+                    {sniperSelection.primarySestina.evenCount}P / {sniperSelection.primarySestina.oddCount}D
+                  </span>
+                </div>
 
-              {isAlternativesOpen && (
-                <div className="mt-3 space-y-3" data-testid="wfi-alternatives-drawer">
-                  {[sniperSelection.alternative2, sniperSelection.alternative3].map((alt) => (
-                    <div
-                      key={alt.rank}
-                      className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 font-mono font-bold text-[11px]">
-                            Alternativa #{alt.rank}
-                          </span>
-                          <span className="text-[11px] font-mono text-slate-400">
-                            Score: {alt.totalScore} pt &bull; &Sigma; {alt.sum} &bull; {alt.evenCount}P/{alt.oddCount}D &bull; Estremi: {alt.extremesCount}
-                          </span>
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    Estremi (1-8 / 33-40)
+                  </span>
+                  <span className="font-mono font-black text-sm text-teal-300">
+                    {sniperSelection.primarySestina.extremesCount} presenze
+                  </span>
+                </div>
+
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    Cluster &amp; Contigui
+                  </span>
+                  <span className="font-mono font-black text-sm text-indigo-300">
+                    {sniperSelection.primarySestina.adjacentPairsCount} cont. &bull;{' '}
+                    {sniperSelection.primarySestina.sameDecadePairsCount} ambi dec.
+                  </span>
+                </div>
+
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 col-span-2 sm:col-span-1">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    Decine (Max 3)
+                  </span>
+                  <span className="font-mono font-black text-sm text-slate-200">
+                    [{sniperSelection.primarySestina.decadeCounts.join('-')}] (max{' '}
+                    {sniperSelection.primarySestina.maxPerDecade})
+                  </span>
+                </div>
+              </div>
+
+              {/* Expandable Drawer for Alternatives #2 and #3 */}
+              <div className="mt-5 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  aria-expanded={isAlternativesOpen}
+                  onClick={() => setIsAlternativesOpen((prev) => !prev)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 text-xs font-bold text-slate-200 flex items-center justify-between transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-amber-400" />
+                    <span>
+                      Alternative Sestina #2 e #3 (dalle {sniperSelection.totalCombinationsEvaluated} combinazioni C(12,6))
+                    </span>
+                  </span>
+                  {isAlternativesOpen ? (
+                    <ChevronUp className="w-4 h-4 text-slate-400" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                  )}
+                </button>
+
+                {isAlternativesOpen && (
+                  <div className="mt-3 space-y-3" data-testid="wfi-alternatives-drawer">
+                    {[sniperSelection.alternative2, sniperSelection.alternative3].map((alt) => (
+                      <div
+                        key={alt.rank}
+                        className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 font-mono font-bold text-[11px]">
+                              Alternativa #{alt.rank}
+                            </span>
+                            <span className="text-[11px] font-mono text-slate-400">
+                              Score: {alt.totalScore} pt &bull; &Sigma; {alt.sum} &bull; {alt.evenCount}P/{alt.oddCount}D &bull; Estremi: {alt.extremesCount}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {alt.numbers.map((n) => renderNumberBadge(n, 'md'))}
+                          </div>
                         </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() => handleCopySestina(alt)}
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
+                          >
+                            {copiedRank === alt.rank ? 'Copiata!' : 'Copia'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRegisterSestinaPlay(alt)}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-bold cursor-pointer"
+                          >
+                            Gioca #{alt.rank} (2€)
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* MODE 2: Sistema Ridotto — 6,00 € (3 Sestine su 9 Numeri con Copertura 2x Simmetrica) */
+            <div
+              className="bg-slate-900/95 border-2 border-amber-500/40 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden space-y-5"
+              data-testid="wfi-reduced3-card"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-md bg-amber-500 text-slate-950 font-black text-[11px] uppercase tracking-wider">
+                      Sistema Ridotto C(9,6) &rarr; 3 Colonne
+                    </span>
+                    <span
+                      className="px-2.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-extrabold text-[11px] flex items-center gap-1"
+                      data-testid="wfi-symmetric-2x-badge"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Copertura 2x Simmetrica (9 &times; 2 = 18)
+                    </span>
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-black text-white">
+                    3 Sestine Ridotte (#01, #02, #03) &mdash; Costo Totale:{' '}
+                    <span className="text-amber-400">6,00 &euro;</span>
+                  </h2>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="wfi-copy-3-sestine-btn"
+                    onClick={handleCopyAll3Sestine}
+                    className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{copiedRank === 'all3' ? '3 Sestine Copiate!' : 'Copia 3 Sestine'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="wfi-register-3-sestine-btn"
+                    onClick={handleRegisterReduced3Play}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 cursor-pointer"
+                  >
+                    <BookmarkCheck className="w-4 h-4" />
+                    <span>Registra 3 Sestine (6,00 €)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3 Reduced Columns List */}
+              <div className="space-y-3" data-testid="wfi-reduced3-columns-list">
+                {reduced3System.columns.map((col, idx) => {
+                  const colLabel = `#${String(idx + 1).padStart(2, '0')}`;
+                  const lows = col.lowCount ?? col.numbers.filter((n) => n <= 20).length;
+                  const highs = col.highCount ?? 6 - lows;
+                  return (
+                    <div
+                      key={col.rank}
+                      data-testid={`wfi-reduced-col-${idx + 1}`}
+                      className="p-4 rounded-xl bg-slate-950/90 border border-slate-800 hover:border-amber-500/40 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-black text-sm">
+                          {colLabel}
+                        </span>
                         <div className="flex flex-wrap items-center gap-2">
-                          {alt.numbers.map((n) => renderNumberBadge(n, 'md'))}
+                          {col.numbers.map((num) => renderNumberBadge(num, 'md'))}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 self-end sm:self-center">
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-mono self-end sm:self-center">
+                        <span className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 text-emerald-300 font-bold">
+                          &Sigma; {col.sum}
+                        </span>
+                        <span className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 text-amber-300 font-bold">
+                          P/D {col.evenCount}/{col.oddCount}
+                        </span>
+                        <span className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 text-indigo-300 font-bold">
+                          B/A {lows}/{highs}
+                        </span>
+                        <span className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 text-teal-300 font-bold">
+                          Est: {col.extremesCount}
+                        </span>
                         <button
                           type="button"
-                          onClick={() => handleCopySestina(alt)}
-                          className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
+                          onClick={() => handleCopySestina(col)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-sans font-bold cursor-pointer"
                         >
-                          {copiedRank === alt.rank ? 'Copiata!' : 'Copia'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRegisterSestinaPlay(alt)}
-                          className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-bold cursor-pointer"
-                        >
-                          Gioca #{alt.rank} (2€)
+                          {copiedRank === col.rank ? 'Copiata!' : 'Copia'}
                         </button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+                  );
+                })}
+              </div>
 
-          {/* Simulatore Monte Carlo "Settimana Tipo" (7 Estrazioni = 14,00 €) */}
+              {/* Mathematical Coverage Summary Bar */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-800/80 text-xs">
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    Bilanciamento Presenze (Top 9)
+                  </span>
+                  <span className="font-mono font-black text-sm text-emerald-300">
+                    {reduced3System.isPerfect2x
+                      ? '9/9 Numeri presenti esattamente 2x'
+                      : 'Copertura Bilanciata 18/18'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    Copertura Ambi su Top 9
+                  </span>
+                  <span className="font-mono font-black text-sm text-amber-300">
+                    {reduced3System.uniquePairsCovered} / {reduced3System.totalPairsInTop9} coppie (
+                    {Math.round(
+                      (reduced3System.uniquePairsCovered / reduced3System.totalPairsInTop9) * 100
+                    )}
+                    %)
+                  </span>
+                </div>
+
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    Copertura Terni su Top 9
+                  </span>
+                  <span className="font-mono font-black text-sm text-indigo-300">
+                    {reduced3System.uniqueTripletsCovered} / {reduced3System.totalTripletsInTop9} terne (
+                    {Math.round(
+                      (reduced3System.uniqueTripletsCovered / reduced3System.totalTripletsInTop9) *
+                        100
+                    )}
+                    %)
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Simulatore Monte Carlo "Settimana Tipo" Dinamico (14,00 € vs 42,00 €) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
               <div>
@@ -539,7 +917,18 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
                   </h3>
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Motore bitmask a 40 bit sulla Sestina #1 [{sniperSelection.primarySestina.numbers.join(', ')}] &bull; Ciclo 7 giorni = <strong className="text-white">14,00 &euro;</strong> spesi ({monteCarloWeekly.executionTimeMs} ms)
+                  {playMode === 'sniper' ? (
+                    <>
+                      Motore bitmask a 40 bit sulla Sestina #1 [
+                      {sniperSelection.primarySestina.numbers.join(', ')}] &bull; Ciclo 7 giorni ={' '}
+                      <strong className="text-white">14,00 &euro;</strong> spesi ({monteCarloWeekly.executionTimeMs} ms)
+                    </>
+                  ) : (
+                    <>
+                      Motore bitmask a 40 bit sulle <strong className="text-amber-300">3 Sestine Ridotte</strong> in simultanea (somma vincite multiple nella stessa serata) &bull; Ciclo 7 giorni ={' '}
+                      <strong className="text-white">42,00 &euro;</strong> spesi ({monteCarloWeekly.executionTimeMs} ms)
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -553,15 +942,18 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
               </button>
             </div>
 
-            {/* Key Weekly Metrics */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Key Weekly & Single Evening Metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
                 <span className="text-[11px] text-slate-400 font-bold block">
-                  Spesa Ciclo 7 Giorni (7 &times; 2,00 €)
+                  Spesa Ciclo 7 Giorni (7 &times; {monteCarloWeekly.ticketCost.toFixed(2).replace('.', ',')} €)
                 </span>
                 <div className="mt-1 flex flex-col gap-0.5">
-                  <span className="text-lg font-mono font-black text-white">
-                    14,00 &euro;
+                  <span
+                    className="text-lg font-mono font-black text-white"
+                    data-testid="wfi-mc-weekly-cost"
+                  >
+                    {monteCarloWeekly.weeklyCost.toFixed(2).replace('.', ',')} &euro;
                   </span>
                   <span className="text-[11px] font-mono text-emerald-400">
                     Ritorno medio: {monteCarloWeekly.averageWeeklyPayout.toFixed(2)} &euro;/sett.
@@ -571,7 +963,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
               <div className="p-3.5 rounded-xl bg-slate-950 border border-emerald-500/30">
                 <span className="text-[11px] text-slate-400 font-bold block">
-                  Tasso Medio Recupero (7 Giorni)
+                  Tasso Medio Recupero (ROI %)
                 </span>
                 <div className="mt-1 flex flex-col gap-0.5">
                   <span
@@ -588,17 +980,37 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
               <div className="p-3.5 rounded-xl bg-slate-950 border border-amber-500/30">
                 <span className="text-[11px] text-slate-400 font-bold block">
-                  Frequenza Attesa Punto 2 (2,00 €)
+                  Prob. Serata &ge;1 Punto 2 (2,00 €)
                 </span>
                 <div className="mt-1 flex flex-col gap-0.5">
                   <span
                     className="text-lg font-mono font-black text-amber-300"
+                    data-testid="wfi-mc-evening-p2"
+                  >
+                    {monteCarloWeekly.probAtLeastOnePunto2PerDrawPct}% / sera
+                  </span>
+                  <span
+                    className="text-[11px] font-mono text-slate-400"
                     data-testid="wfi-mc-punto2-freq"
                   >
-                    {monteCarloWeekly.expectedPunto2PerWeek} / sett.
+                    {monteCarloWeekly.expectedPunto2PerWeek} P.2/sett. ({monteCarloWeekly.probAtLeastOnePunto2PerWeekPct}% sett.)
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-indigo-500/30">
+                <span className="text-[11px] text-slate-400 font-bold block">
+                  Prob. Serata &ge;1 Punto 3 (8,00 €)
+                </span>
+                <div className="mt-1 flex flex-col gap-0.5">
+                  <span
+                    className="text-lg font-mono font-black text-indigo-300"
+                    data-testid="wfi-mc-evening-p3"
+                  >
+                    {monteCarloWeekly.probAtLeastOnePunto3PerDrawPct}% / sera
                   </span>
                   <span className="text-[11px] font-mono text-slate-400">
-                    Prob. &ge;1 P.2: {monteCarloWeekly.probAtLeastOnePunto2PerWeekPct}%
+                    Prob. 7gg &ge;1 P.3: {monteCarloWeekly.probAtLeastOnePunto3PerWeekPct}%
                   </span>
                 </div>
               </div>
@@ -710,50 +1122,75 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
           </div>
         </div>
 
-        {/* Right 5 cols: Imbuto Bilanciato 40 -> 16 (13 Gen + 3 Caos) -> 12 */}
+        {/* Right 5 cols: Imbuto Bilanciato 40 -> 16 (13 Gen + 3 Caos) -> 12 or 9 */}
         <div className="lg:col-span-5 space-y-5">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <Award className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-extrabold text-white uppercase tracking-wide">
-                  Pool Top 12 (Imbuto 40 &rarr; 16 &rarr; 12)
+                <h3
+                  className="text-sm font-extrabold text-white uppercase tracking-wide"
+                  data-testid="wfi-pool-base-heading"
+                >
+                  {playMode === 'sniper'
+                    ? 'Pool Base (12 Numeri • 40 → 16 → 12)'
+                    : 'Pool Base (9 Numeri • 40 → 16 → 9)'}
                 </h3>
               </div>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                13 Gen + 3 Caos
+              <span
+                className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                data-testid="wfi-pool-short-badge"
+              >
+                {activeUiLabels.shortBadge}
               </span>
             </div>
 
             {/* Unified Balanced Funnel Description Box */}
             <div className="p-3.5 rounded-xl bg-slate-950/90 border border-emerald-500/25 space-y-1.5 text-xs">
-              <div className="font-extrabold text-emerald-300">
-                {WIN_FOR_ITALIA_UI_LABELS.subtitle}
-              </div>
+              <div className="font-extrabold text-emerald-300">{activeUiLabels.subtitle}</div>
               <div className="font-mono text-amber-300 text-[11px]">
-                3 Caos Iniettati (1&ndash;40): [{funnelResult.chaos3.join(', ')}] &bull; Sopravvissuti nei Top 12:{' '}
+                3 Caos Iniettati (1&ndash;40): [{funnelResult.chaos3.join(', ')}] &bull; Sopravvissuti nei Top{' '}
+                {activePoolNumbers.length}:{' '}
                 {survivedChaos.length > 0 ? `[${survivedChaos.join(', ')}]` : 'Nessuno'}
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                {WIN_FOR_ITALIA_UI_LABELS.weightsDetail}
+                {activeUiLabels.weightsDetail}
               </p>
             </div>
 
-            {/* Top 12 Selected Pool Badges */}
+            {/* Top 12 or Top 9 Selected Pool Badges */}
             <div>
               <div className="flex flex-col gap-1 text-xs text-slate-400 mb-2.5">
-                <span className="font-bold uppercase text-[11px] text-slate-200">
-                  Top 12 Qualificati per C(12,6) = 924
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold uppercase text-[11px] text-slate-200">
+                    {playMode === 'sniper'
+                      ? 'Top 12 Qualificati per C(12,6) = 924'
+                      : 'Top 9 Qualificati per C(9,6) = 84 (2x ciascuno)'}
+                  </span>
+                  <span
+                    className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 font-mono text-[11px] text-amber-300 font-bold"
+                    data-testid="wfi-pool-parity-ratio"
+                  >
+                    Equilibrio P/D: {activePoolEvenCount}P / {activePoolOddCount}D
+                  </span>
+                </div>
                 <span className="font-mono text-[11px] text-emerald-300">
-                  Decine (Max 3): [1-10: {funnelResult.decadeDistributionTop12[0] || 0} &bull; 11-20:{' '}
-                  {funnelResult.decadeDistributionTop12[1] || 0} &bull; 21-30:{' '}
-                  {funnelResult.decadeDistributionTop12[2] || 0} &bull; 31-40:{' '}
-                  {funnelResult.decadeDistributionTop12[3] || 0}]
+                  Decine (Max 3): [1-10: {activeDecadeDist[0] || 0} &bull; 11-20:{' '}
+                  {activeDecadeDist[1] || 0} &bull; 21-30: {activeDecadeDist[2] || 0} &bull; 31-40:{' '}
+                  {activeDecadeDist[3] || 0}]
                 </span>
               </div>
-              <div className="grid grid-cols-6 gap-2">
-                {funnelResult.top12Numbers.map((num) => renderNumberBadge(num, 'md'))}
+              <div
+                className={`grid ${playMode === 'reduced3' ? 'grid-cols-9' : 'grid-cols-6'} gap-2`}
+                data-testid="wfi-active-pool-numbers"
+              >
+                {activePoolNumbers.map((num) =>
+                  renderNumberBadge(
+                    num,
+                    'md',
+                    playMode === 'reduced3' ? reduced3System.numberFrequencies[num] : undefined
+                  )
+                )}
               </div>
             </div>
 
@@ -764,54 +1201,59 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
                 <span className="text-slate-500 font-mono">Verde = Estremi 1-8/33-40</span>
               </div>
               <div className="max-h-64 overflow-y-auto pr-1 space-y-1.5">
-                {funnelResult.scoredPool16.map((item, idx) => (
-                  <div
-                    key={item.num}
-                    className={`px-3 py-1.5 rounded-xl border text-xs flex items-center justify-between ${
-                      item.selectedInTop12
-                        ? 'bg-slate-950/90 border-slate-800 text-slate-200'
-                        : 'bg-slate-950/40 border-slate-900 text-slate-500 line-through'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[10px] text-slate-500 w-4">
-                        #{idx + 1}
-                      </span>
-                      <span
-                        className={`w-6 h-6 rounded-lg font-mono font-black text-xs flex items-center justify-center ${
-                          item.isExtreme
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        }`}
-                      >
-                        {String(item.num).padStart(2, '0')}
-                      </span>
-                      <span className="text-[11px] font-mono">
-                        {item.isChaos ? '⚡ Caos' : '🧬 Gen'} &bull; Dec.{item.decade + 1}
-                      </span>
-                    </div>
+                {funnelResult.scoredPool16.map((item, idx) => {
+                  const isSelected =
+                    playMode === 'reduced3' ? Boolean(item.selectedInTop9) : item.selectedInTop12;
+                  return (
+                    <div
+                      key={item.num}
+                      className={`px-3 py-1.5 rounded-xl border text-xs flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-slate-950/90 border-slate-800 text-slate-200'
+                          : 'bg-slate-950/40 border-slate-900 text-slate-500 line-through'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px] text-slate-500 w-4">
+                          #{idx + 1}
+                        </span>
+                        <span
+                          className={`w-6 h-6 rounded-lg font-mono font-black text-xs flex items-center justify-center ${
+                            item.isExtreme
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          }`}
+                        >
+                          {String(item.num).padStart(2, '0')}
+                        </span>
+                        <span className="text-[11px] font-mono">
+                          {item.isChaos ? '⚡ Caos' : '🧬 Gen'} &bull; Dec.{item.decade + 1} &bull;{' '}
+                          {item.num % 2 === 0 ? 'P' : 'D'}
+                        </span>
+                      </div>
 
-                    <div className="flex items-center gap-2 font-mono text-[11px]">
-                      <span className="text-slate-400">
-                        Cl:+{item.clusterBonus}
-                        {item.extremeBonus > 0 ? ` Est:+${item.extremeBonus}` : ''}
-                        {item.isolationPenalty < 0 ? ` Pen:${item.isolationPenalty}` : ''}
-                      </span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded font-bold ${
-                          item.totalFunnelScore >= 40
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        {item.totalFunnelScore >= 0
-                          ? `+${item.totalFunnelScore}`
-                          : item.totalFunnelScore}{' '}
-                        pt
-                      </span>
+                      <div className="flex items-center gap-2 font-mono text-[11px]">
+                        <span className="text-slate-400">
+                          Cl:+{item.clusterBonus}
+                          {item.extremeBonus > 0 ? ` Est:+${item.extremeBonus}` : ''}
+                          {item.isolationPenalty < 0 ? ` Pen:${item.isolationPenalty}` : ''}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-bold ${
+                            item.totalFunnelScore >= 40
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {item.totalFunnelScore >= 0
+                            ? `+${item.totalFunnelScore}`
+                            : item.totalFunnelScore}{' '}
+                          pt
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -847,19 +1289,20 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
                   <div className="flex items-center gap-1.5">
                     {draw.numbers.map((n) => {
-                      const inSestina1 =
-                        sniperSelection.primarySestina.numbers.includes(n);
+                      const inActivePlay = playedNumbersSet.has(n);
                       return (
                         <span
                           key={n}
                           className={`w-7 h-7 rounded-lg font-mono font-bold text-xs flex items-center justify-center border ${
-                            inSestina1
+                            inActivePlay
                               ? 'bg-emerald-500 text-slate-950 border-emerald-300 font-black'
                               : 'bg-slate-900 text-slate-200 border-slate-700'
                           }`}
                           title={
-                            inSestina1
-                              ? 'Presente nella Sestina #1 Cecchino'
+                            inActivePlay
+                              ? playMode === 'sniper'
+                                ? 'Presente nella Sestina #1 Cecchino'
+                                : 'Presente nel Pool Top 9 del Sistema Ridotto'
                               : undefined
                           }
                         >

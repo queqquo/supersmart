@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { X, Clipboard, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
-import { parseExtractionText } from '../utils/combinatorics';
+import { parseExtractionText, validateRealDrawInput } from '../utils/combinatorics';
 import { Draw } from '../types/lottery';
 
 interface SmartPasteModalProps {
@@ -52,17 +52,28 @@ export const SmartPasteModal: React.FC<SmartPasteModalProps> = ({
   const handleConfirmSave = () => {
     if (!parsedData || !parsedData.numbers) return;
 
-    const fullDraw: Draw = {
-      id: parsedData.id || `2026-${String(parsedData.contestNumber || 46).padStart(3, '0')}`,
-      contestNumber: parsedData.contestNumber || 46,
+    const check = validateRealDrawInput({
+      id: parsedData.id,
+      concorso: parsedData.contestNumber || (lastDraw ? lastDraw.contestNumber + 1 : 1),
+      contestNumber: parsedData.contestNumber || (lastDraw ? lastDraw.contestNumber + 1 : 1),
       year: parsedData.year || 2026,
+      data: parsedData.date || new Date().toISOString().split('T')[0],
       date: parsedData.date || new Date().toISOString().split('T')[0],
-      numbers: parsedData.numbers as [number, number, number, number, number, number],
-      jolly: parsedData.jolly ?? 1,
+      sestina: parsedData.numbers,
+      numbers: parsedData.numbers,
+      jolly: parsedData.jolly,
       superstar: parsedData.superstar
-    };
+    });
 
-    onSaveDraw(fullDraw);
+    if (!check.valid || !check.draw) {
+      setErrorMsg(
+        check.error ||
+          'Estrazione incompleta: assicurati che siano presenti 6 numeri distinti [1..90], Jolly [1..90] e SuperStar [1..90].'
+      );
+      return;
+    }
+
+    onSaveDraw(check.draw);
     setPasteText('');
     setParsedData(null);
     onClose();

@@ -278,58 +278,148 @@ test('buildGeneratedColumn, parseManualSestineText, createManualSavedPlay, and a
   assert.equal(updated.result?.netReturn, 100.0);
 });
 
-test('generateFullHistoricalDataset provides complete official archive from 2009 to October 2026 (all 18 years)', async () => {
-  const { generateFullHistoricalDataset } = await import('../data/seedDraws');
-  const full = generateFullHistoricalDataset();
+test('Zero Mock Data & Sisal Schema: public/data/estrazioni_sisal.json is [], validateRealDrawInput & exportEstrazioniSisalJSON enforce strict Sisal schema', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { generateFullHistoricalDataset, INITIAL_HISTORICAL_DRAWS } = await import('../data/seedDraws');
+  const { validateRealDrawInput } = await import('./combinatorics');
+  const { validateAndDeduplicateDraws, exportEstrazioniSisalJSON } = await import('./storage');
 
-  assert.equal(full.length, 2946);
-  assert.equal(full[0].id, '2026-174');
-  assert.equal(full[0].date, '2026-10-30');
-  assert.deepEqual(full[0].numbers, [19, 24, 49, 62, 64, 85]);
+  assert.equal(generateFullHistoricalDataset().length, 0);
+  assert.equal(INITIAL_HISTORICAL_DRAWS.length, 0);
 
-  assert.equal(full[full.length - 1].id, '2009-001');
-  assert.equal(full[full.length - 1].date, '2009-01-02');
-  assert.deepEqual(full[full.length - 1].numbers, [16, 19, 29, 34, 48, 64]);
+  // Verify static public/data/estrazioni_sisal.json is initialized as empty array []
+  const sisalFilePath = path.resolve(process.cwd(), 'public/data/estrazioni_sisal.json');
+  const sisalRawContent = fs.readFileSync(sisalFilePath, 'utf-8').trim();
+  assert.deepEqual(JSON.parse(sisalRawContent), []);
 
-  const yearsPresent = new Set(full.map((d) => d.year));
-  for (let yr = 2009; yr <= 2026; yr++) {
-    assert.ok(yearsPresent.has(yr), `Year ${yr} must be present in historical archive`);
+  // Valid real draw in official Sisal schema { concorso, data, sestina, jolly, superstar }
+  const validRes = validateRealDrawInput({
+    concorso: 174,
+    data: '2026-10-30',
+    sestina: [85, 19, 24, 64, 49, 62],
+    jolly: 12,
+    superstar: 77
+  });
+  assert.equal(validRes.valid, true);
+  assert.deepEqual(validRes.sisalRecord, {
+    concorso: 174,
+    data: '2026-10-30',
+    sestina: [19, 24, 49, 62, 64, 85],
+    jolly: 12,
+    superstar: 77
+  });
+
+  // Reject incomplete record (missing superstar)
+  assert.equal(
+    validateRealDrawInput({
+      concorso: 174,
+      data: '2026-10-30',
+      sestina: [19, 24, 49, 62, 64, 85],
+      jolly: 12
+    }).valid,
+    false
+  );
+
+  // Reject duplicate numbers in sestina
+  assert.equal(
+    validateRealDrawInput({ numbers: [7, 7, 19, 24, 49, 62], jolly: 12, superstar: 44 }).valid,
+    false
+  );
+
+  // Reject out-of-range numbers (<1 or >90)
+  assert.equal(
+    validateRealDrawInput({ numbers: [0, 19, 24, 49, 62, 85], jolly: 12, superstar: 44 }).valid,
+    false
+  );
+  assert.equal(
+    validateRealDrawInput({ numbers: [7, 19, 24, 49, 62, 91], jolly: 12, superstar: 44 }).valid,
+    false
+  );
+
+  // Reject Jolly equal to one of the 6 winning numbers
+  assert.equal(
+    validateRealDrawInput({ numbers: [7, 19, 24, 49, 62, 85], jolly: 24, superstar: 44 }).valid,
+    false
+  );
+
+  // Deduplication and exportEstrazioniSisalJSON descending order verification
+  const rawMixed = [
+    { concorso: 44, data: '2026-03-10', sestina: [90, 5, 18, 22, 41, 63], jolly: 11, superstar: 33 },
+    { concorso: 45, data: '2026-03-12', sestina: [89, 12, 24, 35, 58, 71], jolly: 15, superstar: 44 },
+    { concorso: 45, data: '2026-03-12', sestina: [12, 24, 35, 58, 71, 89], jolly: 15, superstar: 44 }, // duplicate
+    { concorso: 46, data: '2026-03-14', sestina: [1, 2, 3, 4, 5], jolly: 10, superstar: 20 } // incomplete (5 numbers) -> discarded
+  ];
+  const deduped = validateAndDeduplicateDraws(rawMixed);
+  assert.equal(deduped.length, 2);
+  const exportedJson = JSON.parse(exportEstrazioniSisalJSON(deduped));
+  assert.deepEqual(exportedJson, [
+    {
+      concorso: 45,
+      data: '2026-03-12',
+      sestina: [12, 24, 35, 58, 71, 89],
+      jolly: 15,
+      superstar: 44
+    },
+    {
+      concorso: 44,
+      data: '2026-03-10',
+      sestina: [5, 18, 22, 41, 63, 90],
+      jolly: 11,
+      superstar: 33
+    }
+  ]);
+});
+
+test('Exact 5x Symmetry: generateOptimizedSystem on 12 numbers -> 10 sestine guarantees every number appears EXACTLY 5 times with 0 duplicate sestine', () => {
+  const pool12 = [4, 11, 18, 25, 32, 39, 46, 53, 60, 67, 74, 81];
+  const unbiasedFilters: FilterOptions = {
+    evenOdd: false,
+    highLow: false,
+    sumRange: false,
+    minSum: 190,
+    maxSum: 350,
+    consecutive: false,
+    decades: false,
+    cadences: false
+  };
+
+  for (const target of ['ambi', 'terni'] as const) {
+    const res = generateOptimizedSystem(pool12, unbiasedFilters, 10, undefined, target);
+    assert.equal(res.columns.length, 10);
+    assert.equal(res.coverageMetrics.minPresence, 5, `Every number must appear at least 5 times (${target})`);
+    assert.equal(res.coverageMetrics.maxPresence, 5, `Every number must appear at most 5 times (${target})`);
+    assert.equal(res.coverageMetrics.averagePresence, 5);
+
+    // Check every individual number in pool12 appears exactly 5 times
+    for (const num of pool12) {
+      assert.equal(
+        res.coverageMetrics.presenceHistogram[num],
+        5,
+        `Number ${num} must appear exactly 5 times in the 10 sestine, got ${res.coverageMetrics.presenceHistogram[num]}`
+      );
+    }
+
+    // Check zero duplicate sestine
+    const uniqueColumnKeys = new Set(res.columns.map((c) => c.numbers.join(',')));
+    assert.equal(uniqueColumnKeys.size, 10, 'All 10 sestine must be strictly distinct (0 duplicates)');
   }
 });
 
-test('generateOptimizedSystem supports both Massimizza Ambi (t=2) and Massimizza Terni (t=3) coverage targets', () => {
-  const pool = [4, 11, 18, 25, 32, 39, 46, 53, 60, 67, 74, 81];
-  const filters: FilterOptions = {
-    evenOdd: true,
-    highLow: true,
-    sumRange: true,
-    minSum: 190,
-    maxSum: 350,
-    consecutive: true,
-    decades: true,
-    cadences: true
-  };
-
-  const resAmbi = generateOptimizedSystem(pool, filters, 10, undefined, 'ambi');
-  const resTerni = generateOptimizedSystem(pool, filters, 10, undefined, 'terni');
-
-  assert.equal(resAmbi.coverageTarget, 'ambi');
-  assert.equal(resTerni.coverageTarget, 'terni');
-  assert.equal(resAmbi.columns.length, 10);
-  assert.equal(resTerni.columns.length, 10);
-  assert.ok(
-    resTerni.coverageMetrics.tripletsCoveredCount >= resAmbi.coverageMetrics.tripletsCoveredCount,
-    `Terni mode should cover at least as many triplets (${resTerni.coverageMetrics.tripletsCoveredCount}) as Ambi mode (${resAmbi.coverageMetrics.tripletsCoveredCount})`
-  );
-});
-
-test('compareSavedPlayAgainstRecentDraws clamps range [10..200], highlights drawn numbers, and calculates Spesa, Utile Lordo, and Utile Netto', async () => {
+test('compareSavedPlayAgainstRecentDraws clamps range [10..200], highlights drawn numbers, and calculates Spesa, Utile Lordo, and Utile Netto on real user draws', () => {
   assert.equal(clampArchiveComparisonDrawsCount(3), 10);
   assert.equal(clampArchiveComparisonDrawsCount(50), 50);
   assert.equal(clampArchiveComparisonDrawsCount(350), 200);
 
-  const { generateFullHistoricalDataset } = await import('../data/seedDraws');
-  const full = generateFullHistoricalDataset();
+  const realDrawsSample: Draw[] = Array.from({ length: 15 }, (_, idx) => ({
+    id: `2026-${String(174 - idx).padStart(3, '0')}`,
+    contestNumber: 174 - idx,
+    year: 2026,
+    date: `2026-10-${String(30 - idx).padStart(2, '0')}`,
+    numbers: idx === 0 ? [19, 24, 49, 62, 64, 85] : [3, 14, 27, 41, 58, 79],
+    jolly: 11,
+    superstar: 10
+  }));
 
   const col1 = buildGeneratedColumn(1, [19, 24, 49, 62, 64, 85], 10)!;
   const col2 = buildGeneratedColumn(2, [1, 2, 3, 4, 5, 6], 20)!;
@@ -338,97 +428,83 @@ test('compareSavedPlayAgainstRecentDraws clamps range [10..200], highlights draw
     columns: [col1, col2],
     cost: 3.0,
     winningAmount: 0,
-    manualNote: 'Test confronto archivio'
+    manualNote: 'Test confronto archivio reale'
   });
 
-  const summary = compareSavedPlayAgainstRecentDraws(play, full, 15);
+  const summary = compareSavedPlayAgainstRecentDraws(play, realDrawsSample, 15);
   assert.equal(summary.drawsEvaluatedCount, 15);
   assert.equal(summary.costPerDraw, 3.0);
   assert.equal(summary.totalSpent, 45.0); // 15 draws * 3.00 €
   assert.equal(summary.netProfitLoss, Number((summary.grossWinnings - summary.totalSpent).toFixed(2)));
   assert.equal(summary.rows.length, 15);
-  // First draw 2026-174 has numbers [19, 24, 49, 62, 64, 85] which match col1 completely
   assert.deepEqual(summary.rows[0].matchedNumbersInPlay, [19, 24, 49, 62, 64, 85]);
   assert.ok(summary.grossWinnings > 0);
 });
 
-test('selectFunnelPool30To12 and selectBalancedTopNumbers implement balanced 30->N scoring (Cluster cap +45, Extremes +40, Targeted Dispersion -5/-30/-15, Max 3/decade)', async () => {
+test('selectFairPoolNumbers, selectFunnelPool30To12, and selectBalancedTopNumbers operate with zero decade/parity/extreme bias via Fisher-Yates crypto.getRandomValues', async () => {
   const {
+    selectFairPoolNumbers,
     selectFunnelPool30To12,
     selectBalancedTopNumbers,
-    scorePool30InPureCompetition
+    scorePool30InPureCompetition,
+    getCryptoRandomFloat
   } = await import('./combinatorics');
 
-  // Verify Balanced Competition scoring math:
-  // - Cluster in extreme decade [1, 2, 11]
-  // - Isolated extreme number [89]
-  // - Isolated middle number [45]
+  // 1. Verify scorePool30InPureCompetition gives every number equal base dignity (uniform score = 100 without artificial cluster/extreme bias)
   const testPool = [1, 2, 11, 45, 89];
   const scored = scorePool30InPureCompetition(testPool);
-  const s1 = scored.find((s) => s.num === 1)!;
-  const s89 = scored.find((s) => s.num === 89)!;
-  const s45 = scored.find((s) => s.num === 45)!;
+  for (const item of scored) {
+    assert.equal(item.score, 100, `Number ${item.num} must have uniform base score 100 without artificial cluster/extreme bias`);
+  }
 
-  // Number 1: sameDecade=1 (2) -> 12, sameCadence=1 (11) -> 8, adjacent=1 (2) -> 15 => rawCluster=35 (<=45) + extreme(40) = +75
-  assert.equal(s1.score, 75);
-  // Number 89: isolated extreme (sameDecade=0, adjacent=0, isExtreme=true) -> +40 - 5 = +35
-  assert.equal(s89.score, 35);
-  // Number 45: isolated non-extreme (sameDecade=0, adjacent=0, isExtreme=false) -> -30
-  assert.equal(s45.score, -30);
+  // 2. Verify NO artificial cap of "max 3 per decade": if input has 10 numbers in the same decade, all 10 are selected without blocking
+  const singleDecadePool = [41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 12, 88];
+  const selected12 = selectBalancedTopNumbers(singleDecadePool, 12);
+  assert.equal(selected12.length, 12);
+  const decade4Count = selected12.filter((n) => Math.floor((n - 1) / 10) === 4).length;
+  assert.equal(decade4Count, 10, 'Must not block 3+ numbers in the same decade');
 
-  // Verify soft limit max 3 numbers per single decade prevents central clusters from monopolizing
-  const centralHeavyPool = [
-    41, 42, 43, 44, 45, 46, // 6 numbers in decade 4 (41-50)
-    1, 2, 14, 15, 76, 77, 88, 89, 22, 23, 61, 62
-  ];
-  const balanced10 = selectBalancedTopNumbers(centralHeavyPool, 10);
-  assert.equal(balanced10.length, 10);
-  const decade4Count = balanced10.filter((n) => Math.floor((n - 1) / 10) === 4).length;
-  assert.ok(decade4Count <= 3, `Decade 4 count (${decade4Count}) must not exceed 3`);
+  // 3. Verify selectFairPoolNumbers falls back to pure_uniform when draws is empty
+  const fairEmpty = selectFairPoolNumbers({
+    draws: [],
+    targetSize: 12,
+    mode: 'real_archive_weighted'
+  });
+  assert.equal(fairEmpty.modeUsed, 'pure_uniform');
+  assert.equal(fairEmpty.selectedNumbers.length, 12);
+  assert.equal(new Set(fairEmpty.selectedNumbers).size, 12);
 
-  // Full 25 + 5 -> 30 -> N funnel check for N=10 (Generatore Ottimizzato) and N=12 (Agenti CAMEL)
-  const rankedInput = Array.from({ length: 90 }, (_, i) => i + 1);
-  for (const targetN of [10, 12]) {
-    const funnelRes = selectFunnelPool30To12(rankedInput, targetN);
-    assert.equal(funnelRes.geneticCandidates.length, 25);
-    assert.equal(funnelRes.chaosNumbers.length, 5);
-    assert.equal(funnelRes.pool30.length, 30);
-    assert.equal(new Set(funnelRes.pool30).size, 30, 'All 30 candidates (25 + 5 chaos) must be unique');
-    assert.equal(funnelRes.top12Numbers.length, targetN);
-    assert.equal(new Set(funnelRes.top12Numbers).size, targetN, `Top ${targetN} must be unique integers`);
-    const decCounts: Record<number, number> = {};
-    for (let i = 0; i < funnelRes.top12Numbers.length; i++) {
-      const n = funnelRes.top12Numbers[i];
-      const dec = Math.floor((n - 1) / 10);
-      decCounts[dec] = (decCounts[dec] || 0) + 1;
-      assert.ok(decCounts[dec] <= 3, `Decade ${dec} must have at most 3 numbers`);
-      assert.ok(n >= 1 && n <= 90, `Number ${n} must be between 1 and 90`);
-      if (i > 0) {
-        assert.ok(n > funnelRes.top12Numbers[i - 1], `Top ${targetN} must be sorted ascending`);
-      }
+  // 4. Verify selectFunnelPool30To12 returns 12 distinct sorted numbers in [1..90]
+  const funnel12 = selectFunnelPool30To12([], 12, getCryptoRandomFloat, 'pure_uniform');
+  assert.equal(funnel12.top12Numbers.length, 12);
+  assert.equal(new Set(funnel12.top12Numbers).size, 12);
+  for (let i = 0; i < funnel12.top12Numbers.length; i++) {
+    const n = funnel12.top12Numbers[i];
+    assert.ok(n >= 1 && n <= 90);
+    if (i > 0) {
+      assert.ok(n > funnel12.top12Numbers[i - 1], 'Selected pool must be sorted ascending');
     }
   }
 });
 
-test('runCamelWorkforcePipeline coordinates 5 agents, uses 30->12 Funnel Pipeline with decades dispersion filter disabled, and supports window from 1 to max draws (default 200)', async () => {
-  const { generateFullHistoricalDataset } = await import('../data/seedDraws');
+test('runCamelWorkforcePipeline works cleanly both with empty archive (Equiprobable Pure mode) and with real draws, producing exact 5x symmetry on 12->10 sestine', async () => {
   const { runCamelWorkforcePipeline } = await import('./camelWorkforce');
-  const full = generateFullHistoricalDataset();
+  const { getBalancedFunnelUiLabels } = await import('./combinatorics');
 
   const filters: FilterOptions = {
-    evenOdd: true,
-    highLow: true,
-    sumRange: true,
+    evenOdd: false,
+    highLow: false,
+    sumRange: false,
     minSum: 190,
     maxSum: 350,
-    consecutive: true,
-    decades: true,
-    cadences: true
+    consecutive: false,
+    decades: false,
+    cadences: false
   };
 
-  // Default window (200 draws)
-  const res = runCamelWorkforcePipeline({
-    draws: full,
+  // Run with empty archive (Zero Mock Data startup state)
+  const resEmpty = runCamelWorkforcePipeline({
+    draws: [],
     poolSizeV: 12,
     budgetEuro: 10,
     playMode: 'pure_coverage',
@@ -436,58 +512,17 @@ test('runCamelWorkforcePipeline coordinates 5 agents, uses 30->12 Funnel Pipelin
     baseFilters: filters
   });
 
-  assert.equal(res.historicalDrawsWindow, 200);
-  assert.equal(res.agents.length, 5);
-  assert.equal(res.candidates.length, 3);
-  for (const cand of res.candidates) {
+  assert.equal(resEmpty.agents.length, 5);
+  assert.equal(resEmpty.candidates.length, 3);
+  for (const cand of resEmpty.candidates) {
     assert.equal(cand.poolNumbers.length, 12);
     assert.equal(new Set(cand.poolNumbers).size, 12);
-    assert.equal(cand.filtersUsed.decades, false, 'Legacy decades dispersion filter must be disabled');
-    for (const n of cand.poolNumbers) {
-      assert.ok(n >= 1 && n <= 90);
-    }
-    for (const pr of cand.poolReasons) {
-      assert.ok(
-        /^(CAOS|ESTREMO|CLUSTER|GENETICO) • Score: [+-]?\d+ pt$/.test(pr.primaryTag),
-        `Expected primaryTag to match role & score format, got "${pr.primaryTag}"`
-      );
-    }
+    assert.equal(cand.systemResult.columns.length, 10);
+    assert.equal(cand.systemResult.coverageMetrics.minPresence, 5);
+    assert.equal(cand.systemResult.coverageMetrics.maxPresence, 5);
   }
-  const { getBalancedFunnelUiLabels } = await import('./combinatorics');
-  const labels10 = getBalancedFunnelUiLabels(10);
+
   const labels12 = getBalancedFunnelUiLabels(12);
-  assert.equal(labels10.shortBadge, 'Imbuto 30→10 (25 Gen + 5 Caos)');
-  assert.equal(labels10.recalcButton, 'Ricalcola Imbuto 30→10');
-  assert.equal(
-    labels10.subtitle,
-    'Competizione Pura Bilanciata (30 → 10): Cluster + Estremi • Max 3/Decina'
-  );
-  assert.equal(labels12.title, 'Imbuto Bilanciato 30→12 (25 Gen + 5 Caos)');
-  assert.equal(labels12.recalcButton, 'Ricalcola Imbuto 30→12');
-  assert.equal(res.winnerCandidate.systemResult.columns.length, 10);
-  assert.ok(res.dialogueTranscript.length >= 5);
-  assert.ok(res.winnerCandidate.camelCompositeScore > 0);
-  assert.ok(
-    (res.winnerCandidate.systemResult.coverageMetrics.maxColumnOverlap ?? 6) <= 4,
-    '2-Opt Kempe + Hamming control should avoid 5-number column collisions for 10 columns on v=12'
-  );
-
-  // Edge case: window = 1 draw
-  const res1 = runCamelWorkforcePipeline({
-    draws: full,
-    poolSizeV: 12,
-    historicalDrawsWindow: 1,
-    budgetEuro: 10,
-    playMode: 'pure_coverage',
-    coverageTarget: 'terni',
-    baseFilters: filters
-  });
-  assert.equal(res1.historicalDrawsWindow, 1);
-  assert.equal(res1.winnerCandidate.poolNumbers.length, 12);
-  assert.equal(new Set(res1.winnerCandidate.poolNumbers).size, 12);
+  assert.equal(labels12.title, 'Selezione Equa 12 Numeri (Fisher-Yates Crypto RNG)');
+  assert.equal(labels12.recalcButton, 'Estrai Nuovi 12 Numeri Equi');
 });
-
-
-
-
-

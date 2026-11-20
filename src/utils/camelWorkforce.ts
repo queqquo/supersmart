@@ -292,8 +292,7 @@ function buildPoolNumberReasons(
 
     const scoreLabel = `Score: ${funnelCompetitionScore >= 0 ? '+' : ''}${funnelCompetitionScore} pt`;
 
-    // Assign dynamic role tag coherent with selectBalancedTopNumbers:
-    // CAOS -> ESTREMO -> CLUSTER -> GENETICO
+    // Assign role tag for multi-agent transparency
     let roleLabel = 'GENETICO';
     let tagColor: CamelPoolNumberReason['tagColor'] = 'purple';
 
@@ -313,17 +312,9 @@ function buildPoolNumberReasons(
     const parts: string[] = [
       `${roleLabel} (${scoreLabel})`,
       isChaosInjected
-        ? `Proviene dai 5 numeri Caos iniettati e selezionato nella Top ${poolNumbers.length}`
-        : `Candidato Genetico/WF (${historicalDrawsWindow} conc.) selezionato da selectBalancedTopNumbers`
+        ? `Campionamento Fisher-Yates (crypto.getRandomValues) senza bias nella Top ${poolNumbers.length}`
+        : `Selezionato senza vincoli forzati di decina o parità (${historicalDrawsWindow} conc. reali)`
     ];
-    if (isPolarExtreme) {
-      parts.push('Estremo 1–15 / 76–90 (+40 pt)');
-    }
-    if (hasClusterBonus) {
-      parts.push(
-        `Cluster: decina=${funnelItem?.sameDecadeCount ?? 0}, contigui=${funnelItem?.adjacentCount ?? 0}, cadenza=${funnelItem?.sameCadenceCount ?? 0} (cap +45 pt)`
-      );
-    }
     parts.push(`Freq(36): ${st?.frequencyK ?? 0} uscite`);
     parts.push(`Ritardo: ${st?.currentDelay ?? 0}/${st?.maxHistoricalDelay ?? 1} conc.`);
     parts.push(`Spia: ${Math.round((st?.affinityScore ?? 0) * 100)}%`);

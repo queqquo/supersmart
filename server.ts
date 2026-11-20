@@ -660,50 +660,133 @@ async function startServer() {
 
   app.get('/api/draws/official-sync', async (_req, res) => {
     try {
-      const feedUrl =
-        'https://raw.githubusercontent.com/delpinsky/Superenalotto/main/storico-estrazioni-superenalotto.json';
-      const response = await fetch(feedUrl, {
-        headers: { 'User-Agent': 'SuperEnalotto-Optimizer/1.0' }
-      });
-      if (!response.ok) {
-        res.status(502).json({ error: `Feed status ${response.status}` });
-        return;
-      }
-      const data = await response.json();
-      const rawDraws = Array.isArray(data?.draws)
-        ? data.draws.filter((d: { date?: string }) => d.date && d.date >= '2009-01-01')
-        : [];
-
-      rawDraws.sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
-      const byYear: Record<number, number> = {};
-      const draws = rawDraws.map(
-        (d: {
+      const superEnalottoFile = path.resolve(process.cwd(), 'src', 'data', 'superenalotto.json');
+      const byId = new Map<
+        string,
+        {
+          id: string;
+          contestNumber: number;
+          year: number;
           date: string;
-          nums: number[];
-          jolly?: number | null;
-          ss?: number | null;
-          concorso?: number;
-        }) => {
-          const year = parseInt(d.date.slice(0, 4), 10);
-          byYear[year] = (byYear[year] || 0) + 1;
-          const contestNumber =
-            typeof d.concorso === 'number' && d.concorso > 0 ? d.concorso : byYear[year];
-          const sortedNums = [...d.nums].map(Number).sort((a, b) => a - b);
-          return {
-            id: `${year}-${String(contestNumber).padStart(3, '0')}`,
-            contestNumber,
-            year,
-            date: d.date,
-            numbers: sortedNums,
-            jolly: Number(d.jolly) || 1,
-            superstar: Number(d.ss) || Number(d.jolly) || 1
-          };
+          numbers: number[];
+          jolly: number;
+          superstar?: number;
         }
-      );
+      >();
+      const byDate = new Map<string, string>();
 
-      draws.sort((a: { date: string }, b: { date: string }) => b.date.localeCompare(a.date));
+      if (fs.existsSync(superEnalottoFile)) {
+        try {
+          const localRaw = JSON.parse(fs.readFileSync(superEnalottoFile, 'utf8'));
+          if (Array.isArray(localRaw?.draws)) {
+            for (const d of localRaw.draws) {
+              if (d && d.id && d.date && Array.isArray(d.numbers) && d.numbers.length === 6) {
+                byId.set(d.id, d);
+                byDate.set(d.date, d.id);
+              }
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      try {
+        const feedUrl =
+          'https://raw.githubusercontent.com/delpinsky/Superenalotto/main/storico-estrazioni-superenalotto.json';
+        const response = await fetch(feedUrl, {
+          headers: { 'User-Agent': 'SuperEnalotto-Optimizer/1.0' }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const rawDraws = Array.isArray(data?.draws)
+            ? data.draws.filter((d: { date?: string }) => d.date && d.date >= '2009-01-01')
+            : [];
+
+          rawDraws.sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+          const byYear: Record<number, number> = {};
+          for (const d of rawDraws as Array<{
+            date: string;
+            nums: number[];
+            jolly?: number | null;
+            ss?: number | null;
+            concorso?: number;
+          }>) {
+            const year = parseInt(d.date.slice(0, 4), 10);
+            byYear[year] = (byYear[year] || 0) + 1;
+            const contestNumber =
+              typeof d.concorso === 'number' && d.concorso > 0 ? d.concorso : byYear[year];
+            const sortedNums = [...d.nums].map(Number).sort((a, b) => a - b);
+            const id = `${year}-${String(contestNumber).padStart(3, '0')}`;
+            byId.set(id, {
+              id,
+              contestNumber,
+              year,
+              date: d.date,
+              numbers: sortedNums,
+              jolly: Number(d.jolly) || 1,
+              superstar: Number(d.ss) || Number(d.jolly) || 1
+            });
+            byDate.set(d.date, id);
+          }
+        }
+      } catch {
+        // Proceed with local official draws if GitHub raw feed is unreachable
+      }
+
+      // Also check Sisal GNTN live endpoint for latest SuperEnalotto draw
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3500);
+        const sisalRes = await fetch(
+          'https://www.giochinumerici.info/sisal-gn-proxy-servlet-web/proxy/gntn-info-web/rest/gioco/superenalotto/estrazioni/ultimoconcorso',
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; SuperEnalotto-Optimizer/1.0)',
+              Accept: 'application/json'
+            },
+            signal: controller.signal
+          }
+        );
+        clearTimeout(timer);
+        if (sisalRes.ok) {
+          const sisalData = await sisalRes.json();
+          const conc = sisalData?.concorso || sisalData?.estrazione;
+          const estratti =
+            conc?.combinazioneVincente?.estratti || sisalData?.combinazioneVincente?.estratti;
+          if (Array.isArray(estratti) && estratti.length >= 6) {
+            const rawDate = conc?.dataEstrazione || sisalData?.dataEstrazione;
+            if (rawDate) {
+              const isoDate = new Date(rawDate).toISOString().slice(0, 10);
+              const year = parseInt(isoDate.slice(0, 4), 10);
+              const contestNumber = Number(conc?.numero || conc?.codice || 1);
+              const nums = estratti
+                .slice(0, 6)
+                .map(Number)
+                .filter((n: number) => n >= 1 && n <= 90)
+                .sort((a: number, b: number) => a - b);
+              if (nums.length === 6) {
+                const id = `${year}-${String(contestNumber).padStart(3, '0')}`;
+                byId.set(id, {
+                  id,
+                  contestNumber,
+                  year,
+                  date: isoDate,
+                  numbers: nums,
+                  jolly: Number(conc?.combinazioneVincente?.jolly || 1),
+                  superstar: Number(conc?.combinazioneVincente?.superstar || 1)
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore if blocked on cloud IP
+      }
+
+      const draws = Array.from(byId.values()).sort((a, b) => b.date.localeCompare(a.date));
       res.json({
-        exportedAt: data.exported || new Date().toISOString(),
+        exportedAt: new Date().toISOString(),
         count: draws.length,
         draws
       });
@@ -734,14 +817,13 @@ async function startServer() {
         }
       }
 
-      // Attempt upstream Sisal / GiochiNumerici Win for Italia Team feed check
+      // Attempt upstream Sisal / GiochiNumerici Win for Italia Team feed check (ONLY real official draws, never synthetic!)
       const now = new Date();
       const year = now.getUTCFullYear();
       const month = now.getUTCMonth() + 1;
       const sisalUrl = `https://www.giochinumerici.info/sisal-gn-proxy-servlet-web/rest/gioco/winforlife/estrazioni/archivio?anno=${year}&mese=${month}&tipoGioco=WINFORITALIA`;
 
       let updatedOnDisk = false;
-      const byId = new Map(localDraws.map((d) => [d.id, d]));
       const byDate = new Map(localDraws.map((d) => [d.date, d]));
 
       try {
@@ -798,73 +880,16 @@ async function startServer() {
                 time: '20:00',
                 numbers: nums
               };
-              byId.set(id, drawObj);
               byDate.set(dateStr, drawObj);
               updatedOnDisk = true;
             }
           }
         }
       } catch {
-        // Sisal upstream blocked (403) or unreachable; proceed with daily 20:00 catch-up below
+        // Sisal upstream blocked (403) or unreachable; return verified official draws from winforitalia.json
       }
 
-      // Ensure daily 20:00 draws are caught up to today if Sisal returns 403 on cloud IPs
-      const todayIso = now.toISOString().slice(0, 10);
-      const sortedExisting = Array.from(byId.values()).sort((a, b) =>
-        a.date.localeCompare(b.date)
-      );
-      const lastDraw = sortedExisting[sortedExisting.length - 1];
-      if (lastDraw && lastDraw.date < todayIso) {
-        let cursor = new Date(`${lastDraw.date}T12:00:00Z`);
-        const endCursor = new Date(`${todayIso}T12:00:00Z`);
-        let nextContest = lastDraw.contestNumber;
-
-        while (cursor.getTime() + 86400000 <= endCursor.getTime()) {
-          cursor = new Date(cursor.getTime() + 86400000);
-          const dateStr = cursor.toISOString().slice(0, 10);
-          if (byDate.has(dateStr)) continue;
-          const drawYear = parseInt(dateStr.slice(0, 4), 10);
-          nextContest = drawYear === lastDraw.year ? nextContest + 1 : 1;
-          // Deterministic daily 6/40 extraction seeded by date string when upstream returns 403
-          let hash = 2166136261;
-          for (let i = 0; i < dateStr.length; i++) {
-            hash ^= dateStr.charCodeAt(i);
-            hash = Math.imul(hash, 16777619);
-          }
-          const picked = new Set<number>();
-          const decadeTargets = [0, 1, 2, 3, (nextContest % 4), ((nextContest + 2) % 4)];
-          for (const dec of decadeTargets) {
-            for (let attempt = 0; attempt < 20; attempt++) {
-              hash ^= (attempt + 1) * 2654435761;
-              hash = Math.imul(hash, 16777619);
-              const candidate = dec * 10 + (Math.abs(hash) % 10) + 1;
-              if (!picked.has(candidate)) {
-                picked.add(candidate);
-                break;
-              }
-            }
-          }
-          while (picked.size < 6) {
-            hash = Math.imul(hash ^ 0x9e3779b9, 16777619);
-            picked.add((Math.abs(hash) % 40) + 1);
-          }
-          const nums = Array.from(picked).sort((a, b) => a - b);
-          const id = `WFI-${drawYear}-${String(nextContest).padStart(3, '0')}`;
-          const drawObj = {
-            id,
-            contestNumber: nextContest,
-            year: drawYear,
-            date: dateStr,
-            time: '20:00',
-            numbers: nums
-          };
-          byId.set(id, drawObj);
-          byDate.set(dateStr, drawObj);
-          updatedOnDisk = true;
-        }
-      }
-
-      localDraws = Array.from(byId.values()).sort((a, b) => {
+      localDraws = Array.from(byDate.values()).sort((a, b) => {
         const cmp = b.date.localeCompare(a.date);
         if (cmp !== 0) return cmp;
         return b.contestNumber - a.contestNumber;
@@ -971,19 +996,14 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     let viteMiddlewares: express.RequestHandler | null = null;
-    const hmrConfig =
-      process.env.DISABLE_HMR === 'true'
-        ? false
-        : {
-            server: httpServer
-          };
 
     const viteReadyPromise = import('vite')
       .then(({ createServer: createViteServer }) =>
         createViteServer({
           server: {
             middlewareMode: true,
-            hmr: hmrConfig,
+            hmr: false as const,
+            ws: false as const,
             watch: null
           },
           appType: 'spa'

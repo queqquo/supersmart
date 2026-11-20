@@ -36,24 +36,30 @@ import {
   Layers,
   Crosshair,
   PlusCircle,
-  AlertCircle
+  AlertCircle,
+  Trash2,
+  Download
 } from 'lucide-react';
 import { Draw, SavedPlay, GeneratedColumn } from '../types/lottery';
 import {
   exportBackupJSON,
+  exportEstrazioniSisalJSON,
   exportDrawsCSV,
   importBackupJSON,
   importDrawsCSV,
+  insertDraw,
+  loadDraws,
+  clearAllDraws,
   syncOfficialDrawsFromLiveFeed
 } from '../utils/storage';
-import { generateFullHistoricalDataset } from '../data/seedDraws';
 import {
   compareSavedPlayAgainstRecentDraws,
   clampArchiveComparisonDrawsCount,
   MIN_ARCHIVE_COMPARISON_DRAWS,
   MAX_ARCHIVE_COMPARISON_DRAWS,
   PRESET_ARCHIVE_COMPARISON_COUNTS,
-  SavedPlayArchiveComparisonSummary
+  SavedPlayArchiveComparisonSummary,
+  validateRealDrawInput
 } from '../utils/combinatorics';
 import {
   WinForItaliaDraw,
@@ -123,6 +129,16 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
   const [isSyncingFeed, setIsSyncingFeed] = useState(false);
   const [showHowUsedGuide, setShowHowUsedGuide] = useState(false);
   const pageSize = 15;
+
+  // --- SuperEnalotto Rapid Real Draw Manual Entry State (6 Numbers + Jolly + SuperStar) ---
+  const [seManualNumbersInput, setSeManualNumbersInput] = useState<string>('');
+  const [seManualJollyInput, setSeManualJollyInput] = useState<string>('');
+  const [seManualSuperstarInput, setSeManualSuperstarInput] = useState<string>('');
+  const [seManualDateInput, setSeManualDateInput] = useState<string>(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [seManualContestIdInput, setSeManualContestIdInput] = useState<string>('');
+  const [seManualError, setSeManualError] = useState<string | null>(null);
 
   // --- State for Play vs Last 10-200 Draws Comparison ---
   const [selectedPlayId, setSelectedPlayId] = useState<string>(() =>
@@ -407,6 +423,19 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
     return filteredDraws.slice(start, start + pageSize);
   }, [filteredDraws, currentPage, pageSize]);
 
+  // Handle export of synchronized estrazioni_sisal.json for GitHub/Vercel repository
+  const handleExportEstrazioniSisal = () => {
+    const jsonStr = exportEstrazioniSisalJSON(draws);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'estrazioni_sisal.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    showNotice('File estrazioni_sisal.json scaricato nel formato ufficiale per il repository GitHub/Vercel');
+  };
+
   // Handle JSON export
   const handleExportJSON = () => {
     const jsonStr = exportBackupJSON();
@@ -417,7 +446,7 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
     a.download = `superenalotto_backup_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    showNotice('Backup JSON (2009-2026) scaricato con successo');
+    showNotice('Backup JSON scaricato con successo');
   };
 
   // Handle CSV export
@@ -442,8 +471,9 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
       try {
         const content = event.target?.result as string;
         const res = importBackupJSON(content);
-        showNotice(`Importati ${res.importedDraws} concorsi e ${res.importedPlays} giocate`);
-        window.location.reload();
+        const updatedDraws = loadDraws();
+        onUpdateDraws(updatedDraws);
+        showNotice(`Importati ${res.importedDraws} concorsi reali validati e ${res.importedPlays} giocate`);
       } catch {
         showNotice("Errore durante l'importazione del file JSON");
       }
@@ -460,13 +490,82 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
       try {
         const content = event.target?.result as string;
         const count = importDrawsCSV(content);
-        showNotice(`Importati ${count} concorsi da CSV`);
-        window.location.reload();
+        const updatedDraws = loadDraws();
+        onUpdateDraws(updatedDraws);
+        showNotice(`Importati ${count} concorsi reali validati da CSV`);
       } catch {
         showNotice("Errore durante l'importazione del CSV");
       }
     };
     reader.readAsText(file);
+  };
+
+  // Rapid insertion of a real SuperEnalotto draw (6 numbers + Jolly + SuperStar) with strict validation
+  const handleSeManualInsert = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSeManualError(null);
+
+    const parsedNumbers = (seManualNumbersInput.match(/\d+/g) || []).map((n) => parseInt(n, 10));
+    const parsedJolly = parseInt(seManualJollyInput.trim(), 10);
+    const parsedSuperstar =
+      seManualSuperstarInput.trim() !== '' ? parseInt(seManualSuperstarInput.trim(), 10) : undefined;
+
+    const validation = validateRealDrawInput({
+      numbers: parsedNumbers,
+      jolly: parsedJolly,
+      superstar: parsedSuperstar,
+      date: seManualDateInput
+    });
+
+    if (!validation.valid || !validation.draw) {
+      setSeManualError(validation.error || 'Estrazione non valida.');
+      return;
+    }
+
+    const { numbers, jolly, superstar, date } = validation.draw;
+    const year = parseInt(date.slice(0, 4), 10) || new Date().getFullYear();
+
+    // Anti-duplicate check against existing draws in archive
+    const numbersKey = numbers.join(',');
+    const duplicate = draws.find(
+      (d) =>
+        (seManualContestIdInput.trim() && d.id.toLowerCase() === seManualContestIdInput.trim().toLowerCase()) ||
+        (d.date === date && d.numbers.slice().sort((a, b) => a - b).join(',') === numbersKey && d.jolly === jolly)
+    );
+    if (duplicate) {
+      setSeManualError(
+        `Estrazione duplicata: il concorso ${duplicate.id} del ${duplicate.date} con gli stessi numeri è già presente in archivio.`
+      );
+      return;
+    }
+
+    const sameYearDraws = draws.filter((d) => d.year === year);
+    const nextContestNum =
+      sameYearDraws.length > 0 ? Math.max(...sameYearDraws.map((d) => d.contestNumber)) + 1 : 1;
+    const contestId =
+      seManualContestIdInput.trim() || `${year}-${String(nextContestNum).padStart(3, '0')}`;
+
+    const newDraw: Draw = {
+      id: contestId,
+      contestNumber: nextContestNum,
+      year,
+      date,
+      numbers,
+      jolly,
+      superstar
+    };
+
+    const updated = insertDraw(newDraw);
+    onUpdateDraws(updated);
+    setSeManualNumbersInput('');
+    setSeManualJollyInput('');
+    setSeManualSuperstarInput('');
+    setSeManualContestIdInput('');
+    showNotice(
+      `Estrazione reale ${newDraw.id} (${newDraw.date}): [${newDraw.numbers.join(', ')}] + Jolly ${newDraw.jolly}${
+        newDraw.superstar ? ` + SuperStar ${newDraw.superstar}` : ''
+      } salvata in localStorage!`
+    );
   };
 
   // Sync live from Official Open-Data Feed
@@ -485,13 +584,13 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
     }
   };
 
-  // Reset to full fresh historical dataset (2009 - 2026)
-  const handleReplenishArchive = () => {
-    const full = generateFullHistoricalDataset();
-    onUpdateDraws(full);
+  // Empty real archive completely (Zero Mock Data)
+  const handleClearRealArchive = () => {
+    const empty = clearAllDraws();
+    onUpdateDraws(empty);
     setSelectedYear('ALL');
     setCurrentPage(1);
-    showNotice(`Archivio storico ufficiale 2009–2026 ripristinato (${full.length} concorsi)`);
+    showNotice('Archivio estrazioni svuotato: nessuna estrazione reale in archivio (Modalità Equiprobabile Pura attiva).');
   };
 
   const showNotice = (msg: string) => {
@@ -1575,35 +1674,27 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                 <div className="flex flex-wrap items-center gap-2">
                   <History className="w-5 h-5 text-amber-400" />
                   <h2 className="text-xl font-bold text-white">
-                    Archivio Storico Ufficiale SuperEnalotto ({minYear} &ndash; {maxYear})
+                    Archivio Storico Reale SuperEnalotto {draws.length > 0 ? `(${minYear} – ${maxYear})` : '(Zero Mock Data)'}
                   </h2>
                   <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/30">
-                    {draws.length.toLocaleString('it-IT')} concorsi ufficiali
+                    {draws.length > 0
+                      ? `${draws.length.toLocaleString('it-IT')} concorsi reali`
+                      : 'Nessuna estrazione reale in archivio'}
                   </span>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono border border-emerald-500/30">
-                    Copertura: {oldestDraw?.id || '2009-001'} &rarr; {latestDraw?.id || '2026-174'} (
-                    {latestDraw?.date || '2026-10-30'})
-                  </span>
+                  {draws.length > 0 && (
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono border border-emerald-500/30">
+                      Copertura: {oldestDraw?.id} &rarr; {latestDraw?.id} ({latestDraw?.date})
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-400">
-                  Serie storica reale delle estrazioni ufficiali del SuperEnalotto dal 02/01/2009 ad
-                  oggi, con sincronizzazione live gratuita da feed Open-Data.
+                  Archivio persistente (<code className="text-amber-300">localStorage</code> / Importa-Esporta CSV &amp; JSON)
+                  alimentato esclusivamente da estrazioni reali inserite o importate dall&apos;utente (nessun dato simulato).
                 </p>
               </div>
 
               {/* Quick buttons */}
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSyncLiveFeed}
-                  disabled={isSyncingFeed}
-                  className="px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  title="Sincronizza con il feed Open-Data ufficiale delle estrazioni SuperEnalotto"
-                >
-                  <RefreshCw className={`w-4 h-4 ${isSyncingFeed ? 'animate-spin' : ''}`} />
-                  <span>{isSyncingFeed ? 'Sincronizzazione...' : 'Sincronizza Feed Ufficiale'}</span>
-                </button>
-
                 <button
                   type="button"
                   onClick={() => setShowHowUsedGuide((prev) => !prev)}
@@ -1620,6 +1711,17 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                 >
                   <Sparkles className="w-4 h-4 fill-slate-950" />
                   <span>Incolla Rapido Smart</span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="export-estrazioni-sisal-btn"
+                  onClick={handleExportEstrazioniSisal}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Scarica l'archivio reale unito e ordinato nel formato esatto di public/data/estrazioni_sisal.json per il repository GitHub/Vercel"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>Esporta estrazioni_sisal.json</span>
                 </button>
 
                 <button
@@ -1645,7 +1747,7 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                 {/* Hidden inputs for imports */}
                 <label className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer">
                   <Upload className="w-4 h-4 text-sky-400" />
-                  <span>Importa</span>
+                  <span>Importa CSV/JSON</span>
                   <input
                     type="file"
                     accept=".json,.csv"
@@ -1660,65 +1762,184 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                   />
                 </label>
 
-                <button
-                  type="button"
-                  onClick={handleReplenishArchive}
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-all cursor-pointer"
-                  title="Ripristina archivio ufficiale completo 2009-2026"
-                  aria-label="Ripristina archivio ufficiale completo 2009-2026"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
+                {draws.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearRealArchive}
+                    className="px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                    title="Svuota completamente l'archivio locale"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Svuota Archivio</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Year Filter Pills (2026 down to 2009) */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between text-[11px] text-slate-400">
-                <span className="font-semibold uppercase tracking-wider flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Filtra per Anno Storico (2009 &ndash; 2026):</span>
-                </span>
-                <span className="font-mono text-slate-300">
-                  {selectedYear === 'ALL'
-                    ? `Tutti i ${draws.length} concorsi (2009–2026)`
-                    : `Anno ${selectedYear}: ${filteredDraws.length} concorsi`}
+            {feedbackMsg && (
+              <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{feedbackMsg}</span>
+              </div>
+            )}
+
+            {/* Rapid Manual Real Draw Insertion Form (6 Numbers + Jolly + SuperStar, validated in [1..90] with anti-duplicate check) */}
+            <form
+              onSubmit={handleSeManualInsert}
+              className="p-4 rounded-xl bg-slate-950 border border-amber-500/30 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-extrabold text-amber-300 uppercase tracking-wider">
+                  <PlusCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Inserimento Rapido Estrazione Reale (6 Numeri + Jolly + SuperStar • Validazione [1..90] Anti-Duplicati)</span>
+                </div>
+                <span className="text-[11px] font-mono text-slate-400">
+                  Persistenza immediata in localStorage
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-xl bg-slate-950 border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedYear('ALL');
-                    setCurrentPage(1);
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
-                    selectedYear === 'ALL'
-                      ? 'bg-amber-500 text-slate-950 shadow'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
-                  }`}
-                >
-                  Tutti (2009-2026)
-                </button>
-                {availableYears.map((yr) => (
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+                <div className="lg:col-span-2">
+                  <label className="text-[10px] text-slate-400 uppercase font-bold block mb-1">
+                    Data Estrazione
+                  </label>
+                  <input
+                    type="date"
+                    value={seManualDateInput}
+                    onChange={(e) => setSeManualDateInput(e.target.value)}
+                    aria-label="Data estrazione reale SuperEnalotto"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div className="lg:col-span-2">
+                  <label className="text-[10px] text-slate-400 uppercase font-bold block mb-1">
+                    Concorso (opz.)
+                  </label>
+                  <input
+                    type="text"
+                    value={seManualContestIdInput}
+                    onChange={(e) => setSeManualContestIdInput(e.target.value)}
+                    placeholder="es. 2026-045"
+                    aria-label="ID Concorso opzionale"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div className="lg:col-span-4">
+                  <label className="text-[10px] text-amber-300 uppercase font-bold block mb-1">
+                    6 Numeri Estratti [1..90]
+                  </label>
+                  <input
+                    type="text"
+                    value={seManualNumbersInput}
+                    onChange={(e) => setSeManualNumbersInput(e.target.value)}
+                    placeholder="es. 7, 19, 34, 52, 68, 89"
+                    aria-label="6 numeri estratti da 1 a 90"
+                    className="w-full bg-slate-900 border border-amber-500/40 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div className="lg:col-span-1">
+                  <label className="text-[10px] text-rose-300 uppercase font-bold block mb-1">
+                    Jolly
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={90}
+                    value={seManualJollyInput}
+                    onChange={(e) => setSeManualJollyInput(e.target.value)}
+                    placeholder="1-90"
+                    aria-label="Numero Jolly da 1 a 90"
+                    className="w-full bg-slate-900 border border-rose-500/40 rounded-lg px-2.5 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                  />
+                </div>
+
+                <div className="lg:col-span-1">
+                  <label className="text-[10px] text-purple-300 uppercase font-bold block mb-1">
+                    SuperStar
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={90}
+                    value={seManualSuperstarInput}
+                    onChange={(e) => setSeManualSuperstarInput(e.target.value)}
+                    placeholder="1-90"
+                    aria-label="Numero SuperStar da 1 a 90"
+                    className="w-full bg-slate-900 border border-purple-500/40 rounded-lg px-2.5 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  />
+                </div>
+
+                <div className="lg:col-span-2 flex items-end">
                   <button
-                    key={yr}
+                    type="submit"
+                    data-testid="insert-real-draw-btn"
+                    className="w-full px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer transition-colors shadow"
+                  >
+                    + Salva Estrazione Reale
+                  </button>
+                </div>
+              </div>
+
+              {seManualError && (
+                <div className="flex items-center gap-2 p-2.5 text-xs rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{seManualError}</span>
+                </div>
+              )}
+            </form>
+
+            {/* Year Filter Pills */}
+            {draws.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span className="font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Filtra per Anno Storico:</span>
+                  </span>
+                  <span className="font-mono text-slate-300">
+                    {selectedYear === 'ALL'
+                      ? `Tutti i ${draws.length} concorsi reali`
+                      : `Anno ${selectedYear}: ${filteredDraws.length} concorsi`}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-xl bg-slate-950 border border-slate-800">
+                  <button
                     type="button"
                     onClick={() => {
-                      setSelectedYear(yr);
+                      setSelectedYear('ALL');
                       setCurrentPage(1);
                     }}
                     className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
-                      selectedYear === yr
+                      selectedYear === 'ALL'
                         ? 'bg-amber-500 text-slate-950 shadow'
                         : 'text-slate-400 hover:text-white hover:bg-slate-900'
                     }`}
                   >
-                    {yr}
+                    Tutti ({draws.length})
                   </button>
-                ))}
+                  {availableYears.map((yr) => (
+                    <button
+                      key={yr}
+                      type="button"
+                      onClick={() => {
+                        setSelectedYear(yr);
+                        setCurrentPage(1);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                        selectedYear === yr
+                          ? 'bg-amber-500 text-slate-950 shadow'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                      }`}
+                    >
+                      {yr}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Search bar */}
             <div className="relative">
@@ -1730,7 +1951,7 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                   setSearchTerm(e.target.value);
                   setCurrentPage(1);
                 }}
-                placeholder="Cerca per anno/concorso (es. 2009-001, 2015-120), data (es. 2009-01) o numero estratto (es. 7)..."
+                placeholder="Cerca per anno/concorso (es. 2026-001), data (es. 2026-04) o numero estratto (es. 7)..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
               />
             </div>
@@ -1874,8 +2095,19 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                   ))}
                   {currentDraws.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-10 text-center text-slate-500">
-                        Nessun concorso corrispondente ai criteri di ricerca.
+                      <td colSpan={6} className="py-12 text-center">
+                        <div className="space-y-1.5 max-w-md mx-auto">
+                          <p className="text-sm font-extrabold text-amber-300">
+                            {draws.length === 0
+                              ? 'Nessuna estrazione reale in archivio'
+                              : 'Nessun concorso corrispondente ai criteri di ricerca'}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {draws.length === 0
+                              ? "Inserisci un'estrazione reale tramite il modulo qui sopra (6 numeri + Jolly + SuperStar), usa Incolla Rapido Smart oppure importa un file CSV/JSON verificato."
+                              : 'Prova a modificare i filtri di ricerca o anno selezionato.'}
+                          </p>
+                        </div>
                       </td>
                     </tr>
                   )}

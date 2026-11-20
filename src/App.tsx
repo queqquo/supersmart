@@ -32,9 +32,9 @@ import {
 } from './utils/combinatorics';
 import {
   loadDraws,
+  loadAndMergeEstrazioniSisal,
   insertDraw,
   saveDraws,
-  syncOfficialDrawsFromLiveFeed,
   loadSavedPlays,
   cachePlaysLocally,
   syncSavedPlaysWithServer,
@@ -43,6 +43,7 @@ import {
   deletePlay,
   loadDeletedPlayIds,
   saveDeletedPlayIds,
+  normalizeLegacyWinForItaliaPlay,
   filterPlaysForUser,
   loadWeights,
   saveWeights,
@@ -100,7 +101,12 @@ export default function App() {
   const defaultWeeklyColumns = useMemo<GeneratedColumn[]>(() => {
     const stats = calculateNumberStatistics(draws, 36);
     const scored = scoreAllNumbers(stats, weights, 36);
-    const pool = selectFunnelPool30To12(scored, 10).top12Numbers;
+    const pool = selectFunnelPool30To12(
+      scored,
+      12,
+      undefined,
+      draws.length > 0 ? 'real_archive_weighted' : 'pure_uniform'
+    ).top12Numbers;
     return generateOptimizedSystem(pool, filters, 10, undefined, coverageTarget).columns;
   }, [draws, weights, filters, coverageTarget]);
 
@@ -111,18 +117,14 @@ export default function App() {
   const [acl, setAcl] = useState<UserAccessRecord[]>(() => loadACL());
   const [session, setSession] = useState<AuthSession | null>(() => loadAuthSession());
 
-  // Automatically sync official draws and test Firestore connection on startup
+  // All'avvio dell'app: fetch di /data/estrazioni_sisal.json e merge deduplicato con localStorage
   useEffect(() => {
     testFirestoreConnection().catch(() => {});
-    syncOfficialDrawsFromLiveFeed()
-      .then((res) => {
-        if (res.draws.length > 0) {
-          setDraws(res.draws);
-        }
+    loadAndMergeEstrazioniSisal()
+      .then((mergedDraws) => {
+        setDraws(mergedDraws);
       })
-      .catch(() => {
-        // Ignore if offline
-      });
+      .catch(() => {});
     syncWinForItaliaDrawsFromServer()
       .then((res) => {
         if (res.draws.length > 0) {
@@ -152,14 +154,18 @@ export default function App() {
 
     const unsubPlays = subscribeCloudPlays((cloudPlays) => {
       const deletedSet = loadDeletedPlayIds();
-      const cleanCloudPlays = cloudPlays.filter((p) => p && !deletedSet.has(p.id));
+      const cleanCloudPlays = cloudPlays
+        .filter((p) => p && !deletedSet.has(p.id))
+        .map(normalizeLegacyWinForItaliaPlay);
       setSavedPlays((prevPlays) => {
         if (
           !initialPlaysSyncDoneRef.current &&
           cleanCloudPlays.length === 0 &&
           prevPlays.length > 0
         ) {
-          return prevPlays.filter((p) => !deletedSet.has(p.id));
+          return prevPlays
+            .filter((p) => !deletedSet.has(p.id))
+            .map(normalizeLegacyWinForItaliaPlay);
         }
         cachePlaysLocally(cleanCloudPlays);
         return cleanCloudPlays;

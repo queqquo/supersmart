@@ -3,6 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export interface SisalDrawRecord {
+  concorso: number;
+  data: string; // YYYY-MM-DD
+  sestina: [number, number, number, number, number, number];
+  jolly: number;
+  superstar: number;
+}
+
 export interface Draw {
   id: string; // e.g. "2026-045"
   contestNumber: number;
@@ -68,6 +76,8 @@ export interface SystemGenerationResult {
     tripletsCoveredCount: number;
     tripletsTotalInPool: number;
     averagePresence: number; // e.g. 5.0 for v=12 and 10 columns
+    minPresence?: number;
+    maxPresence?: number;
     presenceHistogram: Record<number, number>;
     kempeSwapsApplied?: number;
     maxColumnOverlap?: number;

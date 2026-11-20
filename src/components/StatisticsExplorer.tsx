@@ -70,14 +70,20 @@ export const StatisticsExplorer: React.FC<StatisticsExplorerProps> = ({
               Analisi Statistica dei 90 Numeri
             </h2>
           </div>
-          {latestDraw && (
+          {latestDraw ? (
             <div className="text-xs text-slate-400 font-mono">
               Ultimo concorso: <strong className="text-slate-200">{latestDraw.id}</strong> ({latestDraw.date})
+            </div>
+          ) : (
+            <div className="text-xs text-amber-300 font-bold bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 rounded-full">
+              Nessuna estrazione reale in archivio &bull; Modalità Equiprobabile Pura
             </div>
           )}
         </div>
         <p className="text-xs text-slate-400">
-          Calcolo matematico puro eseguito in locale su {draws.length} concorsi. I tre pilastri (Ritardo, Frequenza, Affinità) alimentano il punteggio combinatorio S(x).
+          {draws.length > 0
+            ? `Calcolo matematico puro eseguito in locale su ${draws.length} concorsi reali. I tre pilastri (Ritardo, Frequenza, Affinità) alimentano il punteggio combinatorio S(x).`
+            : "Nessuna estrazione reale in archivio: l'algoritmo lavora in Modalità Equiprobabile Pura (tutti i 90 numeri hanno identico peso base 0,00 senza inventare statistiche inesistenti). Inserisci o importa estrazioni reali nella scheda Archivio Storico."}
         </p>
       </div>
 

@@ -147,6 +147,10 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
   const [editCostInput, setEditCostInput] = useState<string>('');
   const [editWinInput, setEditWinInput] = useState<string>('');
   const [inlineSaveFeedback, setInlineSaveFeedback] = useState<boolean>(false);
+  const [isEditingPlayNumbers, setIsEditingPlayNumbers] = useState<boolean>(false);
+  const [editContestIdInput, setEditContestIdInput] = useState<string>('');
+  const [editColumnsText, setEditColumnsText] = useState<string>('');
+  const [editPlayNumbersError, setEditPlayNumbersError] = useState<string | null>(null);
 
   // Economic Ledger calculations
   const ledger = useMemo(() => {
@@ -188,6 +192,14 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
     if (activePlay) {
       setEditCostInput(activePlay.cost.toFixed(2));
       setEditWinInput((activePlay.result?.totalWinning ?? 0).toFixed(2));
+      setEditContestIdInput(activePlay.targetContestId);
+      setEditColumnsText(
+        activePlay.columns
+          .map((c) => `${c.numbers.join(' ')}${c.superstar ? ` *${c.superstar}` : ''}`)
+          .join('\n')
+      );
+      setEditPlayNumbersError(null);
+      setIsEditingPlayNumbers(false);
       const isWfi = isWinForItaliaPlay(activePlay);
       if (isWfi) {
         setVerifyGameType('winforitalia');
@@ -445,6 +457,63 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
     }
     const updated = applyManualCostAndWinning(play, newCost, newWin, true);
     onUpdatePlay(updated);
+    setInlineSaveFeedback(true);
+    setTimeout(() => setInlineSaveFeedback(false), 2500);
+  };
+
+  // Handler to inline-edit the sestine numbers and contest ID of an existing play
+  const handleSaveInlinePlayNumbersAndContest = (play: SavedPlay) => {
+    setEditPlayNumbersError(null);
+    const isWfi = isWinForItaliaPlay(play) || editContestIdInput.trim().toUpperCase().startsWith('WFI');
+    const maxNum = isWfi ? 40 : 90;
+    const parsedCols = parseManualSestineText(editColumnsText);
+    if (parsedCols.length === 0) {
+      setEditPlayNumbersError(
+        `Inserisci almeno una sestina valida (6 numeri distinti da 1 a ${maxNum} per riga).`
+      );
+      return;
+    }
+    if (isWfi && parsedCols.some((c) => c.numbers.some((n) => n < 1 || n > 40))) {
+      setEditPlayNumbersError(
+        'Per Win for Italia Team (6/40) tutti i numeri devono essere compresi tra 1 e 40.'
+      );
+      return;
+    }
+
+    const nextContestId = editContestIdInput.trim() || play.targetContestId;
+    const nextPool = Array.from(
+      new Set(parsedCols.flatMap((c) => c.numbers))
+    ).sort((a, b) => a - b);
+
+    let nextResult = play.result;
+    let nextStatus = play.status;
+
+    if (isWfi) {
+      const targetWfi =
+        wfiDraws.find((d) => d.id === nextContestId || d.id === selectedTargetDrawId) || wfiDraws[0];
+      if (targetWfi) {
+        nextResult = evaluateWinForItaliaPlay(parsedCols, targetWfi, play.cost);
+        nextStatus = 'VERIFICATA';
+      }
+    } else {
+      const targetSe =
+        draws.find((d) => d.id === nextContestId || d.id === selectedTargetDrawId) || draws[0];
+      if (targetSe) {
+        nextResult = evaluatePlayedSystem(parsedCols, targetSe, play.cost);
+        nextStatus = 'VERIFICATA';
+      }
+    }
+
+    const updatedPlay: SavedPlay = {
+      ...play,
+      targetContestId: nextContestId,
+      columns: parsedCols,
+      poolNumbers: nextPool,
+      status: nextStatus,
+      result: nextResult
+    };
+    onUpdatePlay(updatedPlay);
+    setIsEditingPlayNumbers(false);
     setInlineSaveFeedback(true);
     setTimeout(() => setInlineSaveFeedback(false), 2500);
   };
@@ -1119,6 +1188,14 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingPlayNumbers((prev) => !prev)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>{isEditingPlayNumbers ? 'Chiudi Modifica Numeri' : 'Modifica Numeri / Concorso'}</span>
+                    </button>
                     {/* Delete button */}
                     <button
                       type="button"
@@ -1135,6 +1212,58 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {isEditingPlayNumbers && (
+                  <div className="p-4 rounded-xl bg-slate-950 border-2 border-amber-500/40 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold text-amber-300 uppercase tracking-wide">
+                        Modifica Numeri Giocati &amp; Concorso Schedina
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="edit-play-contest-id" className="text-xs text-slate-400 font-mono">
+                          Concorso:
+                        </label>
+                        <input
+                          id="edit-play-contest-id"
+                          type="text"
+                          value={editContestIdInput}
+                          onChange={(e) => setEditContestIdInput(e.target.value)}
+                          className="w-36 rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1 text-xs font-mono font-bold text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        />
+                      </div>
+                    </div>
+
+                    <textarea
+                      rows={Math.max(2, activePlay.columns.length)}
+                      value={editColumnsText}
+                      onChange={(e) => setEditColumnsText(e.target.value)}
+                      placeholder="Inserisci i 6 numeri giocati per riga (es. 1 14 15 24 30 39)"
+                      className="w-full rounded-xl bg-slate-900 border border-slate-700 p-3 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+
+                    {editPlayNumbersError && (
+                      <p className="text-xs text-rose-400 font-semibold">{editPlayNumbersError}</p>
+                    )}
+
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingPlayNumbers(false)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
+                      >
+                        Annulla
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveInlinePlayNumbersAndContest(activePlay)}
+                        className="px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Salva Numeri &amp; Ricalcola Esito</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Inline Cost & Manual Winning Editor for Active Play */}
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

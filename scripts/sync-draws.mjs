@@ -207,8 +207,11 @@ async function syncWinForItaliaTeam() {
           const rawDate = conc?.dataEstrazione || data?.dataEstrazione || Date.now();
           const isoDate = new Date(rawDate).toISOString().slice(0, 10);
           const year = parseInt(isoDate.slice(0, 4), 10);
+          const maxContestInYear = existingDraws
+            .filter((d) => d.year === year)
+            .reduce((max, d) => Math.max(max, Number(d.contestNumber) || 0), 0);
           const contestNumber =
-            Number(conc?.numero || conc?.codice) || existingDraws.length + 1;
+            Number(conc?.numero || conc?.codice) || maxContestInYear + 1;
           fetchedDraws.push({
             id: `WFI-${year}-${String(contestNumber).padStart(3, '0')}`,
             contestNumber,

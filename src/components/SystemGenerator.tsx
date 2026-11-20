@@ -45,6 +45,7 @@ import {
   scoreAllNumbers,
   selectFunnelPool30To12,
   FunnelPoolSelectionResult,
+  PoolSelectionMode,
   getBalancedFunnelUiLabels,
   generateOptimizedSystem,
   calculateBudgetSystemAllocation,
@@ -106,7 +107,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     [userEmail]
   );
 
-  // Config state initialized from the user's persisted system (default N=10 in Generatore Ottimizzato)
+  // Config state initialized from the user's persisted system (default N=12 per 10 sestine simmetriche 5x)
   const [poolSizeV, setPoolSizeV] = useState<number>(() => {
     if (appliedSimPreset && appliedSimPreset.top12PoolNumbers.length >= 6) {
       return appliedSimPreset.top12PoolNumbers.length;
@@ -114,8 +115,13 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     if (initialUserRecord && initialUserRecord.selectedPool.length >= 6) {
       return initialUserRecord.selectedPool.length;
     }
-    return initialUserRecord?.poolSizeV ?? 10;
+    return initialUserRecord?.poolSizeV ?? 12;
   });
+  const [poolSelectionMode, setPoolSelectionMode] = useState<PoolSelectionMode>(() =>
+    draws.length > 0 ? 'real_archive_weighted' : 'pure_uniform'
+  );
+  const effectivePoolSelectionMode: PoolSelectionMode =
+    draws.length > 0 ? poolSelectionMode : 'pure_uniform';
   const [playMode, setPlayMode] = useState<PlayMode>(
     () => initialUserRecord?.playMode ?? 'pure_coverage'
   );
@@ -262,9 +268,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     return map;
   }, [scoredNumbers]);
 
-  // Funnel 90 -> 30 (25 Genetic + 5 Chaos) -> 12 (or poolSizeV) in Pure Competition
+  // Selezione Equa del Pool (Fisher-Yates con crypto.getRandomValues)
   const [funnelSelection, setFunnelSelection] = useState<FunnelPoolSelectionResult>(() =>
-    selectFunnelPool30To12(scoredNumbers, poolSizeV)
+    selectFunnelPool30To12(scoredNumbers, poolSizeV, undefined, effectivePoolSelectionMode)
   );
 
   const defaultTopVNumbers = useMemo(() => {
@@ -278,14 +284,30 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     }
   }, [defaultTopVNumbers, selectedPool.length]);
 
-  // Slider handlers: update weights and Pool Base preview via 30->12 Funnel, but DO NOT change sestine until user clicks "Calcola Sistema Ottimizzato"
+  const handleSelectPoolMode = (nextMode: PoolSelectionMode) => {
+    if (nextMode === 'real_archive_weighted' && draws.length === 0) return;
+    setPoolSelectionMode(nextMode);
+    setManualPoolEdit(false);
+    const freshScored = scoreAllNumbers(numberStatsMap, weights, 36);
+    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV, undefined, nextMode);
+    setFunnelSelection(freshFunnel);
+    setSelectedPool(freshFunnel.top12Numbers);
+    setHasPendingChanges(true);
+  };
+
+  // Slider handlers: update weights and Pool Base preview, but DO NOT change sestine until user clicks "Calcola Sistema Ottimizzato"
   const handleWeightChange = (key: keyof ScoringWeights, val: number) => {
     const updated = { ...weights, [key]: Number(val.toFixed(2)) };
     setManualPoolEdit(false);
     onUpdateWeights(updated);
     saveWeights(updated);
     const freshScored = scoreAllNumbers(numberStatsMap, updated, 36);
-    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV);
+    const freshFunnel = selectFunnelPool30To12(
+      freshScored,
+      poolSizeV,
+      undefined,
+      effectivePoolSelectionMode
+    );
     setFunnelSelection(freshFunnel);
     setSelectedPool(freshFunnel.top12Numbers);
     setHasPendingChanges(true);
@@ -296,7 +318,12 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     onUpdateWeights(DEFAULT_WEIGHTS);
     saveWeights(DEFAULT_WEIGHTS);
     const freshScored = scoreAllNumbers(numberStatsMap, DEFAULT_WEIGHTS, 36);
-    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV);
+    const freshFunnel = selectFunnelPool30To12(
+      freshScored,
+      poolSizeV,
+      undefined,
+      effectivePoolSelectionMode
+    );
     setFunnelSelection(freshFunnel);
     setSelectedPool(freshFunnel.top12Numbers);
     setHasPendingChanges(true);
@@ -307,7 +334,12 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     onUpdateWeights(newWeights);
     saveWeights(newWeights);
     const freshScored = scoreAllNumbers(numberStatsMap, newWeights, 36);
-    const freshFunnel = selectFunnelPool30To12(freshScored, poolSizeV);
+    const freshFunnel = selectFunnelPool30To12(
+      freshScored,
+      poolSizeV,
+      undefined,
+      effectivePoolSelectionMode
+    );
     setFunnelSelection(freshFunnel);
     setSelectedPool(freshFunnel.top12Numbers);
     setHasPendingChanges(true);
@@ -320,14 +352,19 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
     [activeFunnelTargetCount]
   );
 
-  // Explicit "Ricalcola Imbuto 30->N" action: refreshes Pool Base from weights via Balanced 30->N Funnel (25 Genetic + 5 Chaos)
+  // Explicit "Estrai Nuovi N Numeri Equi" action: refreshes Pool Base via Fisher-Yates Crypto RNG
   const handleRecalculateFromWeights = () => {
     const targetV = activeFunnelTargetCount;
     if (poolSizeV !== targetV) {
       setPoolSizeV(targetV);
     }
     const freshScored = scoreAllNumbers(numberStatsMap, weights, 36);
-    const freshFunnel = selectFunnelPool30To12(freshScored, targetV);
+    const freshFunnel = selectFunnelPool30To12(
+      freshScored,
+      targetV,
+      undefined,
+      effectivePoolSelectionMode
+    );
     setFunnelSelection(freshFunnel);
     setManualPoolEdit(false);
     onClearSimPreset?.();
@@ -1036,6 +1073,83 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               </p>
             </div>
 
+            {/* Selettore Modalità di Selezione Equa del Pool: Selezione Pura vs Pesatura su Archivio Reale */}
+            <div className="pt-3 border-t border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-300">
+                  Modalità Selezione Pool (Crypto RNG Fisher-Yates):
+                </span>
+                {draws.length === 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    Nessuna estrazione reale in archivio
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSelectPoolMode('pure_uniform')}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-all text-left border cursor-pointer ${
+                    effectivePoolSelectionMode === 'pure_uniform'
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-md font-extrabold'
+                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>Selezione Pura (Equiprobabile 1-90)</span>
+                    {effectivePoolSelectionMode === 'pure_uniform' && (
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                  </div>
+                  <span
+                    className={`block text-[10px] mt-0.5 font-normal ${
+                      effectivePoolSelectionMode === 'pure_uniform'
+                        ? 'text-slate-900 font-semibold'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    100% uniforme Fisher-Yates (crypto.getRandomValues) • Zero bias decine
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={draws.length === 0}
+                  onClick={() => handleSelectPoolMode('real_archive_weighted')}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-all text-left border ${
+                    draws.length === 0
+                      ? 'bg-slate-950/50 text-slate-600 border-slate-800/60 cursor-not-allowed opacity-60'
+                      : effectivePoolSelectionMode === 'real_archive_weighted'
+                      ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md font-extrabold cursor-pointer'
+                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-amber-500/40 cursor-pointer'
+                  }`}
+                  title={
+                    draws.length === 0
+                      ? 'Carica o inserisci almeno un’estrazione reale in Archivio Storico per abilitare la pesatura storica'
+                      : `Pesatura morbida su ${draws.length} estrazioni reali senza mai escludere alcun numero`
+                  }
+                >
+                  <div className="flex items-center justify-between">
+                    <span>Pesatura su Archivio Reale</span>
+                    {effectivePoolSelectionMode === 'real_archive_weighted' && (
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                  </div>
+                  <span
+                    className={`block text-[10px] mt-0.5 font-normal ${
+                      effectivePoolSelectionMode === 'real_archive_weighted'
+                        ? 'text-slate-900 font-semibold'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {draws.length > 0
+                      ? `Attiva su ${draws.length} estrazioni reali (nessun numero escluso)`
+                      : 'Disabilitata: nessuna estrazione reale in archivio'}
+                  </span>
+                </button>
+              </div>
+            </div>
+
             {/* Pool size selector */}
             <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
               <label htmlFor="pool-size-select" className="text-xs font-semibold text-slate-300">
@@ -1049,7 +1163,12 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                     onClick={() => {
                       setPoolSizeV(v);
                       setManualPoolEdit(false);
-                      const freshFunnel = selectFunnelPool30To12(scoredNumbers, v);
+                      const freshFunnel = selectFunnelPool30To12(
+                        scoredNumbers,
+                        v,
+                        undefined,
+                        effectivePoolSelectionMode
+                      );
                       setFunnelSelection(freshFunnel);
                       setSelectedPool(freshFunnel.top12Numbers);
                       setHasPendingChanges(true);
@@ -1081,7 +1200,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                   </span>
                 ) : (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
-                    {funnelUiLabels.shortBadge}
+                    {effectivePoolSelectionMode === 'pure_uniform'
+                      ? 'Equiprobabile Pura 1–90 (Crypto RNG)'
+                      : `Pesatura Archivio Reale (${draws.length} estr.)`}
                   </span>
                 )}
               </div>
@@ -1102,84 +1223,50 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               </button>
             </div>
 
-            {!manualPoolEdit && funnelSelection.chaosNumbers.length > 0 && (
-              <div className="px-3 py-2.5 rounded-xl bg-slate-950/90 border border-emerald-500/25 text-[11px] text-slate-300 space-y-1.5">
-                <div className="flex flex-wrap items-center justify-between gap-1.5">
-                  <span className="font-bold text-emerald-300">
-                    {funnelUiLabels.subtitle}
-                  </span>
-                  <div className="flex flex-wrap items-center gap-1 font-mono text-[10px]">
-                    <span className="text-amber-300 font-semibold">
-                      5 Caos Iniettati: [{funnelSelection.chaosNumbers.join(', ')}]
-                    </span>
-                    {funnelSelection.chaosNumbers.map((cNum) => {
-                      const survived = selectedPool.includes(cNum);
-                      return (
-                        <span
-                          key={cNum}
-                          className={`px-1.5 py-0.5 rounded border font-bold ${
-                            survived
-                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                              : 'bg-slate-900 text-slate-500 border-slate-800'
-                          }`}
-                          title={
-                            survived
-                              ? `Numero Caos ${cNum} sopravvissuto nella selezione finale dei ${selectedPool.length} numeri`
-                              : `Numero Caos ${cNum} scartato nell'imbuto 30→${selectedPool.length}`
-                          }
-                        >
-                          {survived ? `★${cNum}` : cNum}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-400">
-                  {funnelUiLabels.weightsDetail}
-                </p>
+            <div className="px-3 py-2.5 rounded-xl bg-slate-950/90 border border-emerald-500/25 text-[11px] text-slate-300 space-y-1">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <span className="font-bold text-emerald-300">
+                  {effectivePoolSelectionMode === 'pure_uniform'
+                    ? 'Modalità Equiprobabile Pura (Fisher-Yates • window.crypto.getRandomValues)'
+                    : `Modalità Pesatura su Archivio Reale (${draws.length} concorsi reali • Zero numeri esclusi)`}
+                </span>
+                <span className="font-mono text-[10px] text-amber-300 font-semibold">
+                  Nessun vincolo forzato sulle decine • Identica dignità 1–90
+                </span>
               </div>
-            )}
+              <p className="text-[10px] text-slate-400">
+                {funnelUiLabels.weightsDetail}
+              </p>
+            </div>
 
-            {/* Balls of the selected pool with live S(x) score & Chaos indicator */}
+            {/* Balls of the selected pool with exact presence count in the reduced system */}
             <div className="flex flex-wrap gap-2.5 p-3 bg-slate-950 rounded-xl border border-slate-800 min-h-[68px]">
               {selectedPool.map((num) => {
                 const stat = scoredByNumber[num] || numberStatsMap[num];
-                const isChaosSurvived = !manualPoolEdit && funnelSelection.chaosNumbers.includes(num);
-                const funnelEntry = funnelSelection.scoredPool.find((s) => s.num === num);
+                const presenceInSystem = systemResult?.coverageMetrics?.presenceHistogram?.[num];
                 return (
                   <div
                     key={num}
                     onClick={() => toggleNumberInPool(num)}
                     className="group relative cursor-pointer flex flex-col items-center"
-                    title={`Numero ${num}${isChaosSurvived ? ' (CAOS Sopravvissuto)' : ''}${
-                      funnelEntry !== undefined ? ` | Score Imbuto: ${funnelEntry.score >= 0 ? '+' : ''}${funnelEntry.score} pt` : ''
-                    } | S(x): ${stat?.compositeScore?.toFixed(3)} | Rit: ${stat?.normalizedDelay?.toFixed(2)} (${stat?.currentDelay}/${stat?.maxHistoricalDelay}) | Freq(36): ${stat?.frequencyK} | Aff: ${stat?.affinityScore?.toFixed(2)}`}
+                    title={`Numero ${num}${
+                      presenceInSystem !== undefined ? ` | Presenze nel sistema: ${presenceInSystem}x` : ''
+                    } | S(x): ${stat?.compositeScore?.toFixed(3)} | Rit: ${stat?.normalizedDelay?.toFixed(2)} (${stat?.currentDelay}/${stat?.maxHistoricalDelay}) | Freq(36): ${stat?.frequencyK}`}
                   >
                     <div className="relative">
-                      <div
-                        className={`w-9 h-9 rounded-full font-extrabold text-sm flex items-center justify-center font-mono shadow-md border group-hover:scale-110 transition-transform ${
-                          isChaosSurvived
-                            ? 'bg-gradient-to-br from-emerald-400 to-amber-500 text-slate-950 border-emerald-200 ring-2 ring-emerald-400/40'
-                            : 'bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 border-amber-300'
-                        }`}
-                      >
+                      <div className="w-9 h-9 rounded-full font-extrabold text-sm flex items-center justify-center font-mono shadow-md border group-hover:scale-110 transition-transform bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 border-amber-300">
                         {num}
                       </div>
-                      {isChaosSurvived && (
-                        <span className="absolute -top-1.5 -left-1.5 px-1 py-0.2 rounded bg-emerald-500 text-slate-950 text-[7px] font-extrabold uppercase shadow">
-                          CAOS
-                        </span>
-                      )}
                       <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-700 text-[8px] font-bold text-slate-400 flex items-center justify-center">
                         ×
                       </span>
                     </div>
-                    <span className="text-[9px] font-mono text-slate-400 mt-1">
-                      {funnelEntry !== undefined
-                        ? `${funnelEntry.score >= 0 ? '+' : ''}${funnelEntry.score}pt`
-                        : stat?.compositeScore !== undefined
+                    <span className="text-[9px] font-mono text-emerald-400 font-bold mt-1">
+                      {presenceInSystem !== undefined
+                        ? `${presenceInSystem}x`
+                        : draws.length > 0 && stat?.compositeScore !== undefined
                         ? stat.compositeScore.toFixed(2)
-                        : ''}
+                        : '1.00'}
                     </span>
                   </div>
                 );
@@ -1191,7 +1278,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
               <div className="p-2.5 rounded-xl bg-slate-950/80 border border-amber-500/30 space-y-1.5">
                 <div className="text-[10px] text-amber-300 font-semibold flex items-center justify-between">
                   <span>
-                    Hai rimosso {poolSizeV - selectedPool.length} numero/i: clicca un candidato per aggiungerlo oppure clicca "Ricalcola dai Pesi"
+                    Hai rimosso {poolSizeV - selectedPool.length} numero/i: clicca un candidato per aggiungerlo oppure clicca "{funnelUiLabels.recalcButton}"
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -1478,13 +1565,17 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
                     </span>
                   </div>
 
-                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[10px] text-slate-400 block uppercase font-medium">Presenza Media</span>
+                  <div className="bg-slate-950/80 p-3 rounded-xl border border-emerald-500/30">
+                    <span className="text-[10px] text-slate-400 block uppercase font-medium">Simmetria Rotazione</span>
                     <span className="text-base font-bold text-emerald-400 font-mono">
-                      {systemResult.coverageMetrics.averagePresence}x
+                      {systemResult.coverageMetrics.minPresence === systemResult.coverageMetrics.maxPresence
+                        ? `${systemResult.coverageMetrics.minPresence}x Esatta`
+                        : `${systemResult.coverageMetrics.minPresence}x–${systemResult.coverageMetrics.maxPresence}x`}
                     </span>
-                    <span className="text-[10px] text-slate-500 block">
-                      perfetto bilanciamento
+                    <span className="text-[10px] text-emerald-300/80 block">
+                      {systemResult.coverageMetrics.minPresence === systemResult.coverageMetrics.maxPresence
+                        ? `ogni numero ${systemResult.coverageMetrics.minPresence} volte (0 dup.)`
+                        : `media ${systemResult.coverageMetrics.averagePresence}x (0 dup.)`}
                     </span>
                   </div>
 
@@ -1701,6 +1792,26 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = ({
           )}
         </div>
       </div>
+
+      {/* Empty Archive Notice when draws.length === 0 */}
+      {draws.length === 0 && (
+        <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-5 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <History className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-extrabold text-amber-300">
+                Nessuna estrazione reale in archivio
+              </h4>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                L&apos;app parte con archivio vuoto (Zero Mock Data) e opera in{' '}
+                <strong className="text-emerald-300">Modalità Equiprobabile Pura (Fisher-Yates via crypto.getRandomValues)</strong>{' '}
+                senza inventare statistiche inesistenti. Inserisci o importa estrazioni reali nella scheda{' '}
+                <strong className="text-white">Archivio Storico</strong> per attivare il Backtest Reale e la Pesatura su Archivio Reale.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PUNTO 4: Verifica Vincite su Storico Reale (Backtest Reale Istantaneo) */}
       {realHistoricalBacktest && systemResult && (
