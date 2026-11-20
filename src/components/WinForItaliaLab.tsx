@@ -42,6 +42,9 @@ import {
   runWinForItaliaFunnel40To12,
   selectSniperSestinaFromTop12,
   generateReduced3Columns,
+  generateWinForItaliaExtended,
+  getWinForItaliaExtendedOdds,
+  WFI_EXTENDED_DEMO_SEED,
   runWinForItaliaWeeklyMonteCarlo
 } from '../utils/winForItalia';
 import {
@@ -68,6 +71,11 @@ const DECADE_LABELS: Record<number, string> = {
 };
 
 const WFI_PLAY_MODE_STORAGE_KEY = 'winforitalia_play_mode_v1';
+const EXTENDED_ODDS = getWinForItaliaExtendedOdds();
+const formatOdds = (count: number) =>
+  (count / EXTENDED_ODDS.draws * 100).toLocaleString('it-IT', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2
+  }) + '%';
 
 export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   userEmail,
@@ -90,7 +98,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     [userEmail]
   );
 
-  // Locked state: funnel + sniper sestine + reduced 3 sestine.
+  // Locked state: the legacy pair and extended columns are generated separately.
   // NEVER auto-generates on mount, tab switch, new draws sync, or across browsers/devices.
   // Changes ONLY when the user explicitly clicks the button to create/recalculate sestine.
   const [lockedState, setLockedState] = useState<UserWinForItaliaRecord | null>(
@@ -103,7 +111,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     if (initialSavedRecord?.playMode) return initialSavedRecord.playMode;
     try {
       const saved = localStorage.getItem(WFI_PLAY_MODE_STORAGE_KEY);
-      if (saved === 'reduced3' || saved === 'sniper') return saved;
+      if (saved === 'reduced3' || saved === 'sniper' || saved === 'extended18') return saved;
     } catch {
       // Ignore
     }
@@ -113,6 +121,11 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   const lastAppliedTimeRef = useRef<number>(
     initialSavedRecord ? new Date(initialSavedRecord.updatedAt || 0).getTime() : 0
   );
+  const isExtended = playMode === 'extended18';
+  const [isGeneratingExtended, setIsGeneratingExtended] = useState(false);
+  const [generationError, setGenerationError] = useState('');
+  const extendedSystem = lockedState?.extendedSystem;
+  const hasActiveSystem = isExtended ? Boolean(extendedSystem) : Boolean(lockedState?.funnelResult);
 
   const applySavedRecordToState = (rec: UserWinForItaliaRecord) => {
     const recTime = new Date(rec.updatedAt || 0).getTime();
@@ -126,7 +139,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     }
   };
 
-  // Synchronize this user's locked Win for Italia state across LocalStorage, Server, and Cloud Firestore
+  // Synchronize this user's locked Win for Italia state across local storage and Cloud Firestore.
   useEffect(() => {
     let active = true;
     const localRec = loadUserWinForItaliaState(userEmail);
@@ -219,6 +232,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   // Expandable drawer for Alternatives #2 and #3 (Cecchino mode)
   const [isAlternativesOpen, setIsAlternativesOpen] = useState<boolean>(false);
   const [copiedRank, setCopiedRank] = useState<number | 'all3' | null>(null);
+  const [copyAllError, setCopyAllError] = useState(false);
   const [savedToast, setSavedToast] = useState<string | null>(null);
 
   // 1. Dynamic Historical Window: Math.min(history.length, 50) (used for archive stats and ONLY when user clicks Create Sestina)
@@ -227,13 +241,48 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   }, [history]);
 
   // 2. Explicit generation ONLY when the user chooses to create/recalculate sestine
+  const persistRecord = (record: UserWinForItaliaRecord) => {
+    lastAppliedTimeRef.current = new Date(record.updatedAt).getTime();
+    setLockedState(record);
+    saveUserWinForItaliaState(record);
+  };
+
+  const handleGenerateExtended = async (useDemo = false) => {
+    setIsGeneratingExtended(true);
+    setGenerationError('');
+    try {
+      const seed = useDemo ? WFI_EXTENDED_DEMO_SEED
+        : Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+      const generated = await generateWinForItaliaExtended(seed);
+      const latest = loadUserWinForItaliaState(userEmail) ?? lockedState;
+      persistRecord({
+        ...latest,
+        userEmail: userEmail.trim().toLowerCase(),
+        updatedAt: new Date().toISOString(),
+        playMode: 'extended18',
+        latestDrawIdAtGeneration: latest?.latestDrawIdAtGeneration ?? '',
+        windowSizeAtGeneration: latest?.windowSizeAtGeneration ?? 0,
+        extendedSystem: generated
+      });
+    } catch {
+      setGenerationError('Impossibile creare le sestine. Riprova su una connessione HTTPS.');
+    } finally {
+      setIsGeneratingExtended(false);
+    }
+  };
+
   const handleCreateOrRecalculateSestina = () => {
+    if (isExtended) {
+      void handleGenerateExtended();
+      return;
+    }
     const generatedFunnel = runWinForItaliaFunnel40To12(stats, Math.random);
     const generatedSniper = selectSniperSestinaFromTop12(generatedFunnel.top12Numbers, stats);
     const generatedReduced3 = generateReduced3Columns(generatedFunnel.top9Numbers, stats);
     const nowIso = new Date().toISOString();
 
     const newRecord: UserWinForItaliaRecord = {
+      ...lockedState,
       userEmail: userEmail.trim().toLowerCase(),
       updatedAt: nowIso,
       playMode,
@@ -244,10 +293,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
       reduced3System: generatedReduced3
     };
 
-    lastAppliedTimeRef.current = new Date(nowIso).getTime();
-    setLockedState(newRecord);
-    setIsSyncingCloud(false);
-    saveUserWinForItaliaState(newRecord);
+    persistRecord(newRecord);
   };
 
   const funnelResult = lockedState?.funnelResult ?? null;
@@ -255,7 +301,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   const reduced3System = lockedState?.reduced3System ?? null;
 
   const hasNewerDrawSinceGeneration = Boolean(
-    lockedState &&
+    !isExtended && lockedState &&
       history[0]?.id &&
       lockedState.latestDrawIdAtGeneration &&
       history[0].id !== lockedState.latestDrawIdAtGeneration
@@ -263,13 +309,13 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
   // 4. Dynamic Monte Carlo "Settimana Tipo" (7 Estrazioni = 14,00 € in sniper mode, 42,00 € in reduced3 mode)
   const monteCarloWeekly = useMemo(() => {
-    if (!sniperSelection || !reduced3System) return null;
+    if (isExtended || !sniperSelection || !reduced3System) return null;
     const columnsToTest =
       playMode === 'reduced3'
         ? reduced3System.columns.map((c) => [...c.numbers])
         : sniperSelection.primarySestina.numbers;
     return runWinForItaliaWeeklyMonteCarlo(columnsToTest, 50000, simSeed);
-  }, [playMode, reduced3System, sniperSelection, simSeed]);
+  }, [isExtended, playMode, reduced3System, sniperSelection, simSeed]);
 
   const chaosSet = useMemo(
     () => new Set(funnelResult ? funnelResult.chaos3 : []),
@@ -301,12 +347,19 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
   // Set of all numbers played in current mode for highlighting in recent archive draws
   const playedNumbersSet = useMemo(() => {
+    if (isExtended) return new Set(extendedSystem?.columns.flatMap(c => c.numbers));
     if (!funnelResult || !sniperSelection) return new Set<number>();
     if (playMode === 'reduced3') {
       return new Set(funnelResult.top9Numbers);
     }
     return new Set(sniperSelection.primarySestina.numbers);
-  }, [playMode, funnelResult, sniperSelection]);
+  }, [isExtended, extendedSystem, playMode, funnelResult, sniperSelection]);
+
+  const generationLabel = isExtended
+    ? hasActiveSystem ? 'Ricalcola 3 sestine (18 numeri)' : 'Crea 3 sestine (18 numeri)'
+    : playMode === 'sniper'
+      ? hasActiveSystem ? 'Crea Nuova Sestina (40→12→1)' : 'Crea Sestina (40→12→1)'
+      : hasActiveSystem ? 'Crea Nuove 3 Sestine (40→9→3)' : 'Crea 3 Sestine (40→9→3)';
 
   const handleSyncOfficial2000 = async () => {
     setIsSyncing(true);
@@ -360,20 +413,24 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
     setTimeout(() => setCopiedRank(null), 2000);
   };
 
-  const handleCopyAll3Sestine = () => {
-    if (!reduced3System) return;
-    const lines = reduced3System.columns.map(
+  const handleCopyAll3Sestine = async () => {
+    const system = isExtended ? extendedSystem : reduced3System;
+    if (!system) return;
+    const lines = system.columns.map(
       (col, idx) =>
         `#${String(idx + 1).padStart(2, '0')}: ${col.numbers
           .map((n) => String(n).padStart(2, '0'))
           .join(' - ')} (Σ ${col.sum} • ${col.evenCount}P/${col.oddCount}D)`
     );
     const text = lines.join('\n');
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch(() => {});
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyAllError(false);
+      setCopiedRank('all3');
+      setTimeout(() => setCopiedRank(null), 2200);
+    } catch {
+      setCopyAllError(true);
     }
-    setCopiedRank('all3');
-    setTimeout(() => setCopiedRank(null), 2200);
   };
 
   const handleRegisterSestinaPlay = (sestina: WinForItaliaRankedSestina) => {
@@ -413,7 +470,11 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
   };
 
   const handleRegisterReduced3Play = () => {
-    if (!reduced3System) return;
+    const system = isExtended ? extendedSystem : reduced3System;
+    if (!system) return;
+    const poolNumbers = isExtended ? system.columns.flatMap(c => c.numbers).sort((a, b) => a - b)
+      : reduced3System?.top9Numbers ?? [];
+    const modeLabel = isExtended ? 'Copertura estesa (18 numeri distinti)' : 'Sistema Ridotto 3 Sestine su 9 Numeri';
     const latestDraw = history[0];
     const nextContestNum = (latestDraw?.contestNumber || 1) + 1;
     const year = latestDraw?.year || new Date().getFullYear();
@@ -424,9 +485,9 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
       targetContestId: `WFI-${year}-${String(nextContestNum).padStart(3, '0')}`,
       mode: 'manual',
       savedAmount: 0,
-      manualNote: `Win for Italia Team (6/40) — Sistema Ridotto 3 Sestine su 9 Numeri (6,00 € • Copertura 2x Simmetrica)`,
-      poolNumbers: [...reduced3System.top9Numbers],
-      columns: reduced3System.columns.map((col, idx) => ({
+      manualNote: `Win for Italia Team (6/40) — ${modeLabel} • 6,00 €`,
+      poolNumbers: [...poolNumbers],
+      columns: system.columns.map((col, idx) => ({
         id: idx + 1,
         numbers: [...col.numbers],
         sum: col.sum,
@@ -441,7 +502,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
 
     onSavePlay(newPlay);
     setSavedToast(
-      `Sistema Ridotto 3 Sestine (Pool 9: [${reduced3System.top9Numbers.join(', ')}]) registrato in Verifica & Bilancio (Budget 6,00 €).`
+      `${modeLabel}: 3 sestine registrate in Verifica & Bilancio (budget 6,00 €).`
     );
     setTimeout(() => setSavedToast(null), 4000);
   };
@@ -504,7 +565,9 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
-                {playMode === 'sniper' ? (
+                {isExtended ? (
+                  <><Layers className="w-3.5 h-3.5" /> Copertura estesa 6/40</>
+                ) : playMode === 'sniper' ? (
                   <>
                     <Crosshair className="w-3.5 h-3.5" />
                     Modalità Cecchino 6/40
@@ -522,19 +585,19 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
               >
                 {playMode === 'sniper'
                   ? 'Budget: 2,00 € (1 Sestina Secca)'
-                  : 'Budget: 6,00 € (3 Sestine • Copertura 2x)'}
+                  : isExtended ? 'Budget: 6,00 € (3 sestine • 18 numeri)' : 'Budget: 6,00 € (3 Sestine • Copertura 2x)'}
               </span>
-              <span
+              {!isExtended && <span
                 className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30"
                 data-testid="wfi-dynamic-window-badge"
               >
                 Finestra Dinamica: {windowSize}/50 Estrazioni
-              </span>
+              </span>}
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono text-slate-300 bg-slate-800/90 border border-slate-700 flex items-center gap-1">
                 <Clock className="w-3 h-3 text-emerald-400" />
                 Auto-Sync GitHub Actions: 02:00 UTC
               </span>
-              {lockedState && (
+              {hasActiveSystem && lockedState && (
                 <span
                   className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1"
                   data-testid="wfi-locked-badge"
@@ -556,11 +619,13 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             </div>
 
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Win for Italia Team (6/40) &mdash; {activeUiLabels.title}
+              Win for Italia Team (6/40) &mdash; {isExtended ? 'Copertura estesa' : activeUiLabels.title}
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-3xl">
               Estrazione quotidiana ore <strong className="text-white">20:00</strong> (6 numeri su 40, senza Jolly/SuperStar).{' '}
-              {playMode === 'sniper' ? (
+              {isExtended ? (
+                <>Tre sestine con <strong className="text-emerald-300">18 numeri distinti</strong>, senza numeri in comune. La selezione non usa frequenze o ritardi.</>
+              ) : playMode === 'sniper' ? (
                 <>
                   Imbuto a competizione pura{' '}
                   <strong className="text-emerald-300">
@@ -597,18 +662,11 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
               type="button"
               onClick={handleCreateOrRecalculateSestina}
               data-testid="wfi-recalc-funnel-btn"
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              disabled={isSyncingCloud || isGeneratingExtended}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
             >
               <Sparkles className="w-4 h-4" />
-              <span>
-                {lockedState
-                  ? playMode === 'sniper'
-                    ? 'Crea Nuova Sestina (40→12→1)'
-                    : 'Crea Nuove 3 Sestine (40→9→3)'
-                  : playMode === 'sniper'
-                  ? 'Crea Sestina (40→12→1)'
-                  : 'Crea 3 Sestine (40→9→3)'}
-              </span>
+              <span>{isGeneratingExtended ? 'Generazione in corso…' : generationLabel}</span>
             </button>
           </div>
         </div>
@@ -640,10 +698,12 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             Seleziona Modalità di Gioco (6/40):
           </span>
 
-          <div className="inline-flex rounded-xl bg-slate-950/90 p-1 border border-slate-800 gap-1">
+          <div className="flex flex-wrap rounded-xl bg-slate-950/90 p-1 border border-slate-800 gap-1">
             <button
               type="button"
               data-testid="wfi-mode-sniper"
+              aria-pressed={playMode === 'sniper'}
+              disabled={isGeneratingExtended}
               onClick={() => handleSelectPlayMode('sniper')}
               className={`px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer ${
                 playMode === 'sniper'
@@ -658,6 +718,8 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             <button
               type="button"
               data-testid="wfi-mode-reduced3"
+              aria-pressed={playMode === 'reduced3'}
+              disabled={isGeneratingExtended}
               onClick={() => handleSelectPlayMode('reduced3')}
               className={`px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer ${
                 playMode === 'reduced3'
@@ -667,6 +729,19 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             >
               <Grid className="w-3.5 h-3.5" />
               <span>Sistema Ridotto &middot; 6,00 &euro; (3 Sestine)</span>
+            </button>
+            <button
+              type="button"
+              data-testid="wfi-mode-extended18"
+              aria-pressed={isExtended}
+              disabled={isGeneratingExtended}
+              onClick={() => handleSelectPlayMode('extended18')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-extrabold flex items-center gap-2 cursor-pointer ${
+                isExtended ? 'bg-emerald-500 text-slate-950' : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Copertura estesa &middot; 6,00 &euro; (18 numeri)</span>
             </button>
           </div>
         </div>
@@ -741,8 +816,8 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
       {/* Main Grid: Left = Active Play Card + Monte Carlo; Right = Imbuto 40 -> 16 -> 12/9 + Archive */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left 7 cols */}
-        <div className="lg:col-span-7 space-y-5">
-          {!lockedState && isSyncingCloud && (
+        <div className="lg:col-span-7 min-w-0 space-y-5">
+          {!hasActiveSystem && isSyncingCloud && (
             <div className="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-8 text-center space-y-2 shadow-lg">
               <div className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
                 <Lock className="w-6 h-6 animate-pulse" />
@@ -757,7 +832,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
             </div>
           )}
 
-          {!lockedState && !isSyncingCloud && (
+          {!hasActiveSystem && !isSyncingCloud && (
             <div
               className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center space-y-4 shadow-lg"
               data-testid="wfi-empty-state"
@@ -767,7 +842,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
               </div>
               <div className="space-y-1">
                 <h3 className="text-base font-extrabold text-white">
-                  Nessuna sestina Win for Italia ancora creata per {userEmail}
+                  {isExtended ? 'Nessuna sestina di Copertura estesa' : `Nessuna sestina Win for Italia ancora creata per ${userEmail}`}
                 </h3>
                 <p className="text-xs text-slate-400 max-w-xl mx-auto">
                   I numeri e le sestine Win for Life / Win for Italia (6/40) non vengono mai
@@ -779,19 +854,73 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
               <button
                 type="button"
                 onClick={handleCreateOrRecalculateSestina}
-                className="mx-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-sm shadow-xl shadow-amber-500/20 inline-flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                disabled={isGeneratingExtended}
+                className="mx-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-sm shadow-xl shadow-amber-500/20 inline-flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
               >
                 <Sparkles className="w-4 h-4" />
-                <span>
-                  {playMode === 'sniper'
-                    ? 'Crea Sestina (40→12→1)'
-                    : 'Crea 3 Sestine (40→9→3)'}
-                </span>
+                <span>{generationLabel}</span>
               </button>
+              {isExtended && (
+                <div>
+                  <button type="button" disabled={isGeneratingExtended} onClick={() => void handleGenerateExtended(true)}
+                    className="px-3 py-2 text-xs font-bold text-emerald-300 border border-slate-700 hover:bg-slate-800 rounded-lg disabled:opacity-50">
+                    Usa le sestine dell’esempio
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
-          {lockedState && funnelResult && sniperSelection && reduced3System && monteCarloWeekly && (
+          {isExtended && generationError && <p role="alert" className="text-rose-300 text-sm">{generationError}</p>}
+          {isExtended && extendedSystem && (
+            <section className="rounded-2xl border border-emerald-500/40 bg-slate-900 p-4 sm:p-6 space-y-4" data-testid="wfi-extended18-card">
+              <div className="space-y-1">
+                <h2 className="text-lg font-extrabold text-white">Le tre sestine di Copertura estesa</h2>
+                <p className="text-xs text-emerald-300">18 numeri distinti · 0 sovrapposizioni · 6,00 € per concorso</p>
+              </div>
+              <ol className="space-y-2">
+                {extendedSystem.columns.map(col => (
+                  <li key={col.rank} className="rounded-xl bg-slate-950 border border-slate-800 p-2.5 sm:p-3 flex flex-wrap items-center gap-2 sm:gap-4" data-testid="wfi-extended18-column">
+                    <span className="text-xs font-bold text-slate-300">Colonna {col.rank}</span>
+                    <div className="grid grid-cols-6 gap-1">
+                      {col.numbers.map(n => (
+                        <span key={n} data-testid="wfi-extended18-number" className="w-7 h-7 sm:w-9 sm:h-9 grid place-items-center rounded-lg bg-emerald-950 text-emerald-100 font-mono font-bold text-xs sm:text-sm border border-emerald-900">
+                          {String(n).padStart(2, '0')}
+                        </span>
+                      ))}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={handleCopyAll3Sestine} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-white text-xs font-bold">
+                  <Copy className="w-4 h-4" /> {copiedRank === 'all3' ? 'Sestine copiate' : 'Copia le 3 sestine'}
+                </button>
+                <button type="button" onClick={handleRegisterReduced3Play} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500 text-slate-950 text-xs font-extrabold">
+                  <BookmarkCheck className="w-4 h-4" /> Registra in Verifica &amp; Bilancio
+                </button>
+              </div>
+              {copyAllError && <p role="status" className="text-xs text-amber-200">Appunti non disponibili: puoi selezionare i numeri e copiarli manualmente.</p>}
+              <p className="text-xs text-slate-400">
+                {extendedSystem.seed === WFI_EXTENDED_DEMO_SEED ? 'Sestine dell’esempio. ' : ''}
+                Le sestine restano bloccate fino al prossimo ricalcolo. Registrarle nell’app non acquista una giocata.
+              </p>
+            </section>
+          )}
+          {isExtended && (
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4 sm:p-5 space-y-3" data-testid="wfi-extended18-odds">
+              <h3 className="text-sm font-extrabold text-white">Probabilità esatte per concorso</h3>
+              <dl className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-300">
+                <div className="rounded-lg bg-slate-950 p-3"><dt>Almeno 2 punti</dt><dd className="mt-1 text-emerald-300 font-mono font-bold">{formatOdds(EXTENDED_ODDS.atLeast2)}</dd></div>
+                <div className="rounded-lg bg-slate-950 p-3"><dt>Almeno 3 punti</dt><dd className="mt-1 text-emerald-300 font-mono font-bold">{formatOdds(EXTENDED_ODDS.atLeast3)}</dd></div>
+                <div className="rounded-lg bg-slate-950 p-3"><dt>6 punti</dt><dd className="mt-1 text-emerald-300 font-mono font-bold">1 su {(EXTENDED_ODDS.draws / EXTENDED_ODDS.exact6).toLocaleString('it-IT')}</dd></div>
+              </dl>
+              <p className="text-xs text-slate-400">
+                Soglia raggiunta da almeno una delle tre colonne, con estrazione uniforme. Un Punto 2 paga 2,00 €: da solo non copre i 6,00 € spesi. I premi superiori variano per concorso.
+              </p>
+            </section>
+          )}
+          {!isExtended && lockedState && funnelResult && sniperSelection && reduced3System && monteCarloWeekly && (
             <>
               {playMode === 'sniper' ? (
             /* MODE 1: Cecchino — 2,00 € (1 Sestina) */
@@ -1316,8 +1445,8 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
         </div>
 
         {/* Right 5 cols: Imbuto Bilanciato 40 -> 16 (13 Gen + 3 Caos) -> 12 or 9 */}
-        <div className="lg:col-span-5 space-y-5">
-          {funnelResult && reduced3System && (
+        <div className="lg:col-span-5 min-w-0 space-y-5">
+          {!isExtended && funnelResult && reduced3System && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -1497,7 +1626,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
                             inActivePlay
                               ? playMode === 'sniper'
                                 ? 'Presente nella Sestina #1 Cecchino'
-                                : 'Presente nel Pool Top 9 del Sistema Ridotto'
+                                : isExtended ? 'Presente nella Copertura estesa' : 'Presente nel Pool Top 9 del Sistema Ridotto'
                               : undefined
                           }
                         >

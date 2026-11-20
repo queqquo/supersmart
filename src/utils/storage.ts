@@ -507,14 +507,13 @@ export function loadUserWinForItaliaState(userEmail: string): UserWinForItaliaRe
 
 export function cacheUserWinForItaliaStateLocally(record: UserWinForItaliaRecord): void {
   const emailKey = normalizeUserEmailKey(record?.userEmail);
-  if (!emailKey || !record?.funnelResult || !record?.sniperSelection || !record?.reduced3System) {
-    return;
-  }
+  const normalizedRecord = normalizeUserWinForItaliaRecord(record, emailKey);
+  if (!normalizedRecord) return;
   try {
     if (typeof localStorage === 'undefined') return;
     localStorage.setItem(
       getUserWinForItaliaStorageKey(emailKey),
-      JSON.stringify({ ...record, userEmail: emailKey })
+      JSON.stringify(normalizedRecord)
     );
   } catch (e) {
     console.error('Error caching user Win for Italia state locally:', e);
@@ -523,25 +522,10 @@ export function cacheUserWinForItaliaStateLocally(record: UserWinForItaliaRecord
 
 export function saveUserWinForItaliaState(record: UserWinForItaliaRecord): void {
   const emailKey = normalizeUserEmailKey(record?.userEmail);
-  if (!emailKey || !record?.funnelResult || !record?.sniperSelection || !record?.reduced3System) {
-    return;
-  }
-  const normalizedRecord: UserWinForItaliaRecord = {
-    ...record,
-    userEmail: emailKey,
-    updatedAt: record.updatedAt || new Date().toISOString()
-  };
+  const normalizedRecord = normalizeUserWinForItaliaRecord(record, emailKey);
+  if (!normalizedRecord) return;
   cacheUserWinForItaliaStateLocally(normalizedRecord);
   upsertCloudUserWinForItalia(normalizedRecord).catch(() => {});
-  if (typeof fetch !== 'undefined') {
-    fetch(`/api/user-winforitalia/${encodeURIComponent(emailKey)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ record: normalizedRecord })
-    }).catch(() => {
-      // Ignore if offline or static deployment (Cloud Firestore handles cross-browser sync)
-    });
-  }
 }
 
 export async function syncUserWinForItaliaState(
@@ -552,20 +536,9 @@ export async function syncUserWinForItaliaState(
 
   const localRecord = loadUserWinForItaliaState(emailKey);
 
-  const [cloudRecord, serverRecord] = await Promise.all([
-    fetchCloudUserWinForItalia(emailKey),
-    typeof fetch !== 'undefined'
-      ? fetch(`/api/user-winforitalia/${encodeURIComponent(emailKey)}`)
-          .then(async (res) => {
-            if (!res.ok) return null;
-            const data = await res.json();
-            return normalizeUserWinForItaliaRecord(data?.record, emailKey);
-          })
-          .catch(() => null)
-      : Promise.resolve(null)
-  ]);
+  const cloudRecord = await fetchCloudUserWinForItalia(emailKey);
 
-  const candidates = [localRecord, serverRecord, cloudRecord].filter(
+  const candidates = [localRecord, cloudRecord].filter(
     (r): r is UserWinForItaliaRecord =>
       Boolean(r && normalizeUserEmailKey(r.userEmail) === emailKey)
   );
@@ -583,18 +556,9 @@ export async function syncUserWinForItaliaState(
 
   const bestTime = new Date(best.updatedAt || 0).getTime();
   const cloudTime = new Date(cloudRecord?.updatedAt || 0).getTime();
-  const serverTime = new Date(serverRecord?.updatedAt || 0).getTime();
 
   if (!cloudRecord || bestTime > cloudTime) {
     await upsertCloudUserWinForItalia(best);
-  }
-
-  if ((!serverRecord || bestTime > serverTime) && typeof fetch !== 'undefined') {
-    fetch(`/api/user-winforitalia/${encodeURIComponent(emailKey)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ record: best })
-    }).catch(() => {});
   }
 
   return best;

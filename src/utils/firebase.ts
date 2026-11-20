@@ -33,7 +33,7 @@ import {
   compactCamelWorkforceResult,
   hydrateCamelWorkforceResult
 } from './camelWorkforce';
-import type { UserWinForItaliaRecord } from './winForItalia';
+import { normalizeUserWinForItaliaRecord, type UserWinForItaliaRecord } from './winForItalia';
 
 export enum OperationType {
   CREATE = 'create',
@@ -996,49 +996,12 @@ function parseCloudWinForItaliaDoc(
   const payload = data.winForItalia as Record<string, unknown> | undefined;
   if (!payload || typeof payload !== 'object') return null;
 
-  const funnel = payload.funnelResult as UserWinForItaliaRecord['funnelResult'] | undefined;
-  const sniper = payload.sniperSelection as UserWinForItaliaRecord['sniperSelection'] | undefined;
-  const reduced3 = payload.reduced3System as UserWinForItaliaRecord['reduced3System'] | undefined;
-
-  if (
-    !funnel ||
-    !Array.isArray(funnel.top12Numbers) ||
-    funnel.top12Numbers.length !== 12 ||
-    !Array.isArray(funnel.top9Numbers) ||
-    funnel.top9Numbers.length !== 9 ||
-    !Array.isArray(funnel.scoredPool16) ||
-    funnel.scoredPool16.length !== 16 ||
-    !sniper?.primarySestina ||
-    !Array.isArray(sniper.primarySestina.numbers) ||
-    sniper.primarySestina.numbers.length !== 6 ||
-    !sniper?.alternative2 ||
-    !sniper?.alternative3 ||
-    !reduced3 ||
-    !Array.isArray(reduced3.columns) ||
-    reduced3.columns.length !== 3
-  ) {
-    return null;
-  }
-
-  const updatedAt =
-    typeof data.updatedAt === 'string' && data.updatedAt
-      ? data.updatedAt
-      : new Date().toISOString();
-
-  return {
+  return normalizeUserWinForItaliaRecord({
+    ...payload,
+    ownerEmail,
     userEmail: expectedEmail,
-    updatedAt,
-    playMode: payload.playMode === 'reduced3' ? 'reduced3' : 'sniper',
-    latestDrawIdAtGeneration:
-      typeof payload.latestDrawIdAtGeneration === 'string'
-        ? payload.latestDrawIdAtGeneration
-        : '',
-    windowSizeAtGeneration:
-      typeof payload.windowSizeAtGeneration === 'number' ? payload.windowSizeAtGeneration : 0,
-    funnelResult: funnel,
-    sniperSelection: sniper,
-    reduced3System: reduced3
-  };
+    updatedAt: data.updatedAt
+  }, expectedEmail);
 }
 
 export async function fetchCloudUserWinForItalia(
@@ -1059,67 +1022,38 @@ export async function fetchCloudUserWinForItalia(
 }
 
 export async function upsertCloudUserWinForItalia(
-  record: UserWinForItaliaRecord
+  input: UserWinForItaliaRecord
 ): Promise<boolean> {
   const db = getCloudDb();
-  const emailKey = normalizeEmail(record?.userEmail || '');
+  const emailKey = normalizeEmail(input?.userEmail || '');
   const docId = getWinForItaliaCloudDocId(emailKey);
-  const primaryNums = record?.sniperSelection?.primarySestina?.numbers;
-  if (
-    !db ||
-    !emailKey ||
-    !docId ||
-    !record?.funnelResult ||
-    !record?.sniperSelection ||
-    !record?.reduced3System ||
-    !Array.isArray(primaryNums) ||
-    primaryNums.length !== 6
-  ) {
-    return false;
-  }
+  const record = normalizeUserWinForItaliaRecord(input, emailKey);
+  if (!db || !docId || !record) return false;
   try {
-    const updatedAt = (record.updatedAt || new Date().toISOString()).slice(0, 64);
-    const activeColumns =
-      record.playMode === 'reduced3'
-        ? record.reduced3System.columns.map((c, idx) => ({
-            id: idx + 1,
-            numbers: [...c.numbers],
-            sum: c.sum,
-            evens: c.evenCount,
-            odds: c.oddCount
-          }))
-        : [
-            {
-              id: 1,
-              numbers: [...primaryNums],
-              sum: record.sniperSelection.primarySestina.sum,
-              evens: record.sniperSelection.primarySestina.evenCount,
-              odds: record.sniperSelection.primarySestina.oddCount
-            }
-          ];
+    const { userEmail, updatedAt, ...winForItalia } = record;
+    const useExtended = record.extendedSystem && (record.playMode === 'extended18' || !record.sniperSelection);
+    const useReduced = !useExtended && record.playMode === 'reduced3';
+    const primary = record.sniperSelection?.primarySestina;
+    const columns = useExtended ? record.extendedSystem?.columns
+      : useReduced ? record.reduced3System?.columns : primary ? [primary] : undefined;
+    if (!columns?.length) return false;
+    const poolNumbers = useExtended ? [...new Set(columns.flatMap(c => c.numbers))].sort((a, b) => a - b)
+      : useReduced ? record.funnelResult?.top9Numbers : record.funnelResult?.top12Numbers;
 
     const clean = stripUndefined({
       userEmail: docId,
-      ownerEmail: emailKey,
+      ownerEmail: userEmail,
       recordType: 'winforitalia_v1',
-      updatedAt,
+      updatedAt: updatedAt.slice(0, 64),
       systemResult: {
-        poolNumbers:
-          record.playMode === 'reduced3'
-            ? [...record.funnelResult.top9Numbers]
-            : [...record.funnelResult.top12Numbers],
-        columns: activeColumns
+        poolNumbers,
+        columns: columns.map((c, idx) => ({
+          id: idx + 1, numbers: c.numbers, sum: c.sum, evens: c.evenCount, odds: c.oddCount
+        }))
       },
-      winForItalia: {
-        playMode: record.playMode,
-        latestDrawIdAtGeneration: record.latestDrawIdAtGeneration,
-        windowSizeAtGeneration: record.windowSizeAtGeneration,
-        funnelResult: record.funnelResult,
-        sniperSelection: record.sniperSelection,
-        reduced3System: record.reduced3System
-      }
+      winForItalia
     });
-    await setDoc(doc(db, 'user_systems', docId), clean);
+    await setDoc(doc(db, 'user_systems', docId), clean, { merge: true });
     return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `user_systems/${docId}`);

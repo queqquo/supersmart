@@ -1681,7 +1681,57 @@ export function compareSavedPlayAgainstWinForItaliaDraws(
 // PER-USER LOCKED WIN FOR ITALIA / WIN FOR LIFE (6/40) PERSISTENCE RECORD
 // ============================================================================
 
-export type WinForItaliaPlayMode = 'sniper' | 'reduced3';
+export type WinForItaliaPlayMode = 'sniper' | 'reduced3' | 'extended18';
+
+export const WFI_EXTENDED_DEMO_SEED = 'wfi-cover18-demo-v1';
+export const WFI_EXTENDED_VERSION = 'sha256-v1';
+
+export interface WinForItaliaExtendedSystem {
+  version: typeof WFI_EXTENDED_VERSION;
+  seed: string;
+  columns: [WinForItaliaRankedSestina, WinForItaliaRankedSestina, WinForItaliaRankedSestina];
+}
+
+export async function generateWinForItaliaExtended(seed: string): Promise<WinForItaliaExtendedSystem> {
+  if (!seed || seed.length > 96) throw new Error('Seme non valido');
+  const encoder = new TextEncoder();
+  const ranked = await Promise.all(Array.from({ length: 40 }, async (_, i) => {
+    const number = i + 1;
+    const hash = await crypto.subtle.digest('SHA-256', encoder.encode(`${seed}:${number}`));
+    const key = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('');
+    return { number, key };
+  }));
+  ranked.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : a.number - b.number);
+  const column = (rank: number) => ({
+    ...scoreWinForItaliaSestina(ranked.slice((rank - 1) * 6, rank * 6).map(item => item.number)),
+    rank
+  });
+  return { version: WFI_EXTENDED_VERSION, seed, columns: [column(1), column(2), column(3)] };
+}
+
+// Count by hits in each of the disjoint columns and in the 22 unused numbers.
+export function getWinForItaliaExtendedOdds() {
+  const choose = (n: number, k: number) => {
+    if (k < 0 || k > n) return 0;
+    let count = 1;
+    for (let i = 1; i <= k; i++) count = count * (n - i + 1) / i;
+    return Math.round(count);
+  };
+  const draws = choose(40, 6);
+  let atLeast2 = 0;
+  let atLeast3 = 0;
+  for (let a = 0; a <= 6; a++) {
+    for (let b = 0; b <= 6 - a; b++) {
+      for (let c = 0; c <= 6 - a - b; c++) {
+        const count = choose(6, a) * choose(6, b) * choose(6, c) * choose(22, 6 - a - b - c);
+        const best = Math.max(a, b, c);
+        if (best >= 2) atLeast2 += count;
+        if (best >= 3) atLeast3 += count;
+      }
+    }
+  }
+  return { draws, atLeast2, atLeast3, exact6: 3 };
+}
 
 export interface UserWinForItaliaRecord {
   userEmail: string;
@@ -1689,9 +1739,10 @@ export interface UserWinForItaliaRecord {
   playMode: WinForItaliaPlayMode;
   latestDrawIdAtGeneration: string;
   windowSizeAtGeneration: number;
-  funnelResult: WinForItaliaFunnelResult;
-  sniperSelection: WinForItaliaSniperSelection;
-  reduced3System: WinForItaliaReduced3System;
+  funnelResult?: WinForItaliaFunnelResult;
+  sniperSelection?: WinForItaliaSniperSelection;
+  reduced3System?: WinForItaliaReduced3System;
+  extendedSystem?: WinForItaliaExtendedSystem;
 }
 
 function isValidWinForItaliaNumbersList(arr: unknown, expectedLen: number): arr is number[] {
@@ -1736,41 +1787,28 @@ export function normalizeUserWinForItaliaRecord(
   const sniper = obj.sniperSelection as WinForItaliaSniperSelection | undefined;
   const reduced3 = obj.reduced3System as WinForItaliaReduced3System | undefined;
 
-  if (
-    !funnel ||
-    typeof funnel !== 'object' ||
-    !isValidWinForItaliaNumbersList(funnel.top12Numbers, 12) ||
-    !isValidWinForItaliaNumbersList(funnel.top9Numbers, 9) ||
-    !Array.isArray(funnel.scoredPool16) ||
-    funnel.scoredPool16.length !== 16 ||
-    !Array.isArray(funnel.chaos3)
-  ) {
-    return null;
-  }
+  const legacyValid = funnel && typeof funnel === 'object' &&
+    isValidWinForItaliaNumbersList(funnel.top12Numbers, 12) &&
+    isValidWinForItaliaNumbersList(funnel.top9Numbers, 9) &&
+    Array.isArray(funnel.scoredPool16) && funnel.scoredPool16.length === 16 &&
+    Array.isArray(funnel.chaos3) &&
+    sniper && typeof sniper === 'object' &&
+    [sniper.primarySestina, sniper.alternative2, sniper.alternative3].every(isValidRankedSestina) &&
+    reduced3 && typeof reduced3 === 'object' && isValidWinForItaliaNumbersList(reduced3.top9Numbers, 9) &&
+    Array.isArray(reduced3.columns) && reduced3.columns.length === 3 && reduced3.columns.every(isValidRankedSestina);
 
-  if (
-    !sniper ||
-    typeof sniper !== 'object' ||
-    !isValidRankedSestina(sniper.primarySestina) ||
-    !isValidRankedSestina(sniper.alternative2) ||
-    !isValidRankedSestina(sniper.alternative3)
-  ) {
-    return null;
-  }
-
-  if (
-    !reduced3 ||
-    typeof reduced3 !== 'object' ||
-    !isValidWinForItaliaNumbersList(reduced3.top9Numbers, 9) ||
-    !Array.isArray(reduced3.columns) ||
-    reduced3.columns.length !== 3 ||
-    !reduced3.columns.every((c) => isValidRankedSestina(c))
-  ) {
-    return null;
-  }
+  const extended = obj.extendedSystem as WinForItaliaExtendedSystem | undefined;
+  const extendedValid = extended?.version === WFI_EXTENDED_VERSION &&
+    typeof extended.seed === 'string' && extended.seed.length > 0 && extended.seed.length <= 96 &&
+    Array.isArray(extended.columns) && extended.columns.length === 3 &&
+    extended.columns.every((column, i) => isValidRankedSestina(column) && column.rank === i + 1 &&
+      column.numbers.every(n => typeof n === 'number')) &&
+    new Set(extended.columns.flatMap(column => column.numbers)).size === 18;
+  if (!legacyValid && !extendedValid) return null;
 
   const playMode: WinForItaliaPlayMode =
-    obj.playMode === 'reduced3' ? 'reduced3' : 'sniper';
+    obj.playMode === 'extended18' || obj.playMode === 'reduced3' || obj.playMode === 'sniper'
+      ? obj.playMode : legacyValid ? 'sniper' : 'extended18';
 
   const updatedAt =
     typeof obj.updatedAt === 'string' && obj.updatedAt
@@ -1787,9 +1825,7 @@ export function normalizeUserWinForItaliaRecord(
       typeof obj.windowSizeAtGeneration === 'number' && obj.windowSizeAtGeneration >= 0
         ? obj.windowSizeAtGeneration
         : 0,
-    funnelResult: funnel,
-    sniperSelection: sniper,
-    reduced3System: reduced3
+    ...(legacyValid ? { funnelResult: funnel, sniperSelection: sniper, reduced3System: reduced3 } : {}),
+    ...(extendedValid ? { extendedSystem: extended } : {})
   };
 }
-

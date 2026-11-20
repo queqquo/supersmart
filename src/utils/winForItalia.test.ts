@@ -13,6 +13,9 @@ import {
   runWinForItaliaFunnel40To12,
   selectSniperSestinaFromTop12,
   generateReduced3Columns,
+  generateWinForItaliaExtended,
+  getWinForItaliaExtendedOdds,
+  WFI_EXTENDED_DEMO_SEED,
   parseWinForItaliaManualInput,
   runWinForItaliaWeeklyMonteCarlo,
   isWinForItaliaPlay,
@@ -303,6 +306,7 @@ test('UserWinForItaliaRecord normalizes and persists exact locked sestine per us
     'giuseppe.vitiello@gmail.com'
   );
   assert.ok(roundTripped);
+  assert.ok(roundTripped.sniperSelection && roundTripped.reduced3System);
   assert.equal(roundTripped.userEmail, 'giuseppe.vitiello@gmail.com');
   assert.deepEqual(
     roundTripped.sniperSelection.primarySestina.numbers,
@@ -337,6 +341,7 @@ test('UserWinForItaliaRecord normalizes and persists exact locked sestine per us
 
     const loaded = loadUserWinForItaliaState('giuseppe.vitiello@gmail.com');
     assert.ok(loaded);
+    assert.ok(loaded.sniperSelection && loaded.funnelResult);
     assert.deepEqual(
       loaded.sniperSelection.primarySestina.numbers,
       sniperSelection.primarySestina.numbers
@@ -352,6 +357,58 @@ test('UserWinForItaliaRecord normalizes and persists exact locked sestine per us
   }
 });
 
+test('Copertura estesa reproduces the example and samples 18 distinct in-range numbers for other seeds', async () => {
+  const example = await generateWinForItaliaExtended(WFI_EXTENDED_DEMO_SEED);
+  assert.deepEqual(example.columns.map(c => c.numbers), [
+    [2, 14, 18, 30, 31, 34], [7, 10, 15, 32, 33, 39], [4, 13, 19, 20, 21, 23]
+  ]);
+  assert.deepEqual(await generateWinForItaliaExtended(example.seed), example);
+  for (let i = 0; i < 20; i++) {
+    const generated = await generateWinForItaliaExtended(`test-${i}`);
+    const numbers = generated.columns.flatMap(column => {
+      assert.equal(column.numbers.length, 6);
+      return column.numbers;
+    });
+    assert.equal(new Set(numbers).size, 18);
+    assert.ok(numbers.every(n => Number.isInteger(n) && n >= 1 && n <= 40));
+  }
+  assert.notDeepEqual((await generateWinForItaliaExtended('different')).columns, example.columns);
+  await assert.rejects(() => generateWinForItaliaExtended(''));
+});
+
+test('Copertura estesa uses exact disjoint-column counts', () => {
+  assert.deepEqual(getWinForItaliaExtendedOdds(), {
+    draws: 3838380, atLeast2: 2167095, atLeast3: 383700, exact6: 3
+  });
+});
+
+test('Copertura estesa round-trips alone and alongside both legacy modes; invalid columns are rejected', async () => {
+  const { normalizeUserWinForItaliaRecord } = await import('./winForItalia');
+  const email = 'test@example.org';
+  const extendedSystem = await generateWinForItaliaExtended(WFI_EXTENDED_DEMO_SEED);
+  const record = {
+    userEmail: email, updatedAt: '2026-11-20T18:55:00Z', playMode: 'extended18',
+    latestDrawIdAtGeneration: '', windowSizeAtGeneration: 0, extendedSystem
+  };
+  assert.deepEqual(normalizeUserWinForItaliaRecord(JSON.parse(JSON.stringify(record)), email), record);
+  assert.equal(normalizeUserWinForItaliaRecord(record, 'other@example.org'), null);
+
+  const { stats } = calculateWinForItaliaStats(makeFixtureHistory(53));
+  const funnelResult = runWinForItaliaFunnel40To12(stats, () => 0.41);
+  const sniperSelection = selectSniperSestinaFromTop12(funnelResult.top12Numbers, stats);
+  const reduced3System = generateReduced3Columns(funnelResult.top9Numbers, stats);
+  assert.deepEqual(normalizeUserWinForItaliaRecord({
+    ...record, playMode: 'reduced3', funnelResult, sniperSelection, reduced3System
+  }, email)?.extendedSystem, extendedSystem);
+  const bad = { ...record, extendedSystem: { ...extendedSystem, columns: [
+    extendedSystem.columns[0], { ...extendedSystem.columns[1], numbers: extendedSystem.columns[0].numbers },
+    extendedSystem.columns[2]
+  ] } };
+  assert.equal(normalizeUserWinForItaliaRecord(bad, email), null);
+  assert.deepEqual(normalizeUserWinForItaliaRecord({
+    ...bad, playMode: 'sniper', funnelResult, sniperSelection, reduced3System
+  }, email)?.sniperSelection, sniperSelection);
+});
 
 
 

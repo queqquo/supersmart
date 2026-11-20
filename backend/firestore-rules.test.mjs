@@ -71,6 +71,17 @@ test('approved users read only their own data and delete only their own saved pl
   await assertSucceeds(updateDoc(acct(admin), { status: 'AUTHORIZED', updatedAt: now }));
   await assertSucceeds(getDoc(doc(bob, 'user_systems', `camel::${bobEmail}`)));
   await assertFails(getDoc(doc(bob, 'user_systems', `wfi::${aliceEmail}`)));
+  const wfi = doc(bob, 'user_systems', `wfi::${bobEmail}`);
+  const columns = [[2, 14, 18, 30, 31, 34], [7, 10, 15, 32, 33, 39], [4, 13, 19, 20, 21, 23]]
+    .map((numbers, i) => ({ id: i + 1, numbers }));
+  await assertSucceeds(setDoc(wfi, {
+    userEmail: `wfi::${bobEmail}`,
+    ownerEmail: bobEmail,
+    updatedAt: now,
+    systemResult: { poolNumbers: columns.flatMap(c => c.numbers), columns },
+    winForItalia: { playMode: 'extended18', extendedSystem: { version: 'sha256-v1', seed: 'wfi-cover18-demo-v1', columns } }
+  }, { merge: true }));
+  await assertSucceeds(getDoc(wfi));
   await assertFails(getDocs(collection(bob, 'plays')));
   await assertSucceeds(getDocs(query(collection(bob, 'plays'), where('userEmail', '==', bobEmail))));
   await assertFails(setDoc(doc(bob, 'plays', 'foreign'), play('foreign', aliceEmail)));
