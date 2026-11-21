@@ -1,4 +1,5 @@
 import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
@@ -27,6 +28,39 @@ function play(id, userEmail) {
     status: 'IN_ATTESA',
   };
 }
+
+test('Cover 60 drafts synchronize across same-account clients without touching the ledger', async () => {
+  const admin = identity('admin', adminEmail);
+  const ownerEmail = 'cover60-fixture@gmail.com';
+  const otherEmail = 'cover60-other@gmail.com';
+  const clientA = identity('cover60-owner', ownerEmail);
+  const clientB = identity('cover60-owner', ownerEmail);
+  const other = identity('cover60-other', otherEmail);
+  for (const [db, email, uid] of [[clientA, ownerEmail, 'cover60-owner'], [other, otherEmail, 'cover60-other']]) {
+    await assertSucceeds(setDoc(doc(db, 'acl_verified', email), requestRecord(email, uid)));
+    await assertSucceeds(updateDoc(doc(admin, 'acl_verified', email), { status: 'AUTHORIZED', updatedAt: now }));
+  }
+  const key = `cover60::${ownerEmail}`;
+  const ref = db => doc(db, 'user_systems', key);
+  const columns = offset => Array.from({ length: 10 }, (_, c) => ({
+    numbers: Array.from({ length: 6 }, (_, n) => offset + c * 6 + n)
+  }));
+  const draft = { userEmail: key, updatedAt: now, id: 'fixture-1', selectionNote: 'Scelta pesata',
+    historyMessage: 'Controllato', systemResult: { columns: columns(1) } };
+  await assertSucceeds(setDoc(ref(clientA), draft));
+  assert.deepEqual((await assertSucceeds(getDoc(ref(clientB)))).data(), draft);
+  await assertFails(getDoc(ref(other)));
+  await assertFails(setDoc(ref(other), draft));
+  await assertFails(getDoc(ref(admin)));
+  await assertFails(setDoc(ref(clientA), { ...draft, userEmail: ownerEmail }));
+  await assertFails(setDoc(ref(clientA), { ...draft, systemResult: { columns: columns(1).slice(1) } }));
+  const next = { ...draft, id: 'fixture-2', systemResult: { columns: columns(31) } };
+  await assertSucceeds(setDoc(ref(clientB), next));
+  assert.deepEqual((await assertSucceeds(getDoc(ref(clientA)))).data(), next);
+  assert.equal((await assertSucceeds(getDoc(doc(clientA, 'user_systems', ownerEmail)))).exists(), false);
+  const plays = query(collection(clientA, 'plays'), where('userEmail', '==', ownerEmail));
+  assert.equal((await assertSucceeds(getDocs(plays))).size, 0);
+});
 
 before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Start the local Firestore emulator first.');

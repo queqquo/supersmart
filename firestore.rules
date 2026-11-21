@@ -34,7 +34,8 @@ service cloud.firestore {
     }
 
     function ownSystemKey(key) {
-      return approved() && (key == myEmail() || key == 'camel::' + myEmail() || key == 'wfi::' + myEmail());
+      return approved() && (key == myEmail() || key == 'camel::' + myEmail()
+        || key == 'wfi::' + myEmail() || key == 'cover60::' + myEmail());
     }
 
     function isValidPlay(data, playId) {
@@ -145,7 +146,15 @@ service cloud.firestore {
     match /user_systems/{emailKey} {
       allow get, delete: if ownSystemKey(emailKey);
       allow create, update: if ownSystemKey(emailKey)
-        && isValidUserSystem(request.resource.data, emailKey);
+        && isValidUserSystem(request.resource.data, emailKey)
+        && (!emailKey.matches('^cover60::.*') || (
+          request.resource.data.keys().hasOnly(['userEmail', 'updatedAt', 'id', 'selectionNote', 'historyMessage', 'systemResult'])
+          && request.resource.data.id is string && request.resource.data.id.matches('^[a-zA-Z0-9-]{1,64}$')
+          && request.resource.data.selectionNote is string && request.resource.data.selectionNote.size() <= 240
+          && request.resource.data.historyMessage is string && request.resource.data.historyMessage.size() <= 240
+          && request.resource.data.systemResult.keys().hasOnly(['columns'])
+          && request.resource.data.systemResult.columns.size() == 10
+        ));
     }
 
     match /user_simulations/{emailKey} {

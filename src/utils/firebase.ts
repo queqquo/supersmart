@@ -34,6 +34,7 @@ import {
   hydrateCamelWorkforceResult
 } from './camelWorkforce';
 import { normalizeUserWinForItaliaRecord, type UserWinForItaliaRecord } from './winForItalia';
+import { parseCover60Draft, type Cover60Draft } from './cover60';
 
 export enum OperationType {
   CREATE = 'create',
@@ -652,6 +653,35 @@ export function subscribeCloudWinForItaliaDraws(
 // ============================================================================
 // 4. PER-USER GENERATED SYSTEM CLOUD PERSISTENCE (/user_systems/{emailKey})
 // ============================================================================
+
+export function subscribeCloudCover60(
+  userEmail: string,
+  onUpdate: (draft: Cover60Draft | null, confirmed: boolean) => void,
+  onUnavailable: () => void
+): () => void {
+  const db = getCloudDb();
+  const email = normalizeEmail(userEmail);
+  if (!db || !email) {
+    onUnavailable();
+    return () => {};
+  }
+  const key = `cover60::${email}`;
+  return onSnapshot(doc(db, 'user_systems', key), { includeMetadataChanges: true }, snap => {
+    const confirmed = !snap.metadata.fromCache && !snap.metadata.hasPendingWrites;
+    const data = snap.data();
+    const draft = data?.userEmail === key ? parseCover60Draft(data) : null;
+    if (confirmed && snap.exists() && !draft) onUnavailable();
+    else onUpdate(draft, confirmed);
+  }, () => onUnavailable());
+}
+
+export async function saveCloudCover60(userEmail: string, draft: Cover60Draft): Promise<void> {
+  const db = getCloudDb();
+  const email = normalizeEmail(userEmail);
+  if (!db || !email) throw new Error('Firestore non disponibile.');
+  const key = `cover60::${email}`;
+  await setDoc(doc(db, 'user_systems', key), { ...draft, userEmail: key, updatedAt: new Date().toISOString() });
+}
 
 export async function fetchCloudUserSystem(
   userEmail: string

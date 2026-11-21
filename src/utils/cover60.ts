@@ -12,6 +12,27 @@ const universe = Array.from({ length: 90 }, (_, i) => i + 1);
 const emptyHistory = new Set<string>();
 type Cover60NumberStat = { currentDelay: number; frequency: number };
 
+export type Cover60Draft = {
+  id: string;
+  selectionNote: string;
+  historyMessage: string;
+  systemResult: { columns: { numbers: number[] }[] };
+};
+
+export function parseCover60Draft(raw: unknown): Cover60Draft | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const draft = raw as Partial<Cover60Draft>;
+  const columns = draft.systemResult?.columns;
+  if (typeof draft.id !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(draft.id) ||
+      typeof draft.selectionNote !== 'string' || draft.selectionNote.length > 240 ||
+      typeof draft.historyMessage !== 'string' || draft.historyMessage.length > 240 ||
+      !Array.isArray(columns) || columns.length !== 10 ||
+      columns.some(column => !column || !columnKey(column.numbers)) ||
+      new Set(columns.flatMap(c => c.numbers)).size !== 60) return null;
+  return { id: draft.id, selectionNote: draft.selectionNote, historyMessage: draft.historyMessage,
+    systemResult: { columns: columns.map(c => ({ numbers: [...c.numbers].sort((a, b) => a - b) })) } };
+}
+
 // Counts for "at least one column reaches the threshold", not exact prize tiers.
 // Enumerating the number of hits in each of ten groups of six, plus 30 unused numbers,
 // gives the same result for every disjoint system.

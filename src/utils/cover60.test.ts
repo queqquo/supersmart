@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Draw, SavedPlay } from '../types/lottery';
 import { buildGeneratedColumn } from './combinatorics';
-import { COVER60_COST, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60ArchiveStats, getCover60History } from './cover60';
+import { COVER60_COST, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60ArchiveStats, getCover60History, parseCover60Draft } from './cover60';
 
 test('Copertura 60 generates ten sorted base columns and sixty globally distinct numbers', () => {
   assert.equal(COVER60_COST, 10);
@@ -111,6 +111,17 @@ test('Delay and frequency both use a rolling two-calendar-year window, including
   assert.deepEqual(stats[7], { frequency: 2, currentDelay: 0 });
   assert.deepEqual(stats[9], { frequency: 1, currentDelay: 2 });
   assert.deepEqual(stats[8], { frequency: 0, currentDelay: 3 }); // Jolly is not counted.
+});
+
+test('A saved Cover 60 draft restores identical columns and rejects overlapping or malformed sets', () => {
+  const columns = generateCover60();
+  assert.ok(columns);
+  const draft = { id: 'fixture-123', selectionNote: 'Scelta pesata', historyMessage: 'Controllo completato',
+    systemResult: { columns: columns.map(({ numbers }) => ({ numbers })) } };
+  assert.deepEqual(parseCover60Draft(JSON.parse(JSON.stringify(draft))), draft);
+  assert.equal(parseCover60Draft({ ...draft, id: 'other/account' }), null);
+  assert.equal(parseCover60Draft({ ...draft, systemResult: { columns: columns.slice(1) } }), null);
+  assert.equal(parseCover60Draft({ ...draft, systemResult: { columns: [...columns.slice(1), columns[1]] } }), null);
 });
 
 test('A leap-day end date clamps to February 28, and an empty archive has no dates', () => {
