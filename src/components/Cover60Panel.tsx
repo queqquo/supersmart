@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BookmarkPlus, Copy, ShieldCheck, Shuffle } from 'lucide-react';
+import { BookmarkPlus, Copy, ExternalLink, ShieldCheck, Shuffle } from 'lucide-react';
 import type { Draw, SavedPlay } from '../types/lottery';
 import { useCover60Draft } from '../hooks/useCover60Draft';
 import { buildGeneratedColumn } from '../utils/combinatorics';
@@ -7,6 +7,7 @@ import { COVER60_ARCHIVE_YEARS, COVER60_COST, COVER60_HISTORY_LIMIT, COVER60_MIN
 
 const pct = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 5 });
 const whole = new Intl.NumberFormat('it-IT');
+const SISAL_SUPERENALOTTO_URL = 'https://www.sisal.it/superenalotto';
 const formatDate = (date: string) => date.split('-').reverse().join('/');
 const secondary = 'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-emerald-300';
 
@@ -54,10 +55,13 @@ export function Cover60Panel({ userEmail, draws, savedPlays, onSavePlay }: {
     });
   }
 
-  async function copy() {
+  async function copy(forSisal = false) {
     try {
       await navigator.clipboard.writeText(text);
-      setStatus('10 sestine copiate.');
+      setManualCopy(false);
+      setStatus(forSisal
+        ? '10 sestine copiate. Su Sisal, inseriscile e controllale prima di confermare.'
+        : '10 sestine copiate.');
     } catch {
       setManualCopy(true);
       setStatus('Copia automatica non disponibile. Puoi copiare le sestine dal campo di testo.');
@@ -145,11 +149,17 @@ export function Cover60Panel({ userEmail, draws, savedPlays, onSavePlay }: {
             ))}
           </ol>
           <div className="flex flex-wrap gap-2">
-            <button type="button" data-testid="cover60-copy" onClick={copy} className={secondary}><Copy aria-hidden="true" className="h-4 w-4" /> Copia 10 sestine</button>
+            <a href={SISAL_SUPERENALOTTO_URL} target="_blank" rel="noopener noreferrer"
+              data-testid="cover60-copy-sisal" onClick={() => void copy(true)}
+              aria-describedby="cover60-sisal-note" className={`${secondary} min-h-11 border-emerald-600/70`}>
+              <ExternalLink aria-hidden="true" className="h-4 w-4" /> Copia e apri Sisal
+            </a>
+            <button type="button" data-testid="cover60-copy" onClick={() => void copy()} className={secondary}><Copy aria-hidden="true" className="h-4 w-4" /> Copia 10 sestine</button>
             <button type="button" data-testid="cover60-register" onClick={register} disabled={!latestDraw || saved || saving} className={secondary}>
               <BookmarkPlus aria-hidden="true" className="h-4 w-4" /> {saved ? 'Registrate nel bilancio' : 'Registra in Verifica & Bilancio'}
             </button>
           </div>
+          <p id="cover60-sisal-note" className="text-xs text-slate-400">Apre Sisal in un’altra scheda. Le sestine restano negli appunti: inserimento, verifica e pagamento sono manuali.</p>
           {!latestDraw && <p className="text-xs text-slate-400">Per registrare le sestine serve un concorso di riferimento nell’archivio.</p>}
           {manualCopy && (
             <label className="block text-sm text-slate-300">
