@@ -177,3 +177,53 @@ test('Copertura 60 keeps the generation date from the account record without cha
   assert.equal(parseCover60Draft({ ...base, updatedAt: 'not-a-date' })?.generatedAt, undefined);
   assert.equal(parseCover60Draft(base)?.generatedAt, undefined);
 });
+
+test('Copertura 90 generates fifteen sorted base columns covering every number once', async () => {
+  const { COVER90_COST, generateCover90 } = await import('./cover60');
+  assert.equal(COVER90_COST, 15);
+  for (let run = 0; run < 30; run++) {
+    const columns = generateCover90();
+    assert.ok(columns);
+    assert.equal(columns.length, 15);
+    assert.deepEqual(columns.flatMap(c => c.numbers).sort((a, b) => a - b), Array.from({ length: 90 }, (_, i) => i + 1));
+    for (const [i, column] of columns.entries()) {
+      assert.equal(column.id, i + 1);
+      assert.deepEqual(column.numbers, [...column.numbers].sort((a, b) => a - b));
+    }
+  }
+});
+
+test('Copertura 90 retries on a duplicate sestina and gives up after repeated duplicates', async () => {
+  const { generateCover90 } = await import('./cover60');
+  const forbidden = new Set(['1,2,3,4,5,6']);
+  assert.equal(generateCover90(forbidden, universe => [...universe]), null);
+  let calls = 0;
+  const next = generateCover90(forbidden, universe => (++calls === 1 ? [...universe] : [...universe.slice(1), universe[0]]));
+  assert.ok(next);
+  assert.equal(calls, 2);
+  assert.ok(next.every(c => !forbidden.has(c.numbers.join(','))));
+});
+
+test('Copertura 90 drafts restore with the generation date and reject 60-number sets', async () => {
+  const { generateCover90, parseCover90Draft } = await import('./cover60');
+  const columns = generateCover90();
+  assert.ok(columns);
+  const stamp = '2026-11-22T09:15:00.000Z';
+  const base = { id: 'draft-90', selectionNote: 'Tutti i 90', historyMessage: 'Ok',
+    systemResult: { columns: columns.map(({ numbers }) => ({ numbers })) } };
+  const parsed = parseCover90Draft({ ...base, updatedAt: stamp });
+  assert.equal(parsed?.generatedAt, stamp);
+  assert.deepEqual(parsed?.systemResult, base.systemResult);
+  assert.equal(parseCover90Draft({ ...base, systemResult: { columns: base.systemResult.columns.slice(0, 10) } }), null);
+  assert.equal(parseCover60Draft(base), null);
+});
+
+test('Copertura 90 exact coverage counts match the disjoint enumeration', async () => {
+  const { COVER90_ODDS } = await import('./cover60');
+  const choose = (n: number, k: number): number => { let r = 1; for (let i = 0; i < k; i++) r = r * (n - i) / (i + 1); return Math.round(r); };
+  for (const { threshold, draws } of COVER90_ODDS) {
+    const below = (groups: number, left: number): number => groups === 0 ? (left === 0 ? 1 : 0)
+      : Array.from({ length: Math.min(threshold - 1, left) + 1 }, (_, h) => choose(6, h) * below(groups - 1, left - h)).reduce((a, b) => a + b, 0);
+    assert.equal(COVER60_TOTAL_DRAWS - below(15, 6), draws);
+  }
+});

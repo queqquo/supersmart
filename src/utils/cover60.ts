@@ -21,16 +21,21 @@ export type Cover60Draft = {
   generatedAt?: string;
 };
 
-export function parseCover60Draft(raw: unknown): Cover60Draft | null {
+/** Copertura 60: 10 disjoint sestine (60 numbers). Copertura 90: 15 disjoint sestine covering all 90 numbers. */
+export type CoverKind = 60 | 90;
+export const COVER90_COST = 15;
+export const coverColumnCount = (kind: CoverKind) => kind / 6;
+
+export function parseCoverDraft(raw: unknown, kind: CoverKind): Cover60Draft | null {
   if (!raw || typeof raw !== 'object') return null;
   const draft = raw as Partial<Cover60Draft>;
   const columns = draft.systemResult?.columns;
   if (typeof draft.id !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(draft.id) ||
       typeof draft.selectionNote !== 'string' || draft.selectionNote.length > 240 ||
       typeof draft.historyMessage !== 'string' || draft.historyMessage.length > 240 ||
-      !Array.isArray(columns) || columns.length !== 10 ||
+      !Array.isArray(columns) || columns.length !== coverColumnCount(kind) ||
       columns.some(column => !column || !columnKey(column.numbers)) ||
-      new Set(columns.flatMap(c => c.numbers)).size !== 60) return null;
+      new Set(columns.flatMap(c => c.numbers)).size !== kind) return null;
   const stamped = raw as { generatedAt?: unknown; updatedAt?: unknown };
   const generatedAt = [stamped.generatedAt, stamped.updatedAt]
     .find((v): v is string => typeof v === 'string' && v.length <= 64 && !Number.isNaN(Date.parse(v)));
@@ -38,6 +43,9 @@ export function parseCover60Draft(raw: unknown): Cover60Draft | null {
     systemResult: { columns: columns.map(c => ({ numbers: [...c.numbers].sort((a, b) => a - b) })) },
     ...(generatedAt ? { generatedAt } : {}) };
 }
+
+export const parseCover60Draft = (raw: unknown) => parseCoverDraft(raw, 60);
+export const parseCover90Draft = (raw: unknown) => parseCoverDraft(raw, 90);
 
 // Counts for "at least one column reaches the threshold", not exact prize tiers.
 // Enumerating the number of hits in each of ten groups of six, plus 30 unused numbers,
@@ -48,6 +56,15 @@ export const COVER60_ODDS = [
   { threshold: 4, draws: 527_950 },
   { threshold: 5, draws: 5_050 },
   { threshold: 6, draws: 10 },
+] as const;
+
+// Same enumeration with fifteen groups of six and no unused numbers.
+export const COVER90_ODDS = [
+  { threshold: 2, draws: 389_101_350 },
+  { threshold: 3, draws: 29_335_125 },
+  { threshold: 4, draws: 791_925 },
+  { threshold: 5, draws: 7_575 },
+  { threshold: 6, draws: 15 },
 ] as const;
 
 function columnKey(numbers: readonly number[]): string | null {
@@ -124,19 +141,26 @@ export function createCover60WeightedShuffle(
   };
 }
 
-export function generateCover60(
+export function generateCover(
+  kind: CoverKind,
   forbidden: ReadonlySet<string> = emptyHistory,
   shuffle = fisherYatesCryptoShuffle,
 ): GeneratedColumn[] | null {
+  const count = coverColumnCount(kind);
   for (let attempt = 0; attempt < COVER60_MAX_ATTEMPTS; attempt++) {
-    const numbers = shuffle(universe).slice(0, 60);
+    const numbers = shuffle(universe).slice(0, kind);
     const columns: GeneratedColumn[] = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < count; i++) {
       const column = buildGeneratedColumn(i + 1, numbers.slice(i * 6, (i + 1) * 6));
       if (!column || forbidden.has(column.numbers.join(','))) break;
       columns.push(column);
     }
-    if (columns.length === 10 && new Set(columns.flatMap(c => c.numbers)).size === 60) return columns;
+    if (columns.length === count && new Set(columns.flatMap(c => c.numbers)).size === kind) return columns;
   }
   return null;
 }
+
+export const generateCover60 = (forbidden: ReadonlySet<string> = emptyHistory, shuffle = fisherYatesCryptoShuffle) =>
+  generateCover(60, forbidden, shuffle);
+export const generateCover90 = (forbidden: ReadonlySet<string> = emptyHistory, shuffle = fisherYatesCryptoShuffle) =>
+  generateCover(90, forbidden, shuffle);

@@ -62,6 +62,30 @@ test('Cover 60 drafts synchronize across same-account clients without touching t
   assert.equal((await assertSucceeds(getDocs(plays))).size, 0);
 });
 
+test('Cover 90 drafts need fifteen columns and stay private to the account', async () => {
+  const admin = identity('admin', adminEmail);
+  const ownerEmail = 'cover90-fixture@gmail.com';
+  const otherEmail = 'cover90-other@gmail.com';
+  const owner = identity('cover90-owner', ownerEmail);
+  const other = identity('cover90-other', otherEmail);
+  for (const [db, email, uid] of [[owner, ownerEmail, 'cover90-owner'], [other, otherEmail, 'cover90-other']]) {
+    await assertSucceeds(setDoc(doc(db, 'acl_verified', email), requestRecord(email, uid)));
+    await assertSucceeds(updateDoc(doc(admin, 'acl_verified', email), { status: 'AUTHORIZED', updatedAt: now }));
+  }
+  const key = `cover90::${ownerEmail}`;
+  const ref = db => doc(db, 'user_systems', key);
+  const columns = Array.from({ length: 15 }, (_, c) => ({ numbers: Array.from({ length: 6 }, (_, n) => 1 + c * 6 + n) }));
+  const draft = { userEmail: key, updatedAt: now, id: 'fixture-90', selectionNote: 'Tutti i 90',
+    historyMessage: 'Controllato', systemResult: { columns } };
+  await assertSucceeds(setDoc(ref(owner), draft));
+  assert.deepEqual((await assertSucceeds(getDoc(ref(owner)))).data(), draft);
+  await assertFails(getDoc(ref(other)));
+  await assertFails(setDoc(ref(other), draft));
+  await assertFails(setDoc(ref(owner), { ...draft, systemResult: { columns: columns.slice(0, 10) } }));
+  await assertFails(setDoc(ref(owner), { ...draft, extra: true }));
+  await assertFails(setDoc(doc(owner, 'user_systems', `cover60::${ownerEmail}`), { ...draft, userEmail: `cover60::${ownerEmail}` }));
+});
+
 before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Start the local Firestore emulator first.');
   env = await initializeTestEnvironment({

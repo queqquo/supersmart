@@ -90,11 +90,13 @@ interface SystemGeneratorProps {
 }
 
 export const SystemGenerator: React.FC<SystemGeneratorProps> = (props) => {
-  const [view, setView] = useState<'reduced' | 'cover60'>('reduced');
+  const [view, setView] = useState<'reduced' | 'cover60' | 'cover90'>('reduced');
   const [cover60Opened, setCover60Opened] = useState(false);
+  const [cover90Opened, setCover90Opened] = useState(false);
   const options = [
     { id: 'reduced', label: 'Sistemi ridotti' },
-    { id: 'cover60', label: 'Copertura 60 · 10 €' }
+    { id: 'cover60', label: 'Copertura 60 · 10 €' },
+    { id: 'cover90', label: 'Copertura 90 · 15 €' }
   ] as const;
 
   return (
@@ -104,6 +106,7 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = (props) => {
           <button key={id} type="button" aria-pressed={view === id} data-testid={`generator-mode-${id}`} onClick={() => {
             setView(id);
             if (id === 'cover60') setCover60Opened(true);
+            if (id === 'cover90') setCover90Opened(true);
           }}
             className={`rounded-lg px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-emerald-300 ${view === id ? 'bg-emerald-400 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}`}>
             {label}
@@ -113,6 +116,9 @@ export const SystemGenerator: React.FC<SystemGeneratorProps> = (props) => {
       <div hidden={view !== 'reduced'}><ReducedSystemGenerator {...props} /></div>
       <div hidden={view !== 'cover60'}>{cover60Opened && (
         <Cover60Panel key={props.userEmail} userEmail={props.userEmail} draws={props.draws} savedPlays={props.savedPlays} onSavePlay={props.onSavePlay} />
+      )}</div>
+      <div hidden={view !== 'cover90'}>{cover90Opened && (
+        <Cover60Panel kind={90} key={`cover90-${props.userEmail}`} userEmail={props.userEmail} draws={props.draws} savedPlays={props.savedPlays} onSavePlay={props.onSavePlay} />
       )}</div>
     </div>
   );

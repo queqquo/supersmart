@@ -34,7 +34,7 @@ import {
   hydrateCamelWorkforceResult
 } from './camelWorkforce';
 import { normalizeUserWinForItaliaRecord, type UserWinForItaliaRecord } from './winForItalia';
-import { parseCover60Draft, type Cover60Draft } from './cover60';
+import { parseCoverDraft, type Cover60Draft, type CoverKind } from './cover60';
 
 export enum OperationType {
   CREATE = 'create',
@@ -654,7 +654,8 @@ export function subscribeCloudWinForItaliaDraws(
 // 4. PER-USER GENERATED SYSTEM CLOUD PERSISTENCE (/user_systems/{emailKey})
 // ============================================================================
 
-export function subscribeCloudCover60(
+function subscribeCloudCover(
+  kind: CoverKind,
   userEmail: string,
   onUpdate: (draft: Cover60Draft | null, confirmed: boolean) => void,
   onUnavailable: () => void
@@ -665,25 +666,49 @@ export function subscribeCloudCover60(
     onUnavailable();
     return () => {};
   }
-  const key = `cover60::${email}`;
+  const key = `cover${kind}::${email}`;
   return onSnapshot(doc(db, 'user_systems', key), { includeMetadataChanges: true }, snap => {
     const confirmed = !snap.metadata.fromCache && !snap.metadata.hasPendingWrites;
     const data = snap.data();
-    const draft = data?.userEmail === key ? parseCover60Draft(data) : null;
+    const draft = data?.userEmail === key ? parseCoverDraft(data, kind) : null;
     if (confirmed && snap.exists() && !draft) onUnavailable();
     else onUpdate(draft, confirmed);
   }, () => onUnavailable());
 }
 
-export async function saveCloudCover60(userEmail: string, draft: Cover60Draft): Promise<void> {
+async function saveCloudCover(kind: CoverKind, userEmail: string, draft: Cover60Draft): Promise<void> {
   const db = getCloudDb();
   const email = normalizeEmail(userEmail);
   if (!db || !email) throw new Error('Firestore non disponibile.');
-  const key = `cover60::${email}`;
+  const key = `cover${kind}::${email}`;
   // updatedAt is written only here, i.e. only when new sestine are generated: it is the generation date.
-  // generatedAt is a read-side alias and must not be sent (the Cover 60 rule allows a fixed key set).
+  // generatedAt is a read-side alias and must not be sent (the Cover rules allow a fixed key set).
   const { generatedAt: _generatedAt, ...fields } = draft;
   await setDoc(doc(db, 'user_systems', key), { ...fields, userEmail: key, updatedAt: new Date().toISOString() });
+}
+
+export function subscribeCloudCover60(
+  userEmail: string,
+  onUpdate: (draft: Cover60Draft | null, confirmed: boolean) => void,
+  onUnavailable: () => void
+): () => void {
+  return subscribeCloudCover(60, userEmail, onUpdate, onUnavailable);
+}
+
+export async function saveCloudCover60(userEmail: string, draft: Cover60Draft): Promise<void> {
+  return saveCloudCover(60, userEmail, draft);
+}
+
+export function subscribeCloudCover90(
+  userEmail: string,
+  onUpdate: (draft: Cover60Draft | null, confirmed: boolean) => void,
+  onUnavailable: () => void
+): () => void {
+  return subscribeCloudCover(90, userEmail, onUpdate, onUnavailable);
+}
+
+export async function saveCloudCover90(userEmail: string, draft: Cover60Draft): Promise<void> {
+  return saveCloudCover(90, userEmail, draft);
 }
 
 export async function fetchCloudUserSystem(

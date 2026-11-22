@@ -57,6 +57,36 @@ const offlinePreview = (hosted) => ({
           catch { cover60PreviewMemory.set(email, draft); }`}
           cover60PreviewEvents.dispatchEvent(new Event(email));
         }`;
+      if (name === 'subscribeCloudCover90') return `
+        const cover90PreviewMemory = new Map();
+        const cover90PreviewEvents = new EventTarget();
+        const cover90PreviewKey = email => 'supersmart_preview_cloud_cover90:' + email;
+        const getCover90Preview = email => {
+          ${hosted ? 'return cover90PreviewMemory.get(email) || null;' : `
+          try { return JSON.parse(localStorage.getItem(cover90PreviewKey(email)) || 'null'); }
+          catch { return cover90PreviewMemory.get(email) || null; }`}
+        };
+        export function subscribeCloudCover90(email, onUpdate) {
+          // Like production, expose the stored updatedAt (written only on generation) as generatedAt.
+          const notify = () => { const d = getCover90Preview(email); onUpdate(d && { ...d, generatedAt: d.updatedAt }, true); };
+          const onStorage = event => { if (event.key === cover90PreviewKey(email)) notify(); };
+          cover90PreviewEvents.addEventListener(email, notify);
+          window.addEventListener('storage', onStorage);
+          notify();
+          return () => {
+            cover90PreviewEvents.removeEventListener(email, notify);
+            window.removeEventListener('storage', onStorage);
+          };
+        }`;
+      if (name === 'saveCloudCover90') return `
+        export async function saveCloudCover90(email, input) {
+          const { generatedAt, ...fields } = input;
+          const draft = { ...fields, updatedAt: new Date().toISOString() };
+          ${hosted ? 'cover90PreviewMemory.set(email, draft);' : `
+          try { localStorage.setItem(cover90PreviewKey(email), JSON.stringify(draft)); }
+          catch { cover90PreviewMemory.set(email, draft); }`}
+          cover90PreviewEvents.dispatchEvent(new Event(email));
+        }`;
       const body = name.startsWith('subscribe') ? '() => {}' : 'null';
       return `export const ${name} = ${asyncPrefix || ''}() => ${body};`;
     }).join('\n');
