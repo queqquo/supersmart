@@ -1743,6 +1743,14 @@ export interface UserWinForItaliaRecord {
   sniperSelection?: WinForItaliaSniperSelection;
   reduced3System?: WinForItaliaReduced3System;
   extendedSystem?: WinForItaliaExtendedSystem;
+  /** ISO date of the last explicit generation of the Cecchino / Ridotto 3 sestine. */
+  baseGeneratedAt?: string;
+  /** ISO date of the last explicit generation of the Copertura estesa (18 numeri) sestine. */
+  extendedGeneratedAt?: string;
+}
+
+function isValidGenerationIso(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 64 && !Number.isNaN(Date.parse(value));
 }
 
 function isValidWinForItaliaNumbersList(arr: unknown, expectedLen: number): arr is number[] {
@@ -1826,6 +1834,8 @@ export function normalizeUserWinForItaliaRecord(
         ? obj.windowSizeAtGeneration
         : 0,
     ...(legacyValid ? { funnelResult: funnel, sniperSelection: sniper, reduced3System: reduced3 } : {}),
-    ...(extendedValid ? { extendedSystem: extended } : {})
+    ...(extendedValid ? { extendedSystem: extended } : {}),
+    ...(legacyValid && isValidGenerationIso(obj.baseGeneratedAt) ? { baseGeneratedAt: obj.baseGeneratedAt } : {}),
+    ...(extendedValid && isValidGenerationIso(obj.extendedGeneratedAt) ? { extendedGeneratedAt: obj.extendedGeneratedAt } : {})
   };
 }

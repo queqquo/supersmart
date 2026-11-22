@@ -37,7 +37,8 @@ const offlinePreview = (hosted) => ({
           catch { return cover60PreviewMemory.get(email) || null; }`}
         };
         export function subscribeCloudCover60(email, onUpdate) {
-          const notify = () => onUpdate(getCover60Preview(email), true);
+          // Like production, expose the stored updatedAt (written only on generation) as generatedAt.
+          const notify = () => { const d = getCover60Preview(email); onUpdate(d && { ...d, generatedAt: d.updatedAt }, true); };
           const onStorage = event => { if (event.key === cover60PreviewKey(email)) notify(); };
           cover60PreviewEvents.addEventListener(email, notify);
           window.addEventListener('storage', onStorage);
@@ -48,7 +49,9 @@ const offlinePreview = (hosted) => ({
           };
         }`;
       if (name === 'saveCloudCover60') return `
-        export async function saveCloudCover60(email, draft) {
+        export async function saveCloudCover60(email, input) {
+          const { generatedAt, ...fields } = input;
+          const draft = { ...fields, updatedAt: new Date().toISOString() };
           ${hosted ? 'cover60PreviewMemory.set(email, draft);' : `
           try { localStorage.setItem(cover60PreviewKey(email), JSON.stringify(draft)); }
           catch { cover60PreviewMemory.set(email, draft); }`}

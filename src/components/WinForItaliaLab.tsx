@@ -55,6 +55,7 @@ import {
   getUserWinForItaliaStorageKey
 } from '../utils/storage';
 import { subscribeCloudUserWinForItalia } from '../utils/firebase';
+import { GenerationDateNote } from './GenerationDateNote';
 
 interface WinForItaliaLabProps {
   userEmail: string;
@@ -260,6 +261,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
         userEmail: userEmail.trim().toLowerCase(),
         updatedAt: new Date().toISOString(),
         playMode: 'extended18',
+        extendedGeneratedAt: new Date().toISOString(),
         latestDrawIdAtGeneration: latest?.latestDrawIdAtGeneration ?? '',
         windowSizeAtGeneration: latest?.windowSizeAtGeneration ?? 0,
         extendedSystem: generated
@@ -285,6 +287,7 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
       ...lockedState,
       userEmail: userEmail.trim().toLowerCase(),
       updatedAt: nowIso,
+      baseGeneratedAt: nowIso,
       playMode,
       latestDrawIdAtGeneration: history[0]?.id || '',
       windowSizeAtGeneration: windowSize,
@@ -878,6 +881,12 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
                 <h2 className="text-lg font-extrabold text-white">Le tre sestine di Copertura estesa</h2>
                 <p className="text-xs text-emerald-300">18 numeri distinti · 0 sovrapposizioni · 6,00 € per concorso</p>
               </div>
+              <GenerationDateNote
+                generatedAt={lockedState?.extendedGeneratedAt ?? lockedState?.updatedAt}
+                subject="Sestine di Copertura estesa generate"
+                regenerateLabel="Ricalcola 3 sestine (18 numeri)"
+                testId="wfi-extended-generated-at"
+              />
               <ol className="space-y-2">
                 {extendedSystem.columns.map(col => (
                   <li key={col.rank} className="rounded-xl bg-slate-950 border border-slate-800 p-2.5 sm:p-3 flex flex-wrap items-center gap-2 sm:gap-4" data-testid="wfi-extended18-column">
@@ -922,6 +931,12 @@ export const WinForItaliaLab: React.FC<WinForItaliaLabProps> = ({
           )}
           {!isExtended && lockedState && funnelResult && sniperSelection && reduced3System && monteCarloWeekly && (
             <>
+              <GenerationDateNote
+                generatedAt={lockedState.baseGeneratedAt ?? lockedState.updatedAt}
+                subject={playMode === 'sniper' ? 'Sestina Win for Life generata' : 'Sestine Win for Life generate'}
+                regenerateLabel={generationLabel}
+                testId="wfi-base-generated-at"
+              />
               {playMode === 'sniper' ? (
             /* MODE 1: Cecchino — 2,00 € (1 Sestina) */
             <div

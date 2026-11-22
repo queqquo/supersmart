@@ -46,6 +46,7 @@ import {
   getUserCamelStorageKey
 } from '../utils/storage';
 import { subscribeCloudUserCamelWorkforce } from '../utils/firebase';
+import { GenerationDateNote } from './GenerationDateNote';
 
 interface CamelWorkforceLabProps {
   userEmail: string;
@@ -1176,6 +1177,12 @@ export const CamelWorkforceLab: React.FC<CamelWorkforceLabProps> = ({
 
                   {/* Sestine Grid */}
                   <div className="space-y-2">
+                    <GenerationDateNote
+                      generatedAt={lastGeneratedAt}
+                      subject="Sestine CAMEL generate"
+                      regenerateLabel={getBalancedFunnelUiLabels(poolSizeV).recalcButton}
+                      testId="camel-generated-at"
+                    />
                     <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
                       Sestine Ridotte Generate ({activeCandidate.systemResult.columns.length} Colonne):
                     </h4>

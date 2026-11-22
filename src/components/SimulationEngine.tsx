@@ -52,6 +52,7 @@ import {
   syncUserSimulationState
 } from '../utils/storage';
 import { subscribeCloudUserSimulation } from '../utils/firebase';
+import { GenerationDateNote } from './GenerationDateNote';
 
 function computeDefaultUserSeed(email: string): number {
   let hash = 202605;
@@ -901,6 +902,12 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             <h3 className="text-lg sm:text-xl font-extrabold text-white">
               Super-Sestina di Consenso Statistico ({formattedDrawsCount} Estrazioni Simulate)
             </h3>
+            <GenerationDateNote
+              generatedAt={lastSimUpdatedAt}
+              subject="Simulazione e Super-Sestina generate"
+              regenerateLabel={`Risimula ${numDrawsToSimulate.toLocaleString('it-IT')} Estrazioni`}
+              testId="simulation-generated-at"
+            />
             <p className="text-xs text-slate-400 max-w-2xl">
               Elaborata incrociando i picchi di frequenza delle {formattedDrawsCount} simulazioni, la
               matrice di co-occorrenza degli ambi/terni simulati e i filtri di equilibrio gaussiano

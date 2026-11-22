@@ -680,7 +680,10 @@ export async function saveCloudCover60(userEmail: string, draft: Cover60Draft): 
   const email = normalizeEmail(userEmail);
   if (!db || !email) throw new Error('Firestore non disponibile.');
   const key = `cover60::${email}`;
-  await setDoc(doc(db, 'user_systems', key), { ...draft, userEmail: key, updatedAt: new Date().toISOString() });
+  // updatedAt is written only here, i.e. only when new sestine are generated: it is the generation date.
+  // generatedAt is a read-side alias and must not be sent (the Cover 60 rule allows a fixed key set).
+  const { generatedAt: _generatedAt, ...fields } = draft;
+  await setDoc(doc(db, 'user_systems', key), { ...fields, userEmail: key, updatedAt: new Date().toISOString() });
 }
 
 export async function fetchCloudUserSystem(

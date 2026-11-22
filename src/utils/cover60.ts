@@ -17,6 +17,8 @@ export type Cover60Draft = {
   selectionNote: string;
   historyMessage: string;
   systemResult: { columns: { numbers: number[] }[] };
+  /** When these sestine were generated (from the account record's updatedAt, written only on generation). */
+  generatedAt?: string;
 };
 
 export function parseCover60Draft(raw: unknown): Cover60Draft | null {
@@ -29,8 +31,12 @@ export function parseCover60Draft(raw: unknown): Cover60Draft | null {
       !Array.isArray(columns) || columns.length !== 10 ||
       columns.some(column => !column || !columnKey(column.numbers)) ||
       new Set(columns.flatMap(c => c.numbers)).size !== 60) return null;
+  const stamped = raw as { generatedAt?: unknown; updatedAt?: unknown };
+  const generatedAt = [stamped.generatedAt, stamped.updatedAt]
+    .find((v): v is string => typeof v === 'string' && v.length <= 64 && !Number.isNaN(Date.parse(v)));
   return { id: draft.id, selectionNote: draft.selectionNote, historyMessage: draft.historyMessage,
-    systemResult: { columns: columns.map(c => ({ numbers: [...c.numbers].sort((a, b) => a - b) })) } };
+    systemResult: { columns: columns.map(c => ({ numbers: [...c.numbers].sort((a, b) => a - b) })) },
+    ...(generatedAt ? { generatedAt } : {}) };
 }
 
 // Counts for "at least one column reaches the threshold", not exact prize tiers.

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { BookmarkPlus, Copy, ExternalLink, ShieldCheck, Shuffle } from 'lucide-react';
 import type { Draw, SavedPlay } from '../types/lottery';
 import { useCover60Draft } from '../hooks/useCover60Draft';
+import { GenerationDateNote } from './GenerationDateNote';
 import { buildGeneratedColumn } from '../utils/combinatorics';
 import { COVER60_ARCHIVE_YEARS, COVER60_COST, COVER60_HISTORY_LIMIT, COVER60_MIN_DRAWS, COVER60_ODDS, COVER60_TOTAL_DRAWS, createCover60WeightedShuffle, generateCover60, getCover60ArchiveStats, getCover60History } from '../utils/cover60';
 
@@ -134,6 +135,7 @@ export function Cover60Panel({ userEmail, draws, savedPlays, onSavePlay }: {
       </div>
       {columns.length > 0 && (
         <>
+          <GenerationDateNote generatedAt={draft?.generatedAt} regenerateLabel="Rigenera 10 sestine" testId="cover60-generated-at" />
           <ol aria-label="Sestine Copertura 60" className="grid gap-2 sm:grid-cols-2">
             {columns.map(column => (
               <li key={column.id} data-testid="cover60-column" className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-slate-700 bg-slate-950 p-2.5">

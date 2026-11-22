@@ -69,6 +69,7 @@ import {
 import { subscribeCloudUserSystem } from '../utils/firebase';
 import { EvolutionarySliderTrainer } from './EvolutionarySliderTrainer';
 import { Cover60Panel } from './Cover60Panel';
+import { GenerationDateNote } from './GenerationDateNote';
 
 interface SystemGeneratorProps {
   userEmail: string;
@@ -1542,6 +1543,13 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
                     <span>{systemResult.executionTimeMs} ms (&lt;500ms)</span>
                   </div>
                 </div>
+
+                <GenerationDateNote
+                  generatedAt={lastCalculatedAt}
+                  subject="Sestine del Generatore Ottimizzato generate"
+                  regenerateLabel="Calcola Sistema Ottimizzato"
+                  testId="optimized-generated-at"
+                />
 
                 {/* Metrics Stats row */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">

@@ -163,3 +163,17 @@ test('Exact coverage counts match inclusion-exclusion over disjoint columns', ()
     assert.equal(draws, expected, `threshold ${threshold}`);
   }
 });
+
+test('Copertura 60 keeps the generation date from the account record without changing the numbers', () => {
+  const columns = generateCover60();
+  assert.ok(columns);
+  const base = { id: 'abc-123', selectionNote: '', historyMessage: '', systemResult: { columns: columns.map(({ numbers }) => ({ numbers })) } };
+  const stamp = '2026-11-21T09:32:00.000Z';
+  const fromCloud = parseCover60Draft({ ...base, userEmail: 'cover60::x@gmail.com', updatedAt: stamp });
+  assert.equal(fromCloud?.generatedAt, stamp);
+  assert.deepEqual(fromCloud?.systemResult, base.systemResult);
+  // The local cache stores the parsed draft, which carries generatedAt.
+  assert.equal(parseCover60Draft(JSON.parse(JSON.stringify(fromCloud)))?.generatedAt, stamp);
+  assert.equal(parseCover60Draft({ ...base, updatedAt: 'not-a-date' })?.generatedAt, undefined);
+  assert.equal(parseCover60Draft(base)?.generatedAt, undefined);
+});

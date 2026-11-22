@@ -412,3 +412,26 @@ test('Copertura estesa round-trips alone and alongside both legacy modes; invali
 
 
 
+
+test('Win for Life records keep separate generation dates for base and extended sestine', async () => {
+  const { normalizeUserWinForItaliaRecord } = await import('./winForItalia');
+  const email = 'test@example.org';
+  const extendedSystem = await generateWinForItaliaExtended(WFI_EXTENDED_DEMO_SEED);
+  const { stats } = calculateWinForItaliaStats(makeFixtureHistory(53));
+  const funnelResult = runWinForItaliaFunnel40To12(stats, () => 0.41);
+  const sniperSelection = selectSniperSestinaFromTop12(funnelResult.top12Numbers, stats);
+  const reduced3System = generateReduced3Columns(funnelResult.top9Numbers, stats);
+  const record = {
+    userEmail: email, updatedAt: '2026-11-21T10:00:00.000Z', playMode: 'sniper',
+    latestDrawIdAtGeneration: '', windowSizeAtGeneration: 0,
+    funnelResult, sniperSelection, reduced3System, extendedSystem,
+    baseGeneratedAt: '2026-11-14T08:00:00.000Z', extendedGeneratedAt: '2026-11-21T10:00:00.000Z'
+  };
+  const parsed = normalizeUserWinForItaliaRecord(JSON.parse(JSON.stringify(record)), email);
+  assert.equal(parsed?.baseGeneratedAt, record.baseGeneratedAt);
+  assert.equal(parsed?.extendedGeneratedAt, record.extendedGeneratedAt);
+  const invalid = normalizeUserWinForItaliaRecord({ ...record, baseGeneratedAt: 'x', extendedGeneratedAt: 5 }, email);
+  assert.equal(invalid?.baseGeneratedAt, undefined);
+  assert.equal(invalid?.extendedGeneratedAt, undefined);
+  assert.deepEqual(invalid?.sniperSelection, sniperSelection);
+});
