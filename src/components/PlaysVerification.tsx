@@ -36,6 +36,7 @@ import {
   isWinForItaliaPlay,
   evaluateWinForItaliaPlay
 } from '../utils/winForItalia';
+import { MonthlyBudgetCard } from './MonthlyBudgetCard';
 
 interface PlaysVerificationProps {
   plays: SavedPlay[];
@@ -533,7 +534,7 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
               <span>Controllo Budget & Bilancio Economico</span>
             </h2>
             <p className="text-xs text-slate-400">
-              Tracciamento giocate di sistema e manuali, costi sostenuti, vincite conseguite e ritorno sull&apos;investimento (ROI).
+              Tracciamento giocate di sistema e manuali, costi sostenuti, vincite conseguite e saldo. Il gioco non è un investimento: in media si perde.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -583,6 +584,8 @@ export const PlaysVerification: React.FC<PlaysVerificationProps> = ({
             </button>
           </div>
         )}
+
+        <MonthlyBudgetCard plays={plays} />
 
         {/* 4 KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">

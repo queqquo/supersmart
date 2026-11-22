@@ -2231,7 +2231,7 @@ export const HistoricalArchive: React.FC<HistoricalArchiveProps> = ({
                     <span>4. Priors Urna 100 Simulazioni</span>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Alimenta le <strong className="text-amber-300">priors Bayesiane di Dirichlet</strong> dell&apos;Urna 1 (sestina + Jolly) e dell&apos;Urna 2 (SuperStar) per simulare le prossime 100 estrazioni ed estrarre la Sestina ad Alta Probabilità.
+                    Alimenta le <strong className="text-amber-300">priors Bayesiane di Dirichlet</strong> dell&apos;Urna 1 (sestina + Jolly) e dell&apos;Urna 2 (SuperStar) per simulare le prossime 100 estrazioni ed estrarre la Sestina delle simulazioni.
                   </p>
                 </div>
 

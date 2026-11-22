@@ -285,7 +285,7 @@ export const EvolutionarySliderTrainer: React.FC<EvolutionarySliderTrainerProps>
                   : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
               }`}
             >
-              1. Utile Netto Reale (&gt; {(effectiveN2 * 6).toLocaleString('it-IT')} €) + Salvaguardia Crossover
+              1. Saldo storico (&gt; {(effectiveN2 * 6).toLocaleString('it-IT')} €) + Salvaguardia Crossover
             </button>
             <button
               type="button"
@@ -314,7 +314,7 @@ export const EvolutionarySliderTrainer: React.FC<EvolutionarySliderTrainerProps>
           <div className="flex items-center gap-2">
             <Trophy className="w-5 h-5 text-amber-400" />
             <h4 className="text-base font-extrabold text-white">
-              Triplette con Valore di Guadagno Più Alto (dopo n₃ = {trainingResult.n3GenerationsCount}{' '}
+              Triplette con il saldo storico più alto (dopo n₃ = {trainingResult.n3GenerationsCount}{' '}
               Generazioni su n₂ = {trainingResult.n2TrainingDraws.toLocaleString('it-IT')} Estrazioni)
             </h4>
           </div>

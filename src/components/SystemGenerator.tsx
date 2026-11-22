@@ -1071,7 +1071,7 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
               />
               <p className="text-[10px] text-slate-500 flex justify-between">
                 <span>Uscite negli ultimi 36 concorsi</span>
-                <span>Priorità numeri "caldi"</span>
+                <span>Numeri usciti più spesso di recente</span>
               </p>
             </div>
 
@@ -1522,7 +1522,7 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
                       </span>
                     </h3>
                     <p className="text-xs text-slate-400">
-                      Sviluppo da {systemResult.totalCombinations} integrali ({systemResult.filteredCombinationsCount} a penalità zero) → {systemResult.columns.length} colonne ottimali (Soft-Penalty Bitmask)
+                      Sviluppo da {systemResult.totalCombinations} integrali ({systemResult.filteredCombinationsCount} a penalità zero) → {systemResult.columns.length} colonne (Soft-Penalty Bitmask)
                       {lastCalculatedAt && (
                         <span className="ml-2 text-slate-500 font-mono">
                           &bull; Calcolato il{' '}
@@ -1550,6 +1550,9 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
                   regenerateLabel="Calcola Sistema Ottimizzato"
                   testId="optimized-generated-at"
                 />
+                <p className="text-xs text-slate-400" data-testid="no-advantage-note">
+                  Filtri, pesi e dati storici non aumentano la probabilità di vincita: ogni sestina ha le stesse probabilità di qualsiasi altra.
+                </p>
 
                 {/* Metrics Stats row */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
@@ -1692,7 +1695,7 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
                       <Calculator className="w-5 h-5 text-amber-400 shrink-0" />
                       <div>
                         <h4 className="text-sm font-bold text-white">
-                          Guadagni e Perdite Presunte (Media Calcolata su Ogni Singola Sestina)
+                          Vincite e perdite simulate (Media Calcolata su Ogni Singola Sestina)
                         </h4>
                         <p className="text-[11px] text-slate-400">
                           Valore generato come media aritmetica (1/{expectedWeeklyPnL.sestineCount} Σ) delle perdite e dei guadagni su ciascuna sestina (100 estrazioni su Urna Fisica Pura)
@@ -1714,7 +1717,7 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="bg-slate-950/90 p-3 rounded-xl border border-emerald-500/20">
                       <span className="text-[10px] text-slate-400 block uppercase font-semibold">
-                        Media Guadagni / Sestina
+                        Saldo medio simulato / sestina
                       </span>
                       <span className="text-base font-extrabold text-emerald-400 font-mono">
                         +{expectedWeeklyPnL.meanTotalGainPerSestina.toFixed(2)} €
@@ -1864,7 +1867,7 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
                   Verificati
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-sky-500/10 text-sky-300 border border-sky-500/20">
-                  Moltiplicatore Anti-Crowd Medio: {realHistoricalBacktest.averageAntiCrowdMultiplier}x
+                  Correttivo quote stimato medio: {realHistoricalBacktest.averageAntiCrowdMultiplier}x
                 </span>
               </div>
               <h3 className="text-lg sm:text-xl font-extrabold text-white">
@@ -1878,7 +1881,7 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
                   storici reali
                 </strong>{' '}
                 presenti in archivio, calcolando per ciascun concorso il moltiplicatore dinamico
-                delle quote <strong className="text-sky-300">Anti-Crowd</strong>.
+                delle quote <strong className="text-sky-300">stimate</strong>.
               </p>
             </div>
 
@@ -1941,7 +1944,7 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Vincita Storica Reale Stimata (Anti-Crowd)
+                Vincita storica stimata (quote stimate)
               </span>
               <span className="text-2xl font-black text-emerald-400 font-mono block pt-1">
                 {realHistoricalBacktest.totalEstimatedGrossWinnings.toLocaleString('it-IT', {
@@ -2022,7 +2025,7 @@ const ReducedSystemGenerator: React.FC<SystemGeneratorProps> = ({
                   <th className="py-3 px-4">Concorso Reale</th>
                   <th className="py-3 px-4">Data Estrazione</th>
                   <th className="py-3 px-4">Sestina Ufficiale Estratta (Oro = Indovinato)</th>
-                  <th className="py-3 px-4 text-center">Molt. Anti-Crowd</th>
+                  <th className="py-3 px-4 text-center">Correttivo quote</th>
                   <th className="py-3 px-4 text-center">Dettaglio Vincite Sistema</th>
                   <th className="py-3 px-4 text-right">Vincita Concorso</th>
                 </tr>

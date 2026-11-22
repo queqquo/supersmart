@@ -374,7 +374,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
     const hp = simResult.highProbabilitySestina;
     const rw = simResult.recommendedWeights;
     const text = [
-      `Sestina Alta Probabilità (${formattedDrawsCount} Simulazioni): ${hp.numbers.join(' - ')}`,
+      `Sestina delle simulazioni (${formattedDrawsCount} Simulazioni): ${hp.numbers.join(' - ')}`,
       `Jolly Consigliato: ${hp.recommendedJolly} | SuperStar: ${hp.recommendedSuperstar}`,
       `Pool Top 12 Simulato: ${simResult.top12PoolNumbers.join(', ')}`,
       `Parametri Pesi S(x): w1(Rit)=${rw.wDelay.toFixed(2)}, w2(Freq)=${rw.wFrequency.toFixed(2)}, w3(Aff)=${rw.wAffinity.toFixed(2)}`,
@@ -494,7 +494,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                 {simResult.executionTimeMs} ms
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-sky-500/10 text-sky-300 border border-sky-500/20">
-                Payout Dinamico Anti-Crowd [0.75x &ndash; 1.65x]
+                Quote stimate (correttivo 0,75x&ndash;1,65x)
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                 <Lock className="w-3 h-3" />
@@ -502,7 +502,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">
-              Simulatore Ufficiale ({formattedDrawsCount} Estrazioni) & Analisi Guadagni/Perdite
+              Simulatore Ufficiale ({formattedDrawsCount} Estrazioni) & Analisi vincite/perdite simulate
             </h2>
             <p className="text-xs text-slate-400 max-w-3xl">
               Riproduce fedelmente la metodologia di estrazione ufficiale del SuperEnalotto a{' '}
@@ -510,7 +510,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               90 sfere per i 6 numeri + 7ª sfera Jolly; Urna 2 indipendente: 90 sfere per il numero
               SuperStar) su un orizzonte da{' '}
               <strong className="text-amber-300">100 fino a 250.000 estrazioni consecutive</strong>{' '}
-              con quote dinamiche <strong className="text-sky-300">Anti-Crowd</strong>.
+              con quote dinamiche <strong className="text-sky-300">stimate</strong>.
               {lastSimUpdatedAt && (
                 <span className="ml-2 text-slate-500 font-mono">
                   &bull; Calcolata il{' '}
@@ -892,7 +892,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-amber-500 text-slate-950 flex items-center gap-1.5 shadow">
                 <Award className="w-3.5 h-3.5" />
-                Sestina ad Alta Probabilità di Vincita
+                Sestina più frequente nelle simulazioni
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                 Indice Convergenza: {hp.confidenceIndex}%
@@ -900,7 +900,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
             </div>
 
             <h3 className="text-lg sm:text-xl font-extrabold text-white">
-              Super-Sestina di Consenso Statistico ({formattedDrawsCount} Estrazioni Simulate)
+              Super-Sestina delle simulazioni ({formattedDrawsCount} Estrazioni Simulate)
             </h3>
             <GenerationDateNote
               generatedAt={lastSimUpdatedAt}
@@ -908,6 +908,9 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               regenerateLabel={`Risimula ${numDrawsToSimulate.toLocaleString('it-IT')} Estrazioni`}
               testId="simulation-generated-at"
             />
+            <p className="text-xs text-slate-400" data-testid="no-advantage-note">
+              Le simulazioni e i dati storici non aumentano la probabilità di vincita: ogni sestina ha le stesse probabilità di qualsiasi altra.
+            </p>
             <p className="text-xs text-slate-400 max-w-2xl">
               Elaborata incrociando i picchi di frequenza delle {formattedDrawsCount} simulazioni, la
               matrice di co-occorrenza degli ambi/terni simulati e i filtri di equilibrio gaussiano
@@ -957,7 +960,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
                   <Sliders className="w-3.5 h-3.5" />
-                  <span>Parametri & Pool Ottimali Estratti dalla Simulazione</span>
+                  <span>Parametri e pool ricavati dalla simulazione</span>
                 </span>
                 <span className="text-[11px] font-mono text-slate-400">
                   Pronti per il Generatore Ottimizzato
@@ -1081,14 +1084,14 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
         </div>
       </div>
 
-      {/* SECTION 2: Guadagni e Perdite Presunte delle Sestine Settimanali (Media su Ogni Singola Sestina) */}
+      {/* SECTION 2: Vincite e perdite simulate delle Sestine Settimanali (Media su Ogni Singola Sestina) */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-4">
           <div>
             <div className="flex items-center gap-2">
               <Calculator className="w-5 h-5 text-amber-400" />
               <h3 className="text-lg font-extrabold text-white">
-                Guadagni e Perdite Presunte delle Sestine Settimanali (Payout Dinamico Anti-Crowd)
+                Vincite e perdite simulate delle Sestine Settimanali (quote stimate)
               </h3>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -1097,7 +1100,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                 media aritmetica delle perdite e dei guadagni su ogni singola sestina
               </strong>{' '}
               ({pnl.sestineCount} sestine settimanali testate sulle {formattedDrawsCount} estrazioni
-              con moltiplicatore Anti-Crowd 0.75x&ndash;1.65x).
+              con correttivo stimato delle quote 0,75x&ndash;1,65x).
             </p>
           </div>
 
@@ -1114,7 +1117,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
           {/* Primary Metric: Mean Net Profit/Loss per Sestina (over N draws) */}
           <div className="p-4 rounded-2xl bg-slate-950 border-2 border-amber-500/40 space-y-1">
             <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300 block">
-              Media Guadagni/Perdite per Sestina ({formattedDrawsCount} Conc.)
+              Saldo medio simulato per sestina ({formattedDrawsCount} Conc.)
             </span>
             <div className="flex items-center gap-2 pt-1">
               {pnl.meanNetProfitLossPerSestina >= 0 ? (
@@ -1143,7 +1146,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
           {/* Mean Gross Gain per Sestina */}
           <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-              Guadagno Lordo Medio per Singola Sestina
+              Vincita lorda media simulata per sestina
             </span>
             <span className="text-2xl font-extrabold text-emerald-400 font-mono block pt-1">
               +{pnl.meanTotalGainPerSestina.toFixed(2)} €
@@ -1189,7 +1192,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
                 <th className="py-3 px-4">Numeri Giocati</th>
                 <th className="py-3 px-4 text-center">Vincite (2pt / 3pt / 4+pt)</th>
                 <th className="py-3 px-4 text-right">Spesa ({formattedDrawsCount} Conc.)</th>
-                <th className="py-3 px-4 text-right">Guadagno Presunto</th>
+                <th className="py-3 px-4 text-right">Vincita simulata</th>
                 <th className="py-3 px-4 text-right">Perdita Presunta</th>
                 <th className="py-3 px-4 text-right">Bilancio Netto Sestina</th>
                 <th className="py-3 px-4 text-right">Media / Concorso</th>
@@ -1426,7 +1429,7 @@ export const SimulationEngine: React.FC<SimulationEngineProps> = ({
           <div className="flex items-center justify-between pt-2 border-t border-slate-800">
             <span className="text-[11px] text-slate-400">
               Evidenziati in <strong className="text-amber-400">oro</strong> i numeri presenti nella
-              Super-Sestina ad Alta Probabilità
+              Super-Sestina delle simulazioni
             </span>
             <div className="flex items-center gap-2">
               <button
